@@ -276,7 +276,7 @@ int nebmodule_init(int flags, char * args, nebmodule * handle) {
         neb_set_module_info(handle, NEBMODULE_MODINFO_TITLE, "nagmq sink");
         neb_set_module_info(handle, NEBMODULE_MODINFO_AUTHOR, "Jonathan Reams");
         neb_set_module_info(handle, NEBMODULE_MODINFO_VERSION, "0.1");
-        neb_seb_module_info(handle, NEBMODULE_MODINFO_LICENSE, "Apache v2");
+        neb_set_module_info(handle, NEBMODULE_MODINFO_LICENSE, "Apache v2");
         neb_set_module_info(handle, NEBMODULE_MODINFO_DESC,
                 "Sink for publishing nagios data to ZMQ");
                         
