@@ -114,10 +114,17 @@ static void zmq_queue_runner(void * nouse) {
 	sigback(0);
 	unsigned long eventcounter = 0;
 	while(queuestatus == 0) {
+		zmq_msg_t zmsg;
+		char * curmsg = malloc(1024);
 		pthread_mutex_lock(&queue_mutex);
 		pthread_cond_wait(&queue_event, &queue_mutex);
-		syslog(LOG_INFO, "Received new event #%d type %d",
+		sprintf(curmsg, "Received new event #%lu type %d",
 			eventcounter++, curwhich);
+		zmq_msg_init_data(&zmsg, curmsg, strlen(curmsg), free_cb, NULL);
+		rc = zmq_send(pubext, &zmsg, 0);
+		zmq_msg_close(&zmsg);
+		//syslog(LOG_INFO, "Received new event #%d type %d",
+		//	eventcounter++, curwhich);
 		pthread_mutex_unlock(&queue_mutex);
 	}
 
