@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
+#include <syslog.h>
 #define NSCORE 1
 #include "naginclude/nebstructs.h"
 #include "naginclude/nebcallbacks.h"
@@ -12,15 +13,17 @@
 #include <zmq.h>
 #include <jansson.h>
 
-static void * zmq_ctx;
-static void * pub_sock;
-static void * nagmq_handle;
+void * zmq_ctx = NULL;
+void * pub_sock = NULL;
+void * nagmq_handle = NULL;
 
 NEB_API_VERSION(CURRENT_NEB_API_VERSION)
 
 int nebmodule_deinit(int flags, int reason) {
+	zmq_close(pub_sock);
 	zmq_term(zmq_ctx);
 	neb_deregister_module_callbacks(nagmq_handle);
+	return 0;
 }
 
 static json_t * parse_timestamp(struct timeval * tv) {
@@ -227,7 +230,8 @@ void free_cb(void * ptr, void * hint) {
 
 int handle_nagdata(int which, void * obj) {
 	json_t * payload = NULL;
-	zmq_msg_t header, payload_msg;
+	zmq_msg_t payload_msg;
+	int rc;
 
 	switch(which) {
 	case NEBCALLBACK_HOST_CHECK_DATA:
@@ -256,23 +260,35 @@ int handle_nagdata(int which, void * obj) {
 	if(payload == NULL)
 		return 0;
 
-	json_t * type = json_object_get(payload, "type");
+	/*json_t * type = json_object_get(payload, "type");
+	//syslog(LOG_INFO, "Sending %s payload", json_string_value(type));
 	char * typestr = strdup(json_string_value(type));
 
 	zmq_msg_init_data(&header, typestr, strlen(typestr),
 		free_cb, NULL);
-	zmq_send(pub_sock, &header, ZMQ_SNDMORE);
+	rc = zmq_send(pub_sock, &header, ZMQ_SNDMORE);
 	zmq_msg_close(&header);
-	
+	if(rc != 0)
+		syslog(LOG_ERR, "Error sending header %s: %s", json_string_value(type),
+			zmq_strerror(errno));
+	*/
+
 	char * payloadstr = json_dumps(payload, JSON_COMPACT);
-	zmq_msg_init_data(&payload_msg, payloadstr, strlen(payloadstr),
-		free_cb, NULL);
-	zmq_send(pub_sock, &payload_msg, 0);
+	size_t plstrlen = strlen(payloadstr);
+	zmq_msg_init_size(&payload_msg, plstrlen);
+	memcpy(zmq_msg_data(&payload_msg), payloadstr, plstrlen);
+	free(payloadstr);
+	rc = zmq_send(pub_sock, &payload_msg, 0);
+        if(rc != 0)  
+                syslog(LOG_ERR, "Error payload %s", zmq_strerror(errno));
+	else
+		syslog(LOG_INFO, "Send message to %p!", pub_sock);
 	zmq_msg_close(&payload_msg);
 	return 0;
 }
 
 int nebmodule_init(int flags, char * args, nebmodule * handle) {
+	const int linger = 0;
         neb_set_module_info(handle, NEBMODULE_MODINFO_TITLE, "nagmq sink");
         neb_set_module_info(handle, NEBMODULE_MODINFO_AUTHOR, "Jonathan Reams");
         neb_set_module_info(handle, NEBMODULE_MODINFO_VERSION, "0.1");
@@ -280,20 +296,25 @@ int nebmodule_init(int flags, char * args, nebmodule * handle) {
         neb_set_module_info(handle, NEBMODULE_MODINFO_DESC,
                 "Sink for publishing nagios data to ZMQ");
                         
-        zmq_ctx = zmq_init(2);
-        if(zmq_init == NULL)
+        zmq_ctx = zmq_init(1);
+        if(zmq_ctx == NULL) {
+		syslog(LOG_ERR, "Error initializing ZMQ context for NagMQ: %s", zmq_strerror(errno));
                 return -1;
+	} else
+		syslog(LOG_INFO, "Initialized ZMQ context %p", zmq_ctx);
         pub_sock = zmq_socket(zmq_ctx, ZMQ_PUB);
         if(pub_sock == NULL) {
+		syslog(LOG_ERR, "Error initialzing socket: %s", zmq_strerror(errno));
                 zmq_term(zmq_ctx);
                 return -1;
-        }
-                
-        
+        } else
+		syslog(LOG_INFO, "Initialized ZMQ socket %p", pub_sock);
+	zmq_setsockopt(pub_sock, ZMQ_LINGER, &linger, sizeof(linger));       
+ 
         char * lock = args, *name, *val;
         while(*lock != '\0') {
                 name = lock;
-                while(*lock != ',') {
+                while(*lock != ',' && *lock != '\0') {
                         if(*lock == '=') {
                                 *lock = '\0';
                                 val = lock + 1;
@@ -302,7 +323,12 @@ int nebmodule_init(int flags, char * args, nebmodule * handle) {
                 }
                 *lock = '\0';
                 if(strcmp(name, "bind") == 0) {
-                        zmq_bind(pub_sock, val);
+			syslog(LOG_ERR, "NagMQ is binding to %s", val);
+			if(zmq_bind(pub_sock, val) == 0)
+				syslog(LOG_INFO, "Bound ZMQ socket %p to %s", pub_sock, val);
+			else
+				syslog(LOG_ERR, "Error binding ZMQ socket %p to %s: %s",
+					pub_sock, val, zmq_strerror(errno));
                 }
         }
         
