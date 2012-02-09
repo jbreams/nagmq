@@ -336,9 +336,9 @@ static void zmq_queue_runner(void * nouse) {
 		json_decref(curpayload);
 		zmq_msg_init_data(&zmsg, payload, strlen(payload), free_cb, NULL);
 		rc = zmq_send(pubext, &zmsg);
-		if(rc != 0) {
+		if(zmq_send(pubext, &zmsg) != 0) {
 			syslog(LOG_ERR, "Error sending payload: %s",
-				zmq_strerror(errno));
+				zmq_strerror(rc);
 		}
 		zmq_msg_close(&zmsg);
 		syslog(LOG_INFO, "Received new event #%d type %d",
