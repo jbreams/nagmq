@@ -15,6 +15,7 @@
 #include <pthread.h>
 
 static void * zmq_ctx = NULL;
+static void * pubout = NULL;
 static void * nagmq_handle = NULL;
 static pthread_cond_t forwarder_started;
 static pthread_mutex_t forwarder_mutex;
@@ -24,6 +25,7 @@ extern int errno;
 NEB_API_VERSION(CURRENT_NEB_API_VERSION)
 
 int nebmodule_deinit(int flags, int reason) {
+	zmq_close(pubout);
 	zmq_term(zmq_ctx);
 	neb_deregister_module_callbacks(nagmq_handle);
 	return 0;
@@ -263,50 +265,20 @@ int handle_nagdata(int which, void * obj) {
 	if(payload == NULL)
 		return 0;
 
-	void * localsock = zmq_socket(zmq_ctx, ZMQ_PUB);
-	if(localsock == NULL) {
-		syslog(LOG_ERR, "Error creating internal socket: %s",
-			zmq_strerror(errno));
-		json_decref(payload);
-		return 0;
-	}
-
-	rc = zmq_connect(localsock, "inproc://nagmqinternal");
-	if(rc != 0) {
-		syslog(LOG_ERR, "Error connecting to internal forwarder: %s",
-			zmq_strerror(errno));
-		json_decref(payload);
-		return 0;
-	}
-
-	/*json_t * type = json_object_get(payload, "type");
-	//syslog(LOG_INFO, "Sending %s payload", json_string_value(type));
-	char * typestr = strdup(json_string_value(type));
-
-	zmq_msg_init_data(&header, typestr, strlen(typestr),
-		free_cb, NULL);
-	rc = zmq_send(pub_sock, &header, ZMQ_SNDMORE);
-	zmq_msg_close(&header);
-	if(rc != 0)
-		syslog(LOG_ERR, "Error sending header %s: %s", json_string_value(type),
-			zmq_strerror(errno));
-	*/
-
 	char * payloadstr = json_dumps(payload, JSON_COMPACT);
 	zmq_msg_init_data(&payload_msg, payloadstr, strlen(payloadstr), free_cb, NULL);
 	json_decref(payload);
-	rc = zmq_send(localsock, &payload_msg, 0);
+	rc = zmq_send(pubout, &payload_msg, 0);
 	if(rc != 0)  
 		syslog(LOG_ERR, "Error payload %s", zmq_strerror(errno));
 	zmq_msg_close(&payload_msg);
-	zmq_close(localsock);
 	return 0;
 }
 
 static void exit_forwarder() {
 	forwarder_err = errno;
 	pthread_mutex_lock(&forwarder_mutex);
-	pthread_cond_wait(&forwarder_started, &forwarder_mutex);
+	pthread_cond_broadcast(&forwarder_started);
 	pthread_mutex_unlock(&forwarder_mutex);
 }
 
@@ -340,13 +312,20 @@ void nagmq_forwarder(void * arg) {
 		zmq_close(pubext);
 		return;
 	}
+	zmq_setsockopt(subint, ZMQ_SUBSCRIBE, "", 0);
+	exit_forwarder();
 	zmq_device(ZMQ_FORWARDER, subint, pubext);
+}
+
+static void start_internal(void* narg) {
+	pubout = zmq_socket(zmq_ctx, ZMQ_PUB);
+	zmq_connect(pubout, "inproc://nagmqinternal");
 }
 
 int nebmodule_init(int flags, char * args, nebmodule * handle) {
 	char * bindto = NULL;
 	int numthreads = 1, rc;
-	pthread_t thread;
+	pthread_t thread, intsetupthread;
 
 	neb_set_module_info(handle, NEBMODULE_MODINFO_TITLE, "nagmq sink");
 	neb_set_module_info(handle, NEBMODULE_MODINFO_AUTHOR, "Jonathan Reams");
@@ -399,6 +378,10 @@ int nebmodule_init(int flags, char * args, nebmodule * handle) {
 		zmq_term(zmq_ctx);
 		return -1;
 	}
+
+	pthread_detach(thread);
+	pthread_create(&intsetupthread, NULL, start_internal, NULL);
+	pthread_detach(intsetupthread);
 
 	neb_register_callback(NEBCALLBACK_HOST_CHECK_DATA, handle,
 		0, handle_nagdata);
