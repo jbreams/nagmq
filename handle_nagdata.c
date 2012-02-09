@@ -14,20 +14,21 @@
 #include <jansson.h>
 #include <pthread.h>
 
-static void * zmq_ctx = NULL;
-static void * pubout = NULL;
 static void * nagmq_handle = NULL;
-static pthread_cond_t forwarder_started;
-static pthread_mutex_t forwarder_mutex;
-static int forwarder_err = 0;
+static pthread_cond_t queue_event;
+static pthread_mutex_t queue_mutex;
+static int queuestatus = 0;
 extern int errno;
+static int curwhich;
 
 NEB_API_VERSION(CURRENT_NEB_API_VERSION)
 
 int nebmodule_deinit(int flags, int reason) {
-	zmq_close(pubout);
-	zmq_term(zmq_ctx);
 	neb_deregister_module_callbacks(nagmq_handle);
+	pthread_mutex_lock(&queue_mutex);
+	queuestatus = 1;
+	pthread_cond_signal(&queue_event);
+	pthread_mutex_unlock(&queue_mutex);
 	return 0;
 }
 
@@ -38,303 +39,32 @@ static json_t * parse_timestamp(struct timeval * tv) {
 	return ret;
 }
 
-static json_t * parse_host_check(nebstruct_host_check_data * state) {
-	json_t * ret = json_object();
-
-	json_object_set_new(ret, "type", json_string("host_check"));
-	json_object_set_new(ret, "host_name", json_string(state->host_name));
-	json_object_set_new(ret, "current_attempt", json_integer(state->current_attempt));
-	json_object_set_new(ret, "max_attempts", json_integer(state->max_attempts));
-	json_object_set_new(ret, "state", json_integer(state->state));
-	json_object_set_new(ret, "timeout", json_integer(state->timeout));
-	json_object_set_new(ret, "command_name", json_string(state->command_name));
-	json_object_set_new(ret, "command_args", json_string(state->command_args));
-	json_object_set_new(ret, "command_line", json_string(state->command_line));
-	json_object_set_new(ret, "start_time", parse_timestamp(&state->start_time));
-	json_object_set_new(ret, "end_time", parse_timestamp(&state->end_time));
-	json_object_set_new(ret, "early_timeout", json_integer(state->early_timeout));
-	json_object_set_new(ret, "execution_time", json_real(state->execution_time));
-	json_object_set_new(ret, "latency", json_real(state->latency));
-	json_object_set_new(ret, "return_code", json_integer(state->return_code));
-	json_object_set_new(ret, "output", json_string(state->output));
-	json_object_set_new(ret, "long_output", json_string(state->long_output));
-	json_object_set_new(ret, "perf_data", json_string(state->perf_data));
-	return ret;
-}
-
-static json_t * parse_service_check(nebstruct_service_check_data * state) {
-	json_t * ret = json_object();
-
-	json_object_set_new(ret, "type", json_string("service_check"));
-	json_object_set_new(ret, "host_name", json_string(state->host_name));
-	json_object_set_new(ret, "service_description", json_string(state->service_description));
-	json_object_set_new(ret, "current_attempt", json_integer(state->current_attempt));
-	json_object_set_new(ret, "max_attempts", json_integer(state->max_attempts));
-	json_object_set_new(ret, "state", json_integer(state->state));
-	json_object_set_new(ret, "timeout", json_integer(state->timeout));
-	json_object_set_new(ret, "command_name", json_string(state->command_name));
-	json_object_set_new(ret, "command_args", json_string(state->command_args));
-	json_object_set_new(ret, "command_line", json_string(state->command_line));
-	json_object_set_new(ret, "start_time", parse_timestamp(&state->start_time));
-	json_object_set_new(ret, "end_time", parse_timestamp(&state->end_time));
-	json_object_set_new(ret, "early_timeout", json_integer(state->early_timeout));
-	json_object_set_new(ret, "execution_time", json_real(state->execution_time));
-	json_object_set_new(ret, "latency", json_real(state->latency));
-	json_object_set_new(ret, "return_code", json_integer(state->return_code));
-	json_object_set_new(ret, "output", json_string(state->output));
-	json_object_set_new(ret, "long_output", json_string(state->long_output));
-	json_object_set_new(ret, "perf_data", json_string(state->perf_data));
-	return ret;
-}
-
-static json_t * parse_program_status(nebstruct_program_status_data * state) {
-	json_t * ret = json_object();
-
-	json_object_set_new(ret, "type", json_string("program_status"));
-	json_object_set_new(ret, "program_start", json_integer(state->program_start));
-	json_object_set_new(ret, "pid", json_integer(state->pid));
-	json_object_set_new(ret, "daemon_mode", json_integer(state->daemon_mode));
-	json_object_set_new(ret, "last_command_check", json_integer(state->last_command_check));
-	json_object_set_new(ret, "last_log_rotation", json_integer(state->last_log_rotation));
-	json_object_set_new(ret, "notifications_enabled", json_integer(state->notifications_enabled));
-	json_object_set_new(ret, "active_service_checks_enabled", json_integer(state->active_service_checks_enabled));
-	json_object_set_new(ret, "passive_service_checks_enabled", json_integer(state->passive_service_checks_enabled));
-	json_object_set_new(ret, "active_host_checks_enabled", json_integer(state->active_host_checks_enabled));
-	json_object_set_new(ret, "passive_host_checks_enabled", json_integer(state->passive_host_checks_enabled));
-	json_object_set_new(ret, "event_handlers_enabled", json_integer(state->event_handlers_enabled));
-	json_object_set_new(ret, "flap_detection_enabled", json_integer(state->flap_detection_enabled));
-	json_object_set_new(ret, "failure_prediction_enabled", json_integer(state->failure_prediction_enabled));
-	json_object_set_new(ret, "process_performance_data", json_integer(state->process_performance_data));
-	json_object_set_new(ret, "obsess_over_hosts", json_integer(state->obsess_over_hosts));
-	json_object_set_new(ret, "obsess_over_services", json_integer(state->obsess_over_services));
-	json_object_set_new(ret, "modified_host_attributes", json_integer(state->modified_host_attributes));
-	json_object_set_new(ret, "modified_service_attributes", json_integer(state->modified_service_attributes));
-	json_object_set_new(ret, "global_host_event_handler", json_string(state->global_host_event_handler));
-	json_object_set_new(ret, "global_service_event_handler", json_string(state->global_service_event_handler));
-	return ret;
-}
-
-static json_t * parse_host_status(nebstruct_host_status_data * obj) {
-	host * state = obj->object_ptr;
-	json_t * ret = json_object();
-
-	json_object_set_new(ret, "type", json_string("host_status"));
-	json_object_set_new(ret, "name", json_string(state->name));
-	json_object_set_new(ret, "plugin_output", json_string(state->plugin_output));
-	json_object_set_new(ret, "long_plugin_output", json_string(state->long_plugin_output));
-	json_object_set_new(ret, "perf_data", json_string(state->perf_data));
-	json_object_set_new(ret, "has_been_checked", json_integer(state->has_been_checked));
-	json_object_set_new(ret, "should_be_scheduled", json_integer(state->should_be_scheduled));
-	json_object_set_new(ret, "current_attempt", json_integer(state->current_attempt));
-	json_object_set_new(ret, "max_attempts", json_integer(state->max_attempts));
-	json_object_set_new(ret, "last_check", json_integer(state->last_check));
-	json_object_set_new(ret, "next_check", json_integer(state->next_check));
-	json_object_set_new(ret, "check_options", json_integer(state->check_options));
-	json_object_set_new(ret, "last_state_change", json_integer(state->last_state_change));
-	json_object_set_new(ret, "last_hard_state_change", json_integer(state->last_hard_state_change));
-	json_object_set_new(ret, "last_hard_state", json_integer(state->last_hard_state));
-	json_object_set_new(ret, "last_time_up", json_integer(state->last_time_up));
-	json_object_set_new(ret, "last_time_down", json_integer(state->last_time_down));
-	json_object_set_new(ret, "last_time_unreachable", json_integer(state->last_time_unreachable));
-	json_object_set_new(ret, "no_more_notifications", json_integer(state->no_more_notifications));
-	json_object_set_new(ret, "notifications_enabled", json_integer(state->notifications_enabled));
-	json_object_set_new(ret, "problem_has_been_acknowledged", json_integer(state->problem_has_been_acknowledged));
-	json_object_set_new(ret, "current_notification_number", json_integer(state->current_notification_number));
-	json_object_set_new(ret, "accept_passive_host_checks", json_integer(state->accept_passive_host_checks));
-	json_object_set_new(ret, "event_handler_enabled", json_integer(state->event_handler_enabled));
-	json_object_set_new(ret, "checks_enabled", json_integer(state->checks_enabled));
-	json_object_set_new(ret, "flap_detection_enabled", json_integer(state->flap_detection_enabled));
-	json_object_set_new(ret, "is_flapping", json_integer(state->is_flapping));
-	json_object_set_new(ret, "percent_state_change", json_real(state->percent_state_change));
-	json_object_set_new(ret, "latency", json_real(state->latency));
-	json_object_set_new(ret, "execution_time", json_real(state->execution_time));
-	json_object_set_new(ret, "scheduled_downtime_depth", json_integer(state->scheduled_downtime_depth));
-	json_object_set_new(ret, "failure_prediction_enabled", json_integer(state->failure_prediction_enabled));
-	json_object_set_new(ret, "process_performance_data", json_integer(state->process_performance_data));
-	json_object_set_new(ret, "obsess_over_host", json_integer(state->obsess_over_host));
-	return ret;
-}
-
-static json_t * parse_service_status(nebstruct_service_status_data * obj) {
-	json_t * ret = json_object();
-	service * state = obj->object_ptr;
-
-	json_object_set_new(ret, "type", json_string("service_status"));
-	json_object_set_new(ret, "host_name", json_string(state->host_name));
-	json_object_set_new(ret, "description", json_string(state->description));
-	json_object_set_new(ret, "plugin_output", json_string(state->plugin_output));
-	json_object_set_new(ret, "long_plugin_output", json_string(state->long_plugin_output));
-	json_object_set_new(ret, "perf_data", json_string(state->perf_data));
-	json_object_set_new(ret, "max_attempts", json_integer(state->max_attempts));
-	json_object_set_new(ret, "current_attempt", json_integer(state->current_attempt));
-	json_object_set_new(ret, "has_been_checked", json_integer(state->has_been_checked));
-	json_object_set_new(ret, "should_be_scheduled", json_integer(state->should_be_scheduled));
-	json_object_set_new(ret, "last_check", json_integer(state->last_check));
-	json_object_set_new(ret, "next_check", json_integer(state->next_check));
-	json_object_set_new(ret, "check_options", json_integer(state->check_options));
-	json_object_set_new(ret, "checks_enabled", json_integer(state->checks_enabled));
-	json_object_set_new(ret, "last_state_change", json_integer(state->last_state_change));
-	json_object_set_new(ret, "last_hard_state_change", json_integer(state->last_hard_state_change));
-	json_object_set_new(ret, "last_hard_state", json_integer(state->last_hard_state));
-	json_object_set_new(ret, "last_time_ok", json_integer(state->last_time_ok));
-	json_object_set_new(ret, "last_time_warning", json_integer(state->last_time_warning));
-	json_object_set_new(ret, "last_time_unknown", json_integer(state->last_time_unknown));
-	json_object_set_new(ret, "last_time_critical", json_integer(state->last_time_critical));
-	json_object_set_new(ret, "last_notification", json_integer(state->last_notification));
-	json_object_set_new(ret, "next_notification", json_integer(state->next_notification));
-	json_object_set_new(ret, "no_more_notifications", json_integer(state->no_more_notifications));
-	json_object_set_new(ret, "notifications_enabled", json_integer(state->notifications_enabled));
-	json_object_set_new(ret, "problem_has_been_acknowledged", json_integer(state->problem_has_been_acknowledged));
-	json_object_set_new(ret, "current_notification_number", json_integer(state->current_notification_number));
-	json_object_set_new(ret, "accept_passive_service_checks", json_integer(state->accept_passive_service_checks));
-	json_object_set_new(ret, "event_handler_enabled", json_integer(state->event_handler_enabled));
-	json_object_set_new(ret, "flap_detection_enabled", json_integer(state->flap_detection_enabled));
-	json_object_set_new(ret, "is_flapping", json_integer(state->is_flapping));
-	json_object_set_new(ret, "percent_state_change", json_real(state->percent_state_change));
-	json_object_set_new(ret, "latency", json_real(state->latency));
-	json_object_set_new(ret, "execution_time", json_real(state->execution_time));
-	json_object_set_new(ret, "scheduled_downtime_depth", json_integer(state->scheduled_downtime_depth));
-	json_object_set_new(ret, "failure_prediction_enabled", json_integer(state->failure_prediction_enabled));
-	json_object_set_new(ret, "process_performance_data", json_integer(state->process_performance_data));
-	json_object_set_new(ret, "obsess_over_service", json_integer(state->obsess_over_service));
-
-	return ret;
-}
-
-static json_t * parse_acknowledgement(nebstruct_acknowledgement_data * state) {
-	json_t * ret = json_object();
-
-	json_object_set_new(ret, "type", json_string("acknowledgement"));
-	json_object_set_new(ret, "host_name", json_string(state->host_name));
-	json_object_set_new(ret, "service_description", json_string(state->service_description));
-	json_object_set_new(ret, "state", json_integer(state->state));
-	json_object_set_new(ret, "author_name", json_string(state->author_name));
-	json_object_set_new(ret, "comment_data", json_string(state->comment_data));
-	json_object_set_new(ret, "is_sticky", json_integer(state->is_sticky));
-	json_object_set_new(ret, "persistent_comment", json_integer(state->persistent_comment));
-	json_object_set_new(ret, "notify_contacts", json_integer(state->notify_contacts));
-	return ret;
-}
-
-static json_t * parse_statechange(nebstruct_statechange_data * state) {
-	json_t * ret = json_object();
-
-	json_object_set_new(ret, "type", json_string("statechange"));
-	json_object_set_new(ret, "host_name", json_string(state->host_name));
-	json_object_set_new(ret, "service_description", json_string(state->service_description));
-	json_object_set_new(ret, "state", json_integer(state->state));
-	json_object_set_new(ret, "current_attempt", json_integer(state->current_attempt));
-	json_object_set_new(ret, "max_attempts", json_integer(state->max_attempts));
-	json_object_set_new(ret, "output", json_string(state->output));
-	return ret;
-}
-
 void free_cb(void * ptr, void * hint) {
 	free(ptr);
 }
 
 int handle_nagdata(int which, void * obj) {
-	json_t * payload = NULL;
-	zmq_msg_t payload_msg;
-	int rc;
-
-	switch(which) {
-	case NEBCALLBACK_HOST_CHECK_DATA:
-		payload = parse_host_check(obj);
-		break;
-	case NEBCALLBACK_SERVICE_CHECK_DATA:
-		payload = parse_service_check(obj);
-		break;
-	case NEBCALLBACK_PROGRAM_STATUS_DATA:
-		payload = parse_program_status(obj);
-		break;
-	case NEBCALLBACK_HOST_STATUS_DATA:
-		payload = parse_host_status(obj);
-		break;
-	case NEBCALLBACK_SERVICE_STATUS_DATA:
-		payload = parse_service_status(obj);
-		break;
-	case NEBCALLBACK_ACKNOWLEDGEMENT_DATA:
-		payload = parse_acknowledgement(obj);
-		break;
-	case NEBCALLBACK_STATE_CHANGE_DATA:
-		payload = parse_statechange(obj);
-		break;
-	}
-
-	if(payload == NULL)
-		return 0;
-
-	char * payloadstr = json_dumps(payload, JSON_COMPACT);
-	zmq_msg_init_data(&payload_msg, payloadstr, strlen(payloadstr), free_cb, NULL);
-	json_decref(payload);
-	rc = zmq_send(pubout, &payload_msg, 0);
-	if(rc != 0)  
-		syslog(LOG_ERR, "Error payload %s", zmq_strerror(errno));
-	zmq_msg_close(&payload_msg);
+	pthread_mutex_lock(&queue_mutex);
+	curwhich = which;
+	pthread_cond_signal(&queue_event);
+	pthread_mutex_unlock(&queue_mutex);
 	return 0;
 }
 
-static void exit_forwarder() {
-	forwarder_err = errno;
-	pthread_mutex_lock(&forwarder_mutex);
-	pthread_cond_broadcast(&forwarder_started);
-	pthread_mutex_unlock(&forwarder_mutex);
+static void sigback(int err) {
+	queuestatus = err;
+	pthread_mutex_lock(&queue_mutex);
+	pthread_cond_broadcast(&queue_event);
+	pthread_mutex_unlock(&queue_mutex);
 }
 
-void nagmq_forwarder(void * arg) {
-	char * bindto = (char*)arg;
-	void * pubext = NULL, *subint = NULL;
-	int rc;
-
-	subint = zmq_socket(zmq_ctx, ZMQ_SUB);
-	if(subint == NULL) {
-		exit_forwarder();
-		return;
-	}
-	pubext = zmq_socket(zmq_ctx, ZMQ_PUB);
-	if(subint == NULL) {
-		exit_forwarder();
-		return;
-	}
-
-	rc = zmq_bind(subint, "inproc://nagmqinternal");
-	if(rc != 0) {
-		exit_forwarder();
-		zmq_close(subint);
-		zmq_close(pubext);
-		return;
-	}
-	rc = zmq_bind(pubext, bindto);
-	if(rc != 0) {
-		exit_forwarder();
-		zmq_close(subint);
-		zmq_close(pubext);
-		return;
-	}
-	zmq_setsockopt(subint, ZMQ_SUBSCRIBE, "", 0);
-	exit_forwarder();
-	zmq_device(ZMQ_FORWARDER, subint, pubext);
-}
-
-static void start_internal(void* narg) {
-	pubout = zmq_socket(zmq_ctx, ZMQ_PUB);
-	zmq_connect(pubout, "inproc://nagmqinternal");
-}
-
-int nebmodule_init(int flags, char * args, nebmodule * handle) {
-	char * bindto = NULL;
+static void zmq_queue_runner(void * args) {
+	void * zmq_ctx;
+	void * pubext;
 	int numthreads = 1, rc;
-	pthread_t thread, intsetupthread;
+	char * bindto = NULL;
 
-	neb_set_module_info(handle, NEBMODULE_MODINFO_TITLE, "nagmq sink");
-	neb_set_module_info(handle, NEBMODULE_MODINFO_AUTHOR, "Jonathan Reams");
-	neb_set_mobdule_info(handle, NEBMODULE_MODINFO_VERSION, "0.1");
-	neb_set_module_info(handle, NEBMODULE_MODINFO_LICENSE, "Apache v2");
-	neb_set_module_info(handle, NEBMODULE_MODINFO_DESC,
-		"Sink for publishing nagios data to ZMQ");
-
-	char * lock = args, *name, *val;
+	char * lock = (char*)args, *name, *val;
 	while(*lock != '\0') {
 		name = lock;
 		while(*lock != ',' && *lock != '\0') {
@@ -355,33 +85,68 @@ int nebmodule_init(int flags, char * args, nebmodule * handle) {
 
 	zmq_ctx = zmq_init(numthreads);
 	if(zmq_ctx == NULL) {
-		syslog(LOG_ERR, "Error initializing ZMQ context for NagMQ: %s",
+		syslog(LOG_ERR, "Error intializing ZMQ context: %s",
 			zmq_strerror(errno));
-		return -1;
-	} else
-		syslog(LOG_INFO, "Initialized ZMQ context %p", zmq_ctx);
+		sigback(1);
+		return;
+	}
 
-	pthread_cond_init(&forwarder_started, NULL);
-	rc = pthread_create(&thread, NULL, nagmq_forwarder, bindto);
+	pubext = zmq_socket(zmq_ctx, ZMQ_PUB);
+	if(pubext == NULL) {
+		syslog(LOG_ERR, "Error creating ZMQ socket: %s",
+			zmq_strerror(errno));
+		sigback(1);
+		return;
+	}
+
+	rc = zmq_bind(pubext, bindto);
+	if(rc != 0) {
+		syslog(LOG_ERR, "Error binding to %s: %s",
+			bindto, zmq_strerror(errno));
+		sigback(1);
+		return;
+	}
+	
+	sigback(0);
+	unsigned long eventcounter = 0;
+	while(queuestatus == 0) {
+		pthread_mutex_lock(&queue_mutex);
+		pthread_cond_wait(&queue_event, &queue_mutex);
+		syslog(LOG_INFO, "Received new event #%d type %d",
+			eventcounter++, curwhich);
+		pthread_mutex_unlock(&queue_mutex);
+	}
+
+	zmq_close(pubext);
+	zmq_term(zmq_ctx);
+}
+
+int nebmodule_init(int flags, char * args, nebmodule * handle) {
+	char * bindto = NULL;
+	int numthreads = 1, rc;
+	pthread_t thread, intsetupthread;
+
+	neb_set_module_info(handle, NEBMODULE_MODINFO_TITLE, "nagmq sink");
+	neb_set_module_info(handle, NEBMODULE_MODINFO_AUTHOR, "Jonathan Reams");
+	neb_set_module_info(handle, NEBMODULE_MODINFO_VERSION, "0.1");
+	neb_set_module_info(handle, NEBMODULE_MODINFO_LICENSE, "Apache v2");
+	neb_set_module_info(handle, NEBMODULE_MODINFO_DESC,
+		"Sink for publishing nagios data to ZMQ");
+
+	pthread_cond_init(&queue_event, NULL);
+	rc = pthread_create(&thread, NULL, zmq_queue_runner, args);
 	if(rc != 0) {
 		syslog(LOG_ERR, "Error creating forwarding thread: %m");
-		zmq_term(zmq_ctx);
 		return -1;
 	}
 
-	pthread_mutex_lock(&forwarder_mutex);
-	pthread_cond_wait(&forwarder_started, &forwarder_mutex);
-	pthread_mutex_unlock(&forwarder_mutex);
-	if(forwarder_err != 0) {
-		syslog(LOG_ERR, "Error creating forwarding device: %s",
-			zmq_strerror(forwarder_err));
-		zmq_term(zmq_ctx);
+	pthread_mutex_lock(&queue_mutex);
+	pthread_cond_wait(&queue_event, &queue_mutex);
+	pthread_mutex_unlock(&queue_mutex);
+	if(queuestatus != 0)
 		return -1;
-	}
 
 	pthread_detach(thread);
-	pthread_create(&intsetupthread, NULL, start_internal, NULL);
-	pthread_detach(intsetupthread);
 
 	neb_register_callback(NEBCALLBACK_HOST_CHECK_DATA, handle,
 		0, handle_nagdata);
