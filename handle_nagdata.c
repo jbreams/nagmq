@@ -92,33 +92,6 @@ static json_t * parse_service_check(nebstruct_service_check_data * state) {
 	return ret;
 }
 
-static json_t * parse_program_status(nebstruct_program_status_data * state) {
-	json_t * ret = json_object();
-
-	json_object_set_new(ret, "type", json_string("program_status"));
-	json_object_set_new(ret, "program_start", json_integer(state->program_start));
-	json_object_set_new(ret, "pid", json_integer(state->pid));
-	json_object_set_new(ret, "daemon_mode", json_integer(state->daemon_mode));
-	json_object_set_new(ret, "last_command_check", json_integer(state->last_command_check));
-	json_object_set_new(ret, "last_log_rotation", json_integer(state->last_log_rotation));
-	json_object_set_new(ret, "notifications_enabled", json_integer(state->notifications_enabled));
-	json_object_set_new(ret, "active_service_checks_enabled", json_integer(state->active_service_checks_enabled));
-	json_object_set_new(ret, "passive_service_checks_enabled", json_integer(state->passive_service_checks_enabled));
-	json_object_set_new(ret, "active_host_checks_enabled", json_integer(state->active_host_checks_enabled));
-	json_object_set_new(ret, "passive_host_checks_enabled", json_integer(state->passive_host_checks_enabled));
-	json_object_set_new(ret, "event_handlers_enabled", json_integer(state->event_handlers_enabled));
-	json_object_set_new(ret, "flap_detection_enabled", json_integer(state->flap_detection_enabled));
-	json_object_set_new(ret, "failure_prediction_enabled", json_integer(state->failure_prediction_enabled));
-	json_object_set_new(ret, "process_performance_data", json_integer(state->process_performance_data));
-	json_object_set_new(ret, "obsess_over_hosts", json_integer(state->obsess_over_hosts));
-	json_object_set_new(ret, "obsess_over_services", json_integer(state->obsess_over_services));
-	json_object_set_new(ret, "modified_host_attributes", json_integer(state->modified_host_attributes));
-	json_object_set_new(ret, "modified_service_attributes", json_integer(state->modified_service_attributes));
-	json_object_set_new(ret, "global_host_event_handler", json_string(state->global_host_event_handler));
-	json_object_set_new(ret, "global_service_event_handler", json_string(state->global_service_event_handler));
-	return ret;
-}
-
 static json_t * parse_host_status(nebstruct_host_status_data * obj) {
 	host * state = obj->object_ptr;
 	json_t * ret = json_object();
@@ -247,9 +220,6 @@ int handle_nagdata(int which, void * obj) {
 	case NEBCALLBACK_SERVICE_CHECK_DATA:
 		payload = parse_service_check(obj);
 		break;
-	case NEBCALLBACK_PROGRAM_STATUS_DATA:
-		payload = parse_program_status(obj);
-		break;
 	case NEBCALLBACK_HOST_STATUS_DATA:
 		payload = parse_host_status(obj);
 		break;
@@ -332,17 +302,15 @@ static void zmq_queue_runner(void * nouse) {
 		zmq_msg_t zmsg;
 		pthread_mutex_lock(&queue_mutex);
 		pthread_cond_wait(&queue_event, &queue_mutex);
-		char * payload = json_dumps(curpayload, JSON_COMPACT);
+		char * payload = json_dumps(curpayload, JSON_COMPACT|JSON_PRESERVE_ORDER);
 		json_decref(curpayload);
 		zmq_msg_init_data(&zmsg, payload, strlen(payload), free_cb, NULL);
-		rc = zmq_send(pubext, &zmsg);
-		if(zmq_send(pubext, &zmsg) != 0) {
+		rc = zmq_send(pubext, &zmsg, 0);
+		if(rc != 0) {
 			syslog(LOG_ERR, "Error sending payload: %s",
-				zmq_strerror(rc);
+				zmq_strerror(rc));
 		}
 		zmq_msg_close(&zmsg);
-		syslog(LOG_INFO, "Received new event #%d type %d",
-			eventcounter++, curwhich);
 		pthread_mutex_unlock(&queue_mutex);
 	}
 
@@ -382,8 +350,6 @@ int nebmodule_init(int flags, char * localargs, nebmodule * handle) {
 	neb_register_callback(NEBCALLBACK_HOST_CHECK_DATA, handle,
 		0, handle_nagdata);
 	neb_register_callback(NEBCALLBACK_SERVICE_CHECK_DATA, handle,
-		0, handle_nagdata);
-	neb_register_callback(NEBCALLBACK_PROGRAM_STATUS_DATA, handle,
 		0, handle_nagdata);
 	neb_register_callback(NEBCALLBACK_HOST_STATUS_DATA, handle,
 		0, handle_nagdata);
