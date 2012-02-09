@@ -12,15 +12,18 @@
 #include "naginclude/objects.h"
 #include <zmq.h>
 #include <jansson.h>
+#include <pthread.h>
 
-void * zmq_ctx = NULL;
-void * pub_sock = NULL;
-void * nagmq_handle = NULL;
+static void * zmq_ctx = NULL;
+static void * nagmq_handle = NULL;
+static pthread_cond_t forwarder_started;
+static pthread_mutex_t forwarder_mutex;
+static int forwarder_err = 0;
+extern int errno;
 
 NEB_API_VERSION(CURRENT_NEB_API_VERSION)
 
 int nebmodule_deinit(int flags, int reason) {
-	zmq_close(pub_sock);
 	zmq_term(zmq_ctx);
 	neb_deregister_module_callbacks(nagmq_handle);
 	return 0;
@@ -260,6 +263,22 @@ int handle_nagdata(int which, void * obj) {
 	if(payload == NULL)
 		return 0;
 
+	void * localsock = zmq_socket(zmq_ctx, ZMQ_PUB);
+	if(localsock == NULL) {
+		syslog(LOG_ERR, "Error creating internal socket: %s",
+			zmq_strerror(errno));
+		json_decref(payload);
+		return 0;
+	}
+
+	rc = zmq_connect(localsock, "inproc://nagmqinternal");
+	if(rc != 0) {
+		syslog(LOG_ERR, "Error connecting to internal forwarder: %s",
+			zmq_strerror(errno));
+		json_decref(payload);
+		return 0;
+	}
+
 	/*json_t * type = json_object_get(payload, "type");
 	//syslog(LOG_INFO, "Sending %s payload", json_string_value(type));
 	char * typestr = strdup(json_string_value(type));
@@ -274,80 +293,129 @@ int handle_nagdata(int which, void * obj) {
 	*/
 
 	char * payloadstr = json_dumps(payload, JSON_COMPACT);
-	size_t plstrlen = strlen(payloadstr);
-	zmq_msg_init_size(&payload_msg, plstrlen);
-	memcpy(zmq_msg_data(&payload_msg), payloadstr, plstrlen);
-	free(payloadstr);
-	rc = zmq_send(pub_sock, &payload_msg, 0);
-        if(rc != 0)  
-                syslog(LOG_ERR, "Error payload %s", zmq_strerror(errno));
-	else
-		syslog(LOG_INFO, "Send message to %p!", pub_sock);
+	zmq_msg_init_data(&payload_msg, payloadstr, strlen(payloadstr), free_cb, NULL);
+	json_decref(payload);
+	rc = zmq_send(localsock, &payload_msg, 0);
+	if(rc != 0)  
+		syslog(LOG_ERR, "Error payload %s", zmq_strerror(errno));
 	zmq_msg_close(&payload_msg);
+	zmq_close(localsock);
 	return 0;
 }
 
+static void exit_forwarder() {
+	forwarder_err = errno;
+	pthread_mutex_lock(&forwarder_mutex);
+	pthread_cond_wait(&forwarder_started, &forwarder_mutex);
+	pthread_mutex_unlock(&forwarder_mutex);
+}
+
+void nagmq_forwarder(void * arg) {
+	char * bindto = (char*)arg;
+	void * pubext = NULL, *subint = NULL;
+	int rc;
+
+	subint = zmq_socket(zmq_ctx, ZMQ_SUB);
+	if(subint == NULL) {
+		exit_forwarder();
+		return;
+	}
+	pubext = zmq_socket(zmq_ctx, ZMQ_PUB);
+	if(subint == NULL) {
+		exit_forwarder();
+		return;
+	}
+
+	rc = zmq_bind(subint, "inproc://nagmqinternal");
+	if(rc != 0) {
+		exit_forwarder();
+		zmq_close(subint);
+		zmq_close(pubext);
+		return;
+	}
+	rc = zmq_bind(pubext, bindto);
+	if(rc != 0) {
+		exit_forwarder();
+		zmq_close(subint);
+		zmq_close(pubext);
+		return;
+	}
+	zmq_device(ZMQ_FORWARDER, subint, pubext);
+}
+
 int nebmodule_init(int flags, char * args, nebmodule * handle) {
-	const int linger = 0;
-        neb_set_module_info(handle, NEBMODULE_MODINFO_TITLE, "nagmq sink");
-        neb_set_module_info(handle, NEBMODULE_MODINFO_AUTHOR, "Jonathan Reams");
-        neb_set_module_info(handle, NEBMODULE_MODINFO_VERSION, "0.1");
-        neb_set_module_info(handle, NEBMODULE_MODINFO_LICENSE, "Apache v2");
-        neb_set_module_info(handle, NEBMODULE_MODINFO_DESC,
-                "Sink for publishing nagios data to ZMQ");
-                        
-        zmq_ctx = zmq_init(1);
-        if(zmq_ctx == NULL) {
-		syslog(LOG_ERR, "Error initializing ZMQ context for NagMQ: %s", zmq_strerror(errno));
-                return -1;
+	char * bindto = NULL;
+	int numthreads = 1, rc;
+	pthread_t thread;
+
+	neb_set_module_info(handle, NEBMODULE_MODINFO_TITLE, "nagmq sink");
+	neb_set_module_info(handle, NEBMODULE_MODINFO_AUTHOR, "Jonathan Reams");
+	neb_set_mobdule_info(handle, NEBMODULE_MODINFO_VERSION, "0.1");
+	neb_set_module_info(handle, NEBMODULE_MODINFO_LICENSE, "Apache v2");
+	neb_set_module_info(handle, NEBMODULE_MODINFO_DESC,
+		"Sink for publishing nagios data to ZMQ");
+
+	char * lock = args, *name, *val;
+	while(*lock != '\0') {
+		name = lock;
+		while(*lock != ',' && *lock != '\0') {
+			if(*lock == '=') {
+				*lock = '\0';
+				val = lock + 1;
+			}
+			lock++;
+		}
+		*lock = '\0';
+		if(strcmp(name, "bind") == 0) {
+			bindto = val;
+		}
+		else if(strcmp(name, "numthreads") == 0) {
+			numthreads = atoi(val);
+		}
+	}
+
+	zmq_ctx = zmq_init(numthreads);
+	if(zmq_ctx == NULL) {
+		syslog(LOG_ERR, "Error initializing ZMQ context for NagMQ: %s",
+			zmq_strerror(errno));
+		return -1;
 	} else
 		syslog(LOG_INFO, "Initialized ZMQ context %p", zmq_ctx);
-        pub_sock = zmq_socket(zmq_ctx, ZMQ_PUB);
-        if(pub_sock == NULL) {
-		syslog(LOG_ERR, "Error initialzing socket: %s", zmq_strerror(errno));
-                zmq_term(zmq_ctx);
-                return -1;
-        } else
-		syslog(LOG_INFO, "Initialized ZMQ socket %p", pub_sock);
-	zmq_setsockopt(pub_sock, ZMQ_LINGER, &linger, sizeof(linger));       
- 
-        char * lock = args, *name, *val;
-        while(*lock != '\0') {
-                name = lock;
-                while(*lock != ',' && *lock != '\0') {
-                        if(*lock == '=') {
-                                *lock = '\0';
-                                val = lock + 1;
-                        }
-                        lock++;
-                }
-                *lock = '\0';
-                if(strcmp(name, "bind") == 0) {
-			syslog(LOG_ERR, "NagMQ is binding to %s", val);
-			if(zmq_bind(pub_sock, val) == 0)
-				syslog(LOG_INFO, "Bound ZMQ socket %p to %s", pub_sock, val);
-			else
-				syslog(LOG_ERR, "Error binding ZMQ socket %p to %s: %s",
-					pub_sock, val, zmq_strerror(errno));
-                }
-        }
-        
-        neb_register_callback(NEBCALLBACK_HOST_CHECK_DATA, handle,
-                0, handle_nagdata);
-        neb_register_callback(NEBCALLBACK_SERVICE_CHECK_DATA, handle,
-                0, handle_nagdata);
-        neb_register_callback(NEBCALLBACK_PROGRAM_STATUS_DATA, handle,
-                0, handle_nagdata);
-        neb_register_callback(NEBCALLBACK_HOST_STATUS_DATA, handle,
-                0, handle_nagdata);
-        neb_register_callback(NEBCALLBACK_SERVICE_STATUS_DATA, handle,
-                0, handle_nagdata);
-        neb_register_callback(NEBCALLBACK_ACKNOWLEDGEMENT_DATA, handle,
-                0, handle_nagdata);
-        neb_register_callback(NEBCALLBACK_STATE_CHANGE_DATA, handle,
-                0, handle_nagdata);
 
-        nagmq_handle = handle;
+	pthread_cond_init(&forwarder_started, NULL);
+	rc = pthread_create(&thread, NULL, nagmq_forwarder, bindto);
+	if(rc != 0) {
+		syslog(LOG_ERR, "Error creating forwarding thread: %m");
+		zmq_term(zmq_ctx);
+		return -1;
+	}
 
-        return 0;
+	pthread_mutex_lock(&forwarder_mutex);
+	pthread_cond_wait(&forwarder_started, &forwarder_mutex);
+	pthread_mutex_unlock(&forwarder_mutex);
+	if(forwarder_err != 0) {
+		syslog(LOG_ERR, "Error creating forwarding device: %s",
+			zmq_strerror(forwarder_err));
+		zmq_term(zmq_ctx);
+		return -1;
+	}
+
+	neb_register_callback(NEBCALLBACK_HOST_CHECK_DATA, handle,
+		0, handle_nagdata);
+	neb_register_callback(NEBCALLBACK_SERVICE_CHECK_DATA, handle,
+		0, handle_nagdata);
+	neb_register_callback(NEBCALLBACK_PROGRAM_STATUS_DATA, handle,
+		0, handle_nagdata);
+	neb_register_callback(NEBCALLBACK_HOST_STATUS_DATA, handle,
+		0, handle_nagdata);
+	neb_register_callback(NEBCALLBACK_SERVICE_STATUS_DATA, handle,
+		0, handle_nagdata);
+	neb_register_callback(NEBCALLBACK_ACKNOWLEDGEMENT_DATA, handle,
+		0, handle_nagdata);
+	neb_register_callback(NEBCALLBACK_STATE_CHANGE_DATA, handle,
+		0, handle_nagdata);
+
+	nagmq_handle = handle;
+
+	return 0;
 }
