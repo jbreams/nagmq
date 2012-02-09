@@ -10,6 +10,7 @@
 #include "naginclude/nebmods.h"
 #include "naginclude/nagios.h"
 #include "naginclude/objects.h"
+#include "naginclude/broker.h"
 #include <zmq.h>
 #include <jansson.h>
 #include <pthread.h>
@@ -20,6 +21,7 @@ static pthread_mutex_t queue_mutex;
 static int queuestatus = 0;
 extern int errno;
 static int curwhich;
+static char * args = NULL;
 
 NEB_API_VERSION(CURRENT_NEB_API_VERSION)
 
@@ -29,6 +31,8 @@ int nebmodule_deinit(int flags, int reason) {
 	queuestatus = 1;
 	pthread_cond_signal(&queue_event);
 	pthread_mutex_unlock(&queue_mutex);
+	if(args)
+		free(args);
 	return 0;
 }
 
@@ -58,7 +62,7 @@ static void sigback(int err) {
 	pthread_mutex_unlock(&queue_mutex);
 }
 
-static void zmq_queue_runner(void * args) {
+static void zmq_queue_runner(void * nouse) {
 	void * zmq_ctx;
 	void * pubext;
 	int numthreads = 1, rc;
@@ -121,32 +125,34 @@ static void zmq_queue_runner(void * args) {
 	zmq_term(zmq_ctx);
 }
 
-int nebmodule_init(int flags, char * args, nebmodule * handle) {
-	char * bindto = NULL;
-	int numthreads = 1, rc;
-	pthread_t thread, intsetupthread;
+int handle_startup(int which, void * obj) {
+	struct nebstruct_process_struct *ps = (struct nebstruct_process_struct *)obj;
+	if (ps->type == NEBTYPE_PROCESS_EVENTLOOPSTART) {
+		pthread_t thread;
+		pthread_cond_init(&queue_event, NULL);
+		if(pthread_create(&thread, NULL, zmq_queue_runner, NULL) != 0) {
+			syslog(LOG_ERR, "Error creating forwarding thread: %m");
+			return -1;
+		}
 
+		pthread_mutex_lock(&queue_mutex);
+		pthread_cond_wait(&queue_event, &queue_mutex);
+		pthread_mutex_unlock(&queue_mutex);
+		if(queuestatus != 0)
+			return -1;
+
+		pthread_detach(thread);
+	}
+	return 0;
+}
+
+int nebmodule_init(int flags, char * localargs, nebmodule * handle) {
 	neb_set_module_info(handle, NEBMODULE_MODINFO_TITLE, "nagmq sink");
 	neb_set_module_info(handle, NEBMODULE_MODINFO_AUTHOR, "Jonathan Reams");
 	neb_set_module_info(handle, NEBMODULE_MODINFO_VERSION, "0.1");
 	neb_set_module_info(handle, NEBMODULE_MODINFO_LICENSE, "Apache v2");
 	neb_set_module_info(handle, NEBMODULE_MODINFO_DESC,
 		"Sink for publishing nagios data to ZMQ");
-
-	pthread_cond_init(&queue_event, NULL);
-	rc = pthread_create(&thread, NULL, zmq_queue_runner, args);
-	if(rc != 0) {
-		syslog(LOG_ERR, "Error creating forwarding thread: %m");
-		return -1;
-	}
-
-	pthread_mutex_lock(&queue_mutex);
-	pthread_cond_wait(&queue_event, &queue_mutex);
-	pthread_mutex_unlock(&queue_mutex);
-	if(queuestatus != 0)
-		return -1;
-
-	pthread_detach(thread);
 
 	neb_register_callback(NEBCALLBACK_HOST_CHECK_DATA, handle,
 		0, handle_nagdata);
@@ -162,8 +168,11 @@ int nebmodule_init(int flags, char * args, nebmodule * handle) {
 		0, handle_nagdata);
 	neb_register_callback(NEBCALLBACK_STATE_CHANGE_DATA, handle,
 		0, handle_nagdata);
+	neb_register_callback(NEBCALLBACK_PROCESS_DATA, handle,
+		0, handle_startup);
 
 	nagmq_handle = handle;
+	args = strdup(localargs);
 
 	return 0;
 }
