@@ -299,11 +299,24 @@ static void zmq_queue_runner(void * nouse) {
 	
 	sigback(0);
 	while(queuestatus == 0) {
-		zmq_msg_t zmsg;
+		zmq_msg_t zmsg, type;
 		pthread_mutex_lock(&queue_mutex);
 		pthread_cond_wait(&queue_event, &queue_mutex);
+		if(curpayload == NULL)
+			continue;
+		
+		json_t *jtype = json_object_get(curpayload, "type");
+		size_t slen = strlen(json_string_value(jtype));
+		zmq_msg_init_size(&type, slen);
+		memcpy(zmq_msg_data(&type), json_string_value(jtype), slen);
+		rc = zmq_send(pubext, &type, ZMQ_SNDMORE);
+		if(rc != 0) {
+			syslog(LOG_ERR, "Error sending type header: %s",
+				zmq_strerror(rc));
+		}
+		zmq_msg_close(&type);
+
 		char * payload = json_dumps(curpayload, JSON_COMPACT|JSON_PRESERVE_ORDER);
-		json_decref(curpayload);
 		zmq_msg_init_data(&zmsg, payload, strlen(payload), free_cb, NULL);
 		rc = zmq_send(pubext, &zmsg, 0);
 		if(rc != 0) {
@@ -311,6 +324,8 @@ static void zmq_queue_runner(void * nouse) {
 				zmq_strerror(rc));
 		}
 		zmq_msg_close(&zmsg);
+		json_decref(curpayload);
+		curpayload = NULL;
 		pthread_mutex_unlock(&queue_mutex);
 	}
 
