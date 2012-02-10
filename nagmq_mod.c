@@ -252,11 +252,16 @@ void free_cb(void * ptr, void * hint) {
 
 int handle_nagdata(int which, void * obj) {
 	json_t * payload;
+	nebstruct_process_data * raw = obj;
 	switch(which) {
 	case NEBCALLBACK_HOST_CHECK_DATA:
+		if(raw->type == NEBTYPE_HOSTCHECK_INITIATE)
+			return 0;
 		payload = parse_host_check(obj);
 		break;
 	case NEBCALLBACK_SERVICE_CHECK_DATA:
+		if(raw->type == NEBTYPE_SERVICECHECK_INITIATE)
+			return 0;
 		payload = parse_service_check(obj);
 		break;
 	case NEBCALLBACK_HOST_STATUS_DATA:
@@ -379,7 +384,6 @@ static void zmq_queue_runner(void * nouse) {
 int handle_startup(int which, void * obj) {
 	struct nebstruct_process_struct *ps = (struct nebstruct_process_struct *)obj;
 	if (ps->type == NEBTYPE_PROCESS_EVENTLOOPSTART) {
-		pthread_t thread;
 		pthread_cond_init(&queue_event, NULL);
 		if(pthread_create(&queue_thread, NULL, zmq_queue_runner, NULL) != 0) {
 			syslog(LOG_ERR, "Error creating forwarding thread: %m");
