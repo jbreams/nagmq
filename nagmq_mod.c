@@ -206,7 +206,7 @@ void free_cb(void * ptr, void * hint) {
 	free(ptr);
 }
 
-static void process_payload(json_t * payload, void * sock) {
+static void process_payload(json_t * payload) {
 	zmq_msg_t type, dump;
 	char * payloadstr;
 	int rc;
@@ -215,20 +215,20 @@ static void process_payload(json_t * payload, void * sock) {
 	size_t slen = strlen(json_string_value(jtype));
 	zmq_msg_init_size(&type, slen);
 	memcpy(zmq_msg_data(&type), json_string_value(jtype), slen);
-	rc = zmq_send(sock, &type, ZMQ_SNDMORE);
+	rc = (zmq_send(pubext, &type, ZMQ_SNDMORE|ZMQ_NOBLOCK) == 0) ? 0 : errno;
 	zmq_msg_close(&type);
 	if(rc != 0) {
-		syslog(LOG_ERR, "Error sending type header: %s",
-			zmq_strerror(rc));
+	//	syslog(LOG_ERR, "Error sending type header: %s",
+	//		zmq_strerror(rc));
 		json_decref(payload);
 		return;
 	}
 
 	payloadstr = json_dumps(payload, JSON_COMPACT);
 	zmq_msg_init_data(&dump, payloadstr, strlen(payloadstr), free_cb, NULL);
-	if((rc = zmq_send(sock, &dump, 0)) != 0)
+	if((rc = zmq_send(pubext, &dump, ZMQ_NOBLOCK)) != 0)
 		syslog(LOG_ERR, "Error sending payload: %s",
-			zmq_strerror(rc));
+			zmq_strerror(errno));
 	zmq_msg_close(&dump);
 	json_decref(payload);
 }
@@ -238,12 +238,12 @@ int handle_nagdata(int which, void * obj) {
 	nebstruct_process_data * raw = obj;
 	switch(which) {
 	case NEBCALLBACK_HOST_CHECK_DATA:
-		if(raw->type == NEBTYPE_HOSTCHECK_INITIATE)
+		if(raw->type != NEBTYPE_HOSTCHECK_INITIATE)
 			return 0;
 		payload = parse_host_check(obj);
 		break;
 	case NEBCALLBACK_SERVICE_CHECK_DATA:
-		if(raw->type == NEBTYPE_SERVICECHECK_INITIATE)
+		if(raw->type != NEBTYPE_SERVICECHECK_INITIATE)
 			return 0;
 		payload = parse_service_check(obj);
 		break;
@@ -261,7 +261,9 @@ int handle_nagdata(int which, void * obj) {
 		break;
 	}
 
-	process_payload(payload, pubext);
+	json_object_set_new(payload, "typenum", json_integer(raw->type));
+	json_object_set_new(payload, "msgattrs", json_integer(raw->attr));
+	process_payload(payload);
 	return 0;
 }
 
@@ -292,23 +294,23 @@ int handle_startup(int which, void * obj) {
 		if(zmq_ctx == NULL) {
 			syslog(LOG_ERR, "Error intializing ZMQ context: %s",
 				zmq_strerror(errno));
-			return;
+			return -1;
 		}
 
 		pubext = zmq_socket(zmq_ctx, ZMQ_PUB);
 		if(pubext == NULL) {
 			syslog(LOG_ERR, "Error creating ZMQ socket: %s",
 				zmq_strerror(errno));
-			return;
+			return -1;
 		}
 
 		rc = zmq_bind(pubext, bindto);
 		if(rc != 0) {
 			syslog(LOG_ERR, "Error binding to %s: %s",
 				bindto, zmq_strerror(errno));
-			return;
+			return -1;
 		}
-	} else if(ps->type == NEBTYPE_PROCESS_EVENTLOOPSTART) {
+	} else if(ps->type == NEBTYPE_PROCESS_EVENTLOOPEND) {
 		zmq_close(pubext);
 		zmq_term(zmq_ctx);
 	}
