@@ -18,10 +18,41 @@
 static void * nagmq_handle = NULL;
 static pthread_cond_t queue_event;
 static pthread_mutex_t queue_mutex;
+static pthread_t queue_thread;
 static int queuestatus = 0;
 extern int errno;
-static json_t * curpayload = NULL;
 static char * args = NULL;
+
+struct pq {
+	json_t * payload;
+	struct pq * next;
+};
+
+static struct pq * head = NULL, *tail = NULL;
+
+static void enqueue(json_t * payload) {
+	struct pq * tmp = malloc(sizeof(struct pq));
+	tmp->payload = payload;
+	tmp->next = NULL;
+	pthread_mutex_lock(&queue_mutex);
+	if(tail == NULL) {
+		tail = tmp;
+		head = tmp;
+	} else {
+		tail->next = tmp;
+	}
+	pthread_mutex_unlock(&queue_mutex);
+}
+
+static struct pq * dequeue() {
+	struct pq * lock;
+	pthread_mutex_lock(&queue_mutex);
+	lock = head;
+	head = NULL;
+	tail = NULL;
+	pthread_mutex_unlock(&queue_mutex);
+	return lock;
+}
 
 NEB_API_VERSION(CURRENT_NEB_API_VERSION)
 
@@ -29,10 +60,18 @@ int nebmodule_deinit(int flags, int reason) {
 	neb_deregister_module_callbacks(nagmq_handle);
 	pthread_mutex_lock(&queue_mutex);
 	queuestatus = 1;
-	pthread_cond_signal(&queue_event);
 	pthread_mutex_unlock(&queue_mutex);
+	pthread_join(queue_thread, NULL);
 	if(args)
 		free(args);
+	pthread_cond_destroy(&queue_event);
+	pthread_mutex_destroy(&queue_mutex);
+	while(head) {
+		tail = head->next;
+		json_decref(head->payload);
+		free(head);
+		head = tail;
+	}
 	return 0;
 }
 
@@ -234,10 +273,7 @@ int handle_nagdata(int which, void * obj) {
 		break;
 	}
 
-	pthread_mutex_lock(&queue_mutex);
-	curpayload = payload;
-	pthread_cond_signal(&queue_event);
-	pthread_mutex_unlock(&queue_mutex);
+	enqueue(payload);
 	return 0;
 }
 
@@ -248,10 +284,37 @@ static void sigback(int err) {
 	pthread_mutex_unlock(&queue_mutex);
 }
 
+static void process_payload(json_t * payload, void * sock) {
+	zmq_msg_t type, dump;
+	char * payloadstr;
+	int rc;
+
+	json_t * jtype = json_object_get(payload, "type");
+	size_t slen = strlen(json_string_value(jtype));
+	zmq_msg_init_size(&type, slen);
+	memcpy(zmq_msg_data(&type), json_string_value(jtype), slen);
+	rc = zmq_send(sock, &type, ZMQ_SNDMORE);
+	zmq_msg_close(&type);
+	if(rc != 0) {
+		syslog(LOG_ERR, "Error sending type header: %s",
+			zmq_strerror(rc));
+		json_decref(payload);
+		return;
+	}
+
+	payloadstr = json_dumps(payload, JSON_COMPACT);
+	zmq_msg_init_data(&dump, payloadstr, strlen(payloadstr), free_cb, NULL);
+	if((rc = zmq_send(sock, &dump, 0)) != 0)
+		syslog(LOG_ERR, "Error sending payload: %s",
+			zmq_strerror(rc));
+	zmq_msg_close(&dump);
+	json_decref(payload);
+}
+
 static void zmq_queue_runner(void * nouse) {
 	void * zmq_ctx;
 	void * pubext;
-	int numthreads = 1, rc;
+	int numthreads = 1, rc, sleeptime = 5;
 	char * bindto = NULL;
 
 	char * lock = (char*)args, *name, *val;
@@ -265,12 +328,12 @@ static void zmq_queue_runner(void * nouse) {
 			lock++;
 		}
 		*lock = '\0';
-		if(strcmp(name, "bind") == 0) {
+		if(strcmp(name, "bind") == 0)
 			bindto = val;
-		}
-		else if(strcmp(name, "numthreads") == 0) {
+		else if(strcmp(name, "numthreads") == 0)
 			numthreads = atoi(val);
-		}
+		else if(strcmp(name, "sleepfor") == 0)
+			sleeptime = atoi(val);
 	}
 
 	zmq_ctx = zmq_init(numthreads);
@@ -299,34 +362,14 @@ static void zmq_queue_runner(void * nouse) {
 	
 	sigback(0);
 	while(queuestatus == 0) {
-		zmq_msg_t zmsg, type;
-		pthread_mutex_lock(&queue_mutex);
-		pthread_cond_wait(&queue_event, &queue_mutex);
-		if(curpayload == NULL)
-			continue;
-		
-		json_t *jtype = json_object_get(curpayload, "type");
-		size_t slen = strlen(json_string_value(jtype));
-		zmq_msg_init_size(&type, slen);
-		memcpy(zmq_msg_data(&type), json_string_value(jtype), slen);
-		rc = zmq_send(pubext, &type, ZMQ_SNDMORE);
-		if(rc != 0) {
-			syslog(LOG_ERR, "Error sending type header: %s",
-				zmq_strerror(rc));
+		struct pq * plock = dequeue();
+		while(plock) {
+			struct pq * next = plock->next;
+			process_payload(plock->payload, pubext);
+			free(plock);
+			plock = next;
 		}
-		zmq_msg_close(&type);
-
-		char * payload = json_dumps(curpayload, JSON_COMPACT|JSON_PRESERVE_ORDER);
-		zmq_msg_init_data(&zmsg, payload, strlen(payload), free_cb, NULL);
-		rc = zmq_send(pubext, &zmsg, 0);
-		if(rc != 0) {
-			syslog(LOG_ERR, "Error sending payload: %s",
-				zmq_strerror(rc));
-		}
-		zmq_msg_close(&zmsg);
-		json_decref(curpayload);
-		curpayload = NULL;
-		pthread_mutex_unlock(&queue_mutex);
+		sleep(sleeptime);
 	}
 
 	zmq_close(pubext);
@@ -338,7 +381,7 @@ int handle_startup(int which, void * obj) {
 	if (ps->type == NEBTYPE_PROCESS_EVENTLOOPSTART) {
 		pthread_t thread;
 		pthread_cond_init(&queue_event, NULL);
-		if(pthread_create(&thread, NULL, zmq_queue_runner, NULL) != 0) {
+		if(pthread_create(&queue_thread, NULL, zmq_queue_runner, NULL) != 0) {
 			syslog(LOG_ERR, "Error creating forwarding thread: %m");
 			return -1;
 		}
@@ -349,7 +392,7 @@ int handle_startup(int which, void * obj) {
 		if(queuestatus != 0)
 			return -1;
 
-		pthread_detach(thread);
+		pthread_detach(queue_thread);
 	}
 	return 0;
 }
