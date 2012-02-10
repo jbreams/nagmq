@@ -254,6 +254,8 @@ int handle_nagdata(int which, void * obj) {
 		payload = parse_service_status(obj);
 		break;
 	case NEBCALLBACK_ACKNOWLEDGEMENT_DATA:
+		if(raw->type != NEBTYPE_NOTIFICATION_START)
+			return 0;
 		payload = parse_acknowledgement(obj);
 		break;
 	case NEBCALLBACK_STATE_CHANGE_DATA:
@@ -261,14 +263,14 @@ int handle_nagdata(int which, void * obj) {
 		break;
 	}
 
-	json_object_set_new(payload, "typenum", json_integer(raw->type));
-	json_object_set_new(payload, "msgattrs", json_integer(raw->attr));
+	json_object_set_new(payload, "timestamp", parse_timestamp(&raw->timestamp));
 	process_payload(payload);
 	return 0;
 }
 
 int handle_startup(int which, void * obj) {
 	struct nebstruct_process_struct *ps = (struct nebstruct_process_struct *)obj;
+	json_t * payload;
 	if (ps->type == NEBTYPE_PROCESS_EVENTLOOPSTART) {
 		int numthreads = 1, rc;
 		char * bindto = NULL;
@@ -310,7 +312,16 @@ int handle_startup(int which, void * obj) {
 				bindto, zmq_strerror(errno));
 			return -1;
 		}
+
+		payload = json_object();
+		json_object_set_new(payload, "type", json_string("eventloopstart"));
+		json_object_set_new(payload, "timestamp", parse_timestamp(&ps->timestamp));
+		process_payload(payload);
 	} else if(ps->type == NEBTYPE_PROCESS_EVENTLOOPEND) {
+		payload = json_object();
+		json_object_set_new(payload, "type", json_string("eventloopend"));
+		json_object_set_new(payload, "timestamp", parse_timestamp(&ps->timestamp));
+		process_payload(payload);
 		zmq_close(pubext);
 		zmq_term(zmq_ctx);
 	}
