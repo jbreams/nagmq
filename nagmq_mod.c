@@ -74,6 +74,7 @@ static json_t * parse_host_check(nebstruct_host_check_data * state) {
 		json_object_set_new(ret, "command_args", json_string(state->command_args));
 		json_object_set_new(ret, "command_line", json_string(state->command_line));
 	} else if(state->type == NEBTYPE_HOSTCHECK_PROCESSED) {
+		json_object_set_new(ret, "type", json_string("host_check_processed"));
 		json_object_set_new(ret, "timeout", json_integer(state->timeout));
 		json_object_set_new(ret, "start_time", parse_timestamp(&state->start_time));
 		json_object_set_new(ret, "end_time", parse_timestamp(&state->end_time));
@@ -251,7 +252,7 @@ int handle_nagdata(int which, void * obj) {
 		switch(raw->type) {
 			case NEBTYPE_HOSTCHECK_INITIATE:
 			case NEBTYPE_HOSTCHECK_PROCESSED:
-				payload = parse_service_check(obj);
+				payload = parse_host_check(obj);
 				break;
 			default:
 				return 0;
@@ -280,14 +281,14 @@ int handle_nagdata(int which, void * obj) {
 			return 0;
 		payload = parse_comment(obj);
 		break;
-    case NEBCALLBACK_DOWNTIME_DATA:
+	case NEBCALLBACK_DOWNTIME_DATA:
 		if(raw->type == NEBTYPE_DOWNTIME_LOAD)
 			return 0;
 		payload = parse_downtime(obj);
 		break;
 	case NEBCALLBACK_PROGRAM_STATUS_DATA:
 		payload = parse_program_status(obj);
-i		break;
+		break;
 	}
 
 	json_object_set_new(payload, "timestamp",
@@ -367,10 +368,6 @@ int nebmodule_init(int flags, char * localargs, nebmodule * handle) {
 	neb_register_callback(NEBCALLBACK_HOST_CHECK_DATA, handle,
 		0, handle_nagdata);
 	neb_register_callback(NEBCALLBACK_SERVICE_CHECK_DATA, handle,
-		0, handle_nagdata);
-	neb_register_callback(NEBCALLBACK_HOST_STATUS_DATA, handle,
-		0, handle_nagdata);
-	neb_register_callback(NEBCALLBACK_SERVICE_STATUS_DATA, handle,
 		0, handle_nagdata);
 	neb_register_callback(NEBCALLBACK_ACKNOWLEDGEMENT_DATA, handle,
 		0, handle_nagdata);
