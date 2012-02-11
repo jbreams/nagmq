@@ -5,7 +5,7 @@ context = zmq.Context()
  
 subscriber = context.socket (zmq.SUB)
 subscriber.connect("tcp://localhost:5555")
-subscriber.setsockopt(zmq.SUBSCRIBE, '')
+subscriber.setsockopt(zmq.SUBSCRIBE, 'service_check')
 maxlat = 0
 
 while True:
