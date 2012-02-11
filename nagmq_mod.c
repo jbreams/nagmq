@@ -202,6 +202,73 @@ static json_t * parse_statechange(nebstruct_statechange_data * state) {
 	return ret;
 }
 
+static json_t * parse_comment(nebstruct_comment_data * state) {
+	json_t * ret = json_object();
+
+	json_object_set_new(ret, "type", json_string("comment"));
+	json_object_set_new(ret, "host_name", json_string(state->host_name));
+	json_object_set_new(ret, "service_description", json_string(state->service_description));
+	json_object_set_new(ret, "entry_time", json_integer(state->entry_time));
+	json_object_set_new(ret, "author_name", json_string(state->author_name));
+	json_object_set_new(ret, "comment_data", json_string(state->comment_data));
+	json_object_set_new(ret, "persistent", json_integer(state->persistent));
+	json_object_set_new(ret, "source", json_integer(state->source));
+	json_object_set_new(ret, "expires", json_integer(state->expires));
+	json_object_set_new(ret, "expire_time", json_integer(state->expire_time));
+	json_object_set_new(ret, "comment_id", json_integer(state->comment_id));
+
+	switch(state->type) {
+		case NEBTYPE_COMMENT_ADD:
+			json_object_set_new(ret, "operation",
+				json_string("add"));
+			break;
+		case NEBTYPE_COMMENT_DELETE:
+			json_object_set_new(ret, "operation",
+				json_string("delete"));
+			break;
+	}
+
+	return ret;
+}
+
+static json_t * parse_downtime(nebstruct_downtime_data * state) {
+	json_t * ret = json_object();
+
+	json_object_set_new(ret, "type", json_string("downtime"));
+	json_object_set_new(ret, "host_name", json_string(state->host_name));
+	json_object_set_new(ret, "service_description", json_string(state->service_description));
+	json_object_set_new(ret, "entry_time", json_integer(state->entry_time));
+	json_object_set_new(ret, "author_name", json_string(state->author_name));
+	json_object_set_new(ret, "comment_data", json_string(state->comment_data));
+	json_object_set_new(ret, "start_time", json_integer(state->start_time));
+	json_object_set_new(ret, "end_time", json_integer(state->end_time));
+	json_object_set_new(ret, "fixed", json_integer(state->fixed));
+	json_object_set_new(ret, "duration", json_integer(state->duration));
+	json_object_set_new(ret, "triggered_by", json_integer(state->triggered_by));
+	json_object_set_new(ret, "downtime_id", json_integer(state->downtime_id));
+
+	switch(state->type) {
+		case NEBTYPE_DOWNTIME_ADD:
+			json_object_set_new(ret, "operation",
+				json_string("add"));
+			break;
+		case NEBTYPE_DOWNTIME_DELETE:
+			json_object_set_new(ret, "operation",
+				json_string("delete"));
+			break;
+		case NEBTYPE_DOWNTIME_START:
+			json_object_set_new(ret, "operation",
+				json_string("start"));
+			break;
+		case NEBTYPE_DOWNTIME_STOP:
+			json_object_set_new(ret, "operation",
+				json_string("stop"));
+			break;
+	}
+
+	return ret;
+}
+
 void free_cb(void * ptr, void * hint) {
 	free(ptr);
 }
@@ -261,9 +328,20 @@ int handle_nagdata(int which, void * obj) {
 	case NEBCALLBACK_STATE_CHANGE_DATA:
 		payload = parse_statechange(obj);
 		break;
+	case NEBCALLBACK_COMMENT_DATA:
+		if(raw->type == NEBTYPE_COMMENT_LOAD)
+			return 0;
+		payload = parse_comment(obj);
+		break;
+    case NEBCALLBACK_DOWNTIME_DATA:
+		if(raw->type == NEBTYPE_DOWNTIME_LOAD)
+			return 0;
+		payload = parse_downtime(obj);
+		break;
 	}
 
-	json_object_set_new(payload, "timestamp", parse_timestamp(&raw->timestamp));
+	json_object_set_new(payload, "timestamp",
+		parse_timestamp(&raw->timestamp));
 	process_payload(payload);
 	return 0;
 }
@@ -350,6 +428,10 @@ int nebmodule_init(int flags, char * localargs, nebmodule * handle) {
 		0, handle_nagdata);
 	neb_register_callback(NEBCALLBACK_PROCESS_DATA, handle,
 		0, handle_startup);
+	neb_register_callback(NEBCALLBACK_COMMENT_DATA, handle,
+		0, handle_nagdata);
+	neb_register_callback(NEBCALLBACK_DOWNTIME_DATA, handle,
+		0, handle_nagdata);
 
 	nagmq_handle = handle;
 	args = strdup(localargs);
