@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-import zmq, json
+import zmq, json, time
 
 context = zmq.Context()
 subscriber = context.socket (zmq.SUB)
@@ -13,27 +13,31 @@ subscriber.setsockopt(zmq.SUBSCRIBE, 'program_status')
 
 pipe = open('nagios.cmd', 'w')
 lastupdate = 0
-failoverat = 120000
+failoverat = 120
 failedover = False
 
 while True:
 	events = subscriber.poll(120000)
-	if events == 0 and time.time() * 1000 - lastupdate > failoverat:
+	if subscriber.getsockopt(zmq.EVENTS) != zmq.POLLIN and time.time() - lastupdate > failoverat and failedover == False:
+		print events
 		pipe.write("[{0}] ENABLE_NOTIFICATIONS\n".format(time.time()))
 		pipe.write("[{0}] START_EXECUTING_SVC_CHECKS\n".format(time.time()))
 		pipe.write("[{0}] START_EXECUTING_HOST_CHECKS\n".format(time.time()))
 		failedover = True
+		pipe.flush()
 		continue
 	elif failedover == True:
 		pipe.write("[{0}] DISABLE_NOTIFICATIONS\n".format(time.time()))
 		pipe.write("[{0}] STOP_EXECUTING_SVC_CHECKS\n".format(time.time()))
 		pipe.write("[{0}] STOP_EXECUTING_HOST_CHECKS\n".format(time.time()))
+		failedover = False
 
 	type, payload = subscriber.recv_multipart()
 	status = json.loads(payload)
 	timestamp = status['timestamp']['tv_sec']
+	lastupdate = timestamp
+
 	if(type == 'service_check_processed'):
-		print status
 		pipe.write("[{0}] PROCESS_SERVICE_CHECK_RESULT;{1};{2};{3};{4}\n".format(
 			timestamp, status['host_name'], status['service_description'],
 			status['return_code'], status['output']))
