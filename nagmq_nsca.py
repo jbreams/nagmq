@@ -4,7 +4,7 @@ import zmq, json
 
 context = zmq.Context()
 subscriber = context.socket (zmq.SUB)
-subscriber.connect("tcp://localhost:5555")
+subscriber.connect("tcp://minotaur:5555")
 subscriber.setsockopt(zmq.SUBSCRIBE, 'service_check_processed')
 subscriber.setsockopt(zmq.SUBSCRIBE, 'host_check_processed')
 subscriber.setsockopt(zmq.SUBSCRIBE, 'comment')
@@ -32,15 +32,15 @@ while True:
 	type, payload = subscriber.recv_multipart()
 	status = json.loads(payload)
 	timestamp = status['timestamp']['tv_sec']
-	if(type == 'service_status'):
+	if(type == 'service_check_processed'):
 		print status
 		pipe.write("[{0}] PROCESS_SERVICE_CHECK_RESULT;{1};{2};{3};{4}\n".format(
 			timestamp, status['host_name'], status['service_description'],
-			status['return_code'], status['plugin_output']))
-	elif(type == 'host_status'):
+			status['return_code'], status['output']))
+	elif(type == 'host_check_processed'):
 		pipe.write("[{0}] PROCESS_HOST_CHECK_RESULT;{1};{2};{3}\n".format(
 			timestamp, status['host_name'], status['return_code'],
-			status['plugin_output']))
+			status['output']))
 	elif(type == 'comment'):
 		if(status['operation'] != 'add'):
 			continue

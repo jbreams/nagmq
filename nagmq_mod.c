@@ -63,16 +63,26 @@ static json_t * parse_program_status(nebstruct_program_status_data * state) {
 
 static json_t * parse_host_check(nebstruct_host_check_data * state) {
 	json_t * ret = json_object();
+	host * obj = find_host(state->host_name);
 
 	json_object_set_new(ret, "host_name", json_string(state->host_name));
 	json_object_set_new(ret, "current_attempt", json_integer(state->current_attempt));
 	json_object_set_new(ret, "max_attempts", json_integer(state->max_attempts));
 	json_object_set_new(ret, "state", json_integer(state->state));
+	json_object_set_new(ret, "last_state", json_integer(obj->last_state));
+	json_object_set_new(ret, "last_hard_state", json_integer(obj->last_state));
+	json_object_set_new(ret, "last_check", json_integer(obj->last_check));
+	json_object_set_new(ret, "last_state_change", json_integer(obj->last_state_change));
+
 	if(state->type == NEBTYPE_HOSTCHECK_INITIATE) {
 		json_object_set_new(ret, "type", json_string("host_check_initiate"));
 		json_object_set_new(ret, "command_name", json_string(state->command_name));
 		json_object_set_new(ret, "command_args", json_string(state->command_args));
 		json_object_set_new(ret, "command_line", json_string(state->command_line));
+		json_object_set_new(ret, "has_been_checked", json_integer(obj->has_been_checked));
+		json_object_set_new(ret, "check_interval", json_real(obj->check_interval));
+		json_object_set_new(ret, "retry_interval", json_real(obj->retry_interval));
+		json_object_set_new(ret, "accept_passive_checks", json_integer(obj->accept_passive_host_checks));
 	} else if(state->type == NEBTYPE_HOSTCHECK_PROCESSED) {
 		json_object_set_new(ret, "type", json_string("host_check_processed"));
 		json_object_set_new(ret, "timeout", json_integer(state->timeout));
@@ -91,17 +101,27 @@ static json_t * parse_host_check(nebstruct_host_check_data * state) {
 
 static json_t * parse_service_check(nebstruct_service_check_data * state) {
 	json_t * ret = json_object();
+	service * obj = find_service(state->host_name, state->service_description);
 
 	json_object_set_new(ret, "host_name", json_string(state->host_name));
 	json_object_set_new(ret, "service_description", json_string(state->service_description));
 	json_object_set_new(ret, "current_attempt", json_integer(state->current_attempt));
 	json_object_set_new(ret, "max_attempts", json_integer(state->max_attempts));
 	json_object_set_new(ret, "state", json_integer(state->state));
+	json_object_set_new(ret, "last_state", json_integer(obj->last_state));
+	json_object_set_new(ret, "last_hard_state", json_integer(obj->last_state));
+	json_object_set_new(ret, "last_check", json_integer(obj->last_check));
+	json_object_set_new(ret, "last_state_change", json_integer(obj->last_state_change));
+
 	if(state->type == NEBTYPE_SERVICECHECK_INITIATE) {
 		json_object_set_new(ret, "type", json_string("service_check_initiate"));
 		json_object_set_new(ret, "command_name", json_string(state->command_name));
 		json_object_set_new(ret, "command_args", json_string(state->command_args));
 		json_object_set_new(ret, "command_line", json_string(state->command_line));
+		json_object_set_new(ret, "has_been_checked", json_integer(obj->has_been_checked));
+		json_object_set_new(ret, "check_interval", json_real(obj->check_interval));
+		json_object_set_new(ret, "retry_interval", json_real(obj->retry_interval));
+		json_object_set_new(ret, "accept_passive_checks", json_integer(obj->accept_passive_service_checks));
 	} else if(state->type == NEBTYPE_SERVICECHECK_PROCESSED) {
 		json_object_set_new(ret, "type", json_string("service_check_processed"));
 		json_object_set_new(ret, "start_time", parse_timestamp(&state->start_time));

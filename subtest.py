@@ -4,8 +4,8 @@ import json
 context = zmq.Context()
  
 subscriber = context.socket (zmq.SUB)
-subscriber.connect("tcp://localhost:5555")
-subscriber.setsockopt(zmq.SUBSCRIBE, 'service_check_processed')
+subscriber.connect("tcp://minotaur:5555")
+subscriber.setsockopt(zmq.SUBSCRIBE, 'service_check_initiate')
 maxlat = 0
 
 while True:
