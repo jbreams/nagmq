@@ -1,3 +1,0 @@
-[submodule "cJSON"]
-path = cJSON
-url = git://github.com/jbreams/cJSON.git

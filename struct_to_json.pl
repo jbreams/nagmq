@@ -17,8 +17,11 @@ while(<>) {
 		print "\tcJSON_AddStringToObject(ret, \"type\", \"${curtype}\");\n";
 		push @types, $curtype;
 	}
-	elsif(/^(?:int|double|unsigned long|time_t) ([^;]+);/ && $curtype) {
+	elsif(/^(?:int|unsigned long|time_t) ([^;]+);/ && $curtype) {
 		print "\tcJSON_AddNumberToObject(ret, \"$1\", state->$1);\n";
+	}
+	elsif(/^double ([^;]+);/ && $curtype) {
+		print "\tpayload_new_double(ret, \"$1\", state->$1);\n";
 	}
 	elsif(/^struct timeval ([^;]+);/ && $curtype) {
 		print "\tparse_timestamp(ret, \"$1\", &state->$1);\n";
