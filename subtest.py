@@ -4,7 +4,7 @@ import json
 context = zmq.Context()
  
 subscriber = context.socket (zmq.SUB)
-subscriber.connect("tcp://localhost:5555")
+subscriber.connect("ipc:///tmp/nagmq.sock")
 subscriber.setsockopt(zmq.SUBSCRIBE, '')
 maxlat = 0
 
