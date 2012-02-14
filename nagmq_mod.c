@@ -12,8 +12,7 @@
 #include "naginclude/objects.h"
 #include "naginclude/broker.h"
 #include <zmq.h>
-#include <jansson.h>
-#include <pthread.h>
+#include <cJSON.h>
 
 static void * nagmq_handle = NULL;
 static void * zmq_ctx = NULL;
@@ -31,205 +30,210 @@ int nebmodule_deinit(int flags, int reason) {
 	return 0;
 }
 
-static json_t * parse_timestamp(struct timeval * tv) {
-	json_t * ret = json_object();
-	json_object_set_new(ret, "tv_sec", json_integer(tv->tv_sec));
-	json_object_set_new(ret, "tv_usec", json_integer(tv->tv_usec));
+static void parse_timestamp(cJSON * out, char * key, struct timeval * tv) {
+	cJSON * new_ts = cJSON_CreateObject();
+	cJSON_AddNumberToObject(new_ts, "tv_sec", tv->tv_sec);
+	cJSON_AddNumberToObject(new_ts, "tv_usec", tv->tv_usec);
+	cJSON_AddItemToObject(out, key, new_ts);
+}
+
+static cJSON * parse_program_status(nebstruct_program_status_data * state) {
+	cJSON * ret = cJSON_CreateObject();
+
+	cJSON_AddStringToObject(ret, "type", "program_status");
+	cJSON_AddNumberToObject(ret, "program_start", state->program_start);
+	cJSON_AddNumberToObject(ret, "pid", state->pid);
+	cJSON_AddNumberToObject(ret, "daemon_mode", state->daemon_mode);
+	cJSON_AddNumberToObject(ret, "last_command_check", state->last_command_check);
+	cJSON_AddNumberToObject(ret, "last_log_rotation", state->last_log_rotation);
+	cJSON_AddNumberToObject(ret, "notifications_enabled", state->notifications_enabled);
+	cJSON_AddNumberToObject(ret, "active_service_checks_enabled", state->active_service_checks_enabled);
+	cJSON_AddNumberToObject(ret, "passive_service_checks_enabled", state->passive_service_checks_enabled);
+	cJSON_AddNumberToObject(ret, "active_host_checks_enabled", state->active_host_checks_enabled);
+	cJSON_AddNumberToObject(ret, "passive_host_checks_enabled", state->passive_host_checks_enabled);
+	cJSON_AddNumberToObject(ret, "event_handlers_enabled", state->event_handlers_enabled);
+	cJSON_AddNumberToObject(ret, "flap_detection_enabled", state->flap_detection_enabled);
+	cJSON_AddNumberToObject(ret, "failure_prediction_enabled", state->failure_prediction_enabled);
+	cJSON_AddNumberToObject(ret, "process_performance_data", state->process_performance_data);
+	cJSON_AddNumberToObject(ret, "obsess_over_hosts", state->obsess_over_hosts);
+	cJSON_AddNumberToObject(ret, "obsess_over_services", state->obsess_over_services);
 	return ret;
 }
 
-static json_t * parse_program_status(nebstruct_program_status_data * state) {
-	json_t * ret = json_object();
-
-	json_object_set_new(ret, "type", json_string("program_status"));
-	json_object_set_new(ret, "program_start", json_integer(state->program_start));
-	json_object_set_new(ret, "pid", json_integer(state->pid));
-	json_object_set_new(ret, "daemon_mode", json_integer(state->daemon_mode));
-	json_object_set_new(ret, "last_command_check", json_integer(state->last_command_check));
-	json_object_set_new(ret, "last_log_rotation", json_integer(state->last_log_rotation));
-	json_object_set_new(ret, "notifications_enabled", json_integer(state->notifications_enabled));
-	json_object_set_new(ret, "active_service_checks_enabled", json_integer(state->active_service_checks_enabled));
-	json_object_set_new(ret, "passive_service_checks_enabled", json_integer(state->passive_service_checks_enabled));
-	json_object_set_new(ret, "active_host_checks_enabled", json_integer(state->active_host_checks_enabled));
-	json_object_set_new(ret, "passive_host_checks_enabled", json_integer(state->passive_host_checks_enabled));
-	json_object_set_new(ret, "event_handlers_enabled", json_integer(state->event_handlers_enabled));
-	json_object_set_new(ret, "flap_detection_enabled", json_integer(state->flap_detection_enabled));
-	json_object_set_new(ret, "failure_prediction_enabled", json_integer(state->failure_prediction_enabled));
-	json_object_set_new(ret, "process_performance_data", json_integer(state->process_performance_data));
-	json_object_set_new(ret, "obsess_over_hosts", json_integer(state->obsess_over_hosts));
-	json_object_set_new(ret, "obsess_over_services", json_integer(state->obsess_over_services));
-	return ret;
-}
-
-static json_t * parse_host_check(nebstruct_host_check_data * state) {
-	json_t * ret = json_object();
+static cJSON * parse_host_check(nebstruct_host_check_data * state) {
+	cJSON * ret = cJSON_CreateObject();
 	host * obj = find_host(state->host_name);
 
-	json_object_set_new(ret, "host_name", json_string(state->host_name));
-	json_object_set_new(ret, "current_attempt", json_integer(state->current_attempt));
-	json_object_set_new(ret, "max_attempts", json_integer(state->max_attempts));
-	json_object_set_new(ret, "state", json_integer(state->state));
-	json_object_set_new(ret, "last_state", json_integer(obj->last_state));
-	json_object_set_new(ret, "last_hard_state", json_integer(obj->last_state));
-	json_object_set_new(ret, "last_check", json_integer(obj->last_check));
-	json_object_set_new(ret, "last_state_change", json_integer(obj->last_state_change));
+	cJSON_AddStringToObject(ret, "host_name", state->host_name);
+	cJSON_AddNumberToObject(ret, "current_attempt", state->current_attempt);
+	cJSON_AddNumberToObject(ret, "max_attempts", state->max_attempts);
+	cJSON_AddNumberToObject(ret, "state", state->state);
+	cJSON_AddNumberToObject(ret, "last_state", obj->last_state);
+	cJSON_AddNumberToObject(ret, "last_hard_state", obj->last_hard_state);
+	cJSON_AddNumberToObject(ret, "last_check", obj->last_check);
+	cJSON_AddNumberToObject(ret, "last_state_change", obj->last_state_change);
 
 	if(state->type == NEBTYPE_HOSTCHECK_INITIATE) {
-		json_object_set_new(ret, "type", json_string("host_check_initiate"));
-		json_object_set_new(ret, "command_name", json_string(state->command_name));
-		json_object_set_new(ret, "command_args", json_string(state->command_args));
-		json_object_set_new(ret, "command_line", json_string(state->command_line));
-		json_object_set_new(ret, "has_been_checked", json_integer(obj->has_been_checked));
-		json_object_set_new(ret, "check_interval", json_real(obj->check_interval));
-		json_object_set_new(ret, "retry_interval", json_real(obj->retry_interval));
-		json_object_set_new(ret, "accept_passive_checks", json_integer(obj->accept_passive_host_checks));
+		cJSON_AddStringToObject(ret, "type", "host_check_initiate");
+		cJSON_AddStringToObject(ret, "command_name", state->command_name);
+		cJSON_AddStringToObject(ret, "command_args", state->command_args);
+		cJSON_AddStringToObject(ret, "command_line", state->command_line);
+		cJSON_AddNumberToObject(ret, "has_been_checked", obj->has_been_checked);
+		cJSON_AddNumberToObject(ret, "check_interval", obj->check_interval);
+		cJSON_AddNumberToObject(ret, "retry_interval", obj->retry_interval);
+		cJSON_AddNumberToObject(ret, "accept_passive_checks", obj->accept_passive_host_checks);
 	} else if(state->type == NEBTYPE_HOSTCHECK_PROCESSED) {
-		json_object_set_new(ret, "type", json_string("host_check_processed"));
-		json_object_set_new(ret, "timeout", json_integer(state->timeout));
-		json_object_set_new(ret, "start_time", parse_timestamp(&state->start_time));
-		json_object_set_new(ret, "end_time", parse_timestamp(&state->end_time));
-		json_object_set_new(ret, "early_timeout", json_integer(state->early_timeout));
-		json_object_set_new(ret, "execution_time", json_real(state->execution_time));
-		json_object_set_new(ret, "latency", json_real(state->latency));
-		json_object_set_new(ret, "return_code", json_integer(state->return_code));
-		json_object_set_new(ret, "output", json_string(state->output));
-		json_object_set_new(ret, "long_output", json_string(state->long_output));
-		json_object_set_new(ret, "perf_data", json_string(state->perf_data));
+		cJSON_AddStringToObject(ret, "type", "host_check_processed");
+		cJSON_AddNumberToObject(ret, "timeout", state->timeout);
+		parse_timestamp(ret, "start_time", &state->start_time);
+		parse_timestamp(ret, "start_time", &state->end_time);
+		cJSON_AddNumberToObject(ret, "early_timeout", state->early_timeout);
+		cJSON_AddNumberToObject(ret, "execution_time", state->execution_time);
+		cJSON_AddNumberToObject(ret, "latency", state->latency);
+		cJSON_AddNumberToObject(ret, "return_code", state->return_code);
+		cJSON_AddStringToObject(ret, "output", state->output);
+		cJSON_AddStringToObject(ret, "long_output", state->long_output);
+		cJSON_AddStringToObject(ret, "perf_data", state->perf_data);
 	}
 	return ret;
 }
 
-static json_t * parse_service_check(nebstruct_service_check_data * state) {
-	json_t * ret = json_object();
+static cJSON * parse_service_check(nebstruct_service_check_data * state) {
+	cJSON * ret = cJSON_CreateObject();
 	service * obj = find_service(state->host_name, state->service_description);
 
-	json_object_set_new(ret, "host_name", json_string(state->host_name));
-	json_object_set_new(ret, "service_description", json_string(state->service_description));
-	json_object_set_new(ret, "current_attempt", json_integer(state->current_attempt));
-	json_object_set_new(ret, "max_attempts", json_integer(state->max_attempts));
-	json_object_set_new(ret, "state", json_integer(state->state));
-	json_object_set_new(ret, "last_state", json_integer(obj->last_state));
-	json_object_set_new(ret, "last_hard_state", json_integer(obj->last_state));
-	json_object_set_new(ret, "last_check", json_integer(obj->last_check));
-	json_object_set_new(ret, "last_state_change", json_integer(obj->last_state_change));
+	cJSON_AddStringToObject(ret, "host_name", state->host_name);
+	cJSON_AddStringToObject(ret, "service_description", state->service_description);
+	cJSON_AddNumberToObject(ret, "current_attempt", state->current_attempt);
+	cJSON_AddNumberToObject(ret, "max_attempts", state->max_attempts);
+	cJSON_AddNumberToObject(ret, "state", state->state);
+	cJSON_AddNumberToObject(ret, "last_state", obj->last_state);
+	cJSON_AddNumberToObject(ret, "last_hard_state", obj->last_hard_state);
+	cJSON_AddNumberToObject(ret, "last_check", obj->last_check);
+	cJSON_AddNumberToObject(ret, "last_state_change", obj->last_state_change);
 
 	if(state->type == NEBTYPE_SERVICECHECK_INITIATE) {
-		json_object_set_new(ret, "type", json_string("service_check_initiate"));
-		json_object_set_new(ret, "command_name", json_string(state->command_name));
-		json_object_set_new(ret, "command_args", json_string(state->command_args));
-		json_object_set_new(ret, "command_line", json_string(state->command_line));
-		json_object_set_new(ret, "has_been_checked", json_integer(obj->has_been_checked));
-		json_object_set_new(ret, "check_interval", json_real(obj->check_interval));
-		json_object_set_new(ret, "retry_interval", json_real(obj->retry_interval));
-		json_object_set_new(ret, "accept_passive_checks", json_integer(obj->accept_passive_service_checks));
+		cJSON_AddStringToObject(ret, "type", "service_check_initiate");
+		cJSON_AddStringToObject(ret, "command_name", state->command_name);
+		cJSON_AddStringToObject(ret, "command_args", state->command_args);
+		cJSON_AddStringToObject(ret, "command_line", state->command_line);
+		cJSON_AddNumberToObject(ret, "has_been_checked", obj->has_been_checked);
+		cJSON_AddNumberToObject(ret, "check_interval", obj->check_interval);
+		cJSON_AddNumberToObject(ret, "retry_interval", obj->retry_interval);
+		cJSON_AddNumberToObject(ret, "accept_passive_checks", obj->accept_passive_service_checks);
 	} else if(state->type == NEBTYPE_SERVICECHECK_PROCESSED) {
-		json_object_set_new(ret, "type", json_string("service_check_processed"));
-		json_object_set_new(ret, "start_time", parse_timestamp(&state->start_time));
-		json_object_set_new(ret, "end_time", parse_timestamp(&state->end_time));
-		json_object_set_new(ret, "execution_time", json_real(state->execution_time));
-		json_object_set_new(ret, "latency", json_real(state->latency));
-		json_object_set_new(ret, "return_code", json_integer(state->return_code));
-		json_object_set_new(ret, "output", json_string(state->output));
-		json_object_set_new(ret, "long_output", json_string(state->long_output));
-		json_object_set_new(ret, "perf_data", json_string(state->perf_data));
-		json_object_set_new(ret, "timeout", json_integer(state->timeout));
-		json_object_set_new(ret, "early_timeout", json_integer(state->early_timeout));
+		cJSON_AddStringToObject(ret, "type", "service_check_processed");
+		parse_timestamp(ret, "start_time", &state->start_time);
+		parse_timestamp(ret, "end_time", &state->end_time);
+		cJSON_AddNumberToObject(ret, "early_timeout", state->early_timeout);
+		cJSON_AddNumberToObject(ret, "execution_time", state->execution_time);
+		cJSON_AddNumberToObject(ret, "latency", state->latency);
+		cJSON_AddNumberToObject(ret, "return_code", state->return_code);
+		cJSON_AddStringToObject(ret, "output", state->output);
+		cJSON_AddStringToObject(ret, "long_output", state->long_output);
+		cJSON_AddStringToObject(ret, "perf_data", state->perf_data);
+		cJSON_AddNumberToObject(ret, "timeout", state->timeout);
 	}
 	return ret;
 }
 
-static json_t * parse_acknowledgement(nebstruct_acknowledgement_data * state) {
-	json_t * ret = json_object();
+static cJSON * parse_acknowledgement(nebstruct_acknowledgement_data * state) {
+	cJSON * ret = cJSON_CreateObject();
 
-	json_object_set_new(ret, "type", json_string("acknowledgement"));
-	json_object_set_new(ret, "host_name", json_string(state->host_name));
-	json_object_set_new(ret, "service_description", json_string(state->service_description));
-	json_object_set_new(ret, "state", json_integer(state->state));
-	json_object_set_new(ret, "author_name", json_string(state->author_name));
-	json_object_set_new(ret, "comment_data", json_string(state->comment_data));
-	json_object_set_new(ret, "is_sticky", json_integer(state->is_sticky));
-	json_object_set_new(ret, "persistent_comment", json_integer(state->persistent_comment));
-	json_object_set_new(ret, "notify_contacts", json_integer(state->notify_contacts));
+	cJSON_AddStringToObject(ret, "type", "acknowledgement");
+	cJSON_AddStringToObject(ret, "host_name", state->host_name);
+	cJSON_AddStringToObject(ret, "service_description", state->service_description);
+	cJSON_AddNumberToObject(ret, "state", state->state);
+	cJSON_AddStringToObject(ret, "author_name", state->author_name);
+	cJSON_AddStringToObject(ret, "comment_data", state->comment_data);
+	cJSON_AddNumberToObject(ret, "is_sticky", state->is_sticky);
+	cJSON_AddNumberToObject(ret, "persistent_comment", state->persistent_comment);
+	cJSON_AddNumberToObject(ret, "notify_contacts", state->notify_contacts);
 	return ret;
 }
 
-static json_t * parse_statechange(nebstruct_statechange_data * state) {
-	json_t * ret = json_object();
+static cJSON * parse_statechange(nebstruct_statechange_data * state) {
+	cJSON * ret = cJSON_CreateObject();
 
-	json_object_set_new(ret, "type", json_string("statechange"));
-	json_object_set_new(ret, "host_name", json_string(state->host_name));
-	json_object_set_new(ret, "service_description", json_string(state->service_description));
-	json_object_set_new(ret, "state", json_integer(state->state));
-	json_object_set_new(ret, "current_attempt", json_integer(state->current_attempt));
-	json_object_set_new(ret, "max_attempts", json_integer(state->max_attempts));
-	json_object_set_new(ret, "output", json_string(state->output));
+	cJSON_AddStringToObject(ret, "type", "statechange");
+	cJSON_AddStringToObject(ret, "host_name", state->host_name);
+	cJSON_AddStringToObject(ret, "service_description", state->service_description);
+	cJSON_AddNumberToObject(ret, "state", state->state);
+	cJSON_AddNumberToObject(ret, "current_attempt", state->current_attempt);
+	cJSON_AddNumberToObject(ret, "max_attempts", state->max_attempts);
+	cJSON_AddStringToObject(ret, "output", state->output);
 	return ret;
 }
 
-static json_t * parse_comment(nebstruct_comment_data * state) {
-	json_t * ret = json_object();
+static cJSON * parse_comment(nebstruct_comment_data * state) {
+	cJSON * ret = cJSON_CreateObject();
 
-	json_object_set_new(ret, "type", json_string("comment"));
-	json_object_set_new(ret, "host_name", json_string(state->host_name));
-	json_object_set_new(ret, "service_description", json_string(state->service_description));
-	json_object_set_new(ret, "entry_time", json_integer(state->entry_time));
-	json_object_set_new(ret, "author_name", json_string(state->author_name));
-	json_object_set_new(ret, "comment_data", json_string(state->comment_data));
-	json_object_set_new(ret, "persistent", json_integer(state->persistent));
-	json_object_set_new(ret, "source", json_integer(state->source));
-	json_object_set_new(ret, "expires", json_integer(state->expires));
-	json_object_set_new(ret, "expire_time", json_integer(state->expire_time));
-	json_object_set_new(ret, "comment_id", json_integer(state->comment_id));
-
-	switch(state->type) {
-		case NEBTYPE_COMMENT_ADD:
-			json_object_set_new(ret, "operation",
-				json_string("add"));
-			break;
-		case NEBTYPE_COMMENT_DELETE:
-			json_object_set_new(ret, "operation",
-				json_string("delete"));
-			break;
+	if(state->type == NEBTYPE_COMMENT_ADD) {
+		cJSON_AddStringToObject(ret, "type", "comment_add");
+		cJSON_AddStringToObject(ret, "host_name", state->host_name);
+		cJSON_AddStringToObject(ret, "service_description", state->service_description);
+		cJSON_AddNumberToObject(ret, "entry_time", state->entry_time);
+		cJSON_AddStringToObject(ret, "author_name", state->author_name);
+		cJSON_AddStringToObject(ret, "comment_data", state->comment_data);
+		cJSON_AddNumberToObject(ret, "persistent", state->persistent);
+		cJSON_AddNumberToObject(ret, "source", state->source);
+		cJSON_AddNumberToObject(ret, "expires", state->expires);
+		cJSON_AddNumberToObject(ret, "expire_time", state->expire_time);
+	} else if(state->type == NEBTYPE_COMMENT_DELETE) {
+		cJSON_AddStringToObject(ret, "type", "comment_delete");
 	}
 
+	cJSON_AddNumberToObject(ret, "comment_id", state->comment_id);
 	return ret;
 }
 
-static json_t * parse_downtime(nebstruct_downtime_data * state) {
-	json_t * ret = json_object();
-
-	json_object_set_new(ret, "type", json_string("downtime"));
-	json_object_set_new(ret, "host_name", json_string(state->host_name));
-	json_object_set_new(ret, "service_description", json_string(state->service_description));
-	json_object_set_new(ret, "entry_time", json_integer(state->entry_time));
-	json_object_set_new(ret, "author_name", json_string(state->author_name));
-	json_object_set_new(ret, "comment_data", json_string(state->comment_data));
-	json_object_set_new(ret, "start_time", json_integer(state->start_time));
-	json_object_set_new(ret, "end_time", json_integer(state->end_time));
-	json_object_set_new(ret, "fixed", json_integer(state->fixed));
-	json_object_set_new(ret, "duration", json_integer(state->duration));
-	json_object_set_new(ret, "triggered_by", json_integer(state->triggered_by));
-	json_object_set_new(ret, "downtime_id", json_integer(state->downtime_id));
+static cJSON * parse_downtime(nebstruct_downtime_data * state) {
+	cJSON * ret = cJSON_CreateObject();
 
 	switch(state->type) {
 		case NEBTYPE_DOWNTIME_ADD:
-			json_object_set_new(ret, "operation",
-				json_string("add"));
+			cJSON_AddStringToObject(ret, "type", "downtime_add");
 			break;
 		case NEBTYPE_DOWNTIME_DELETE:
-			json_object_set_new(ret, "operation",
-				json_string("delete"));
-			break;
+			cJSON_AddStringToObject(ret, "type", "downtime_delete");
+			cJSON_AddNumberToObject(ret, "downtime_id", state->downtime_id);
+			return ret;
 		case NEBTYPE_DOWNTIME_START:
-			json_object_set_new(ret, "operation",
-				json_string("start"));
+			cJSON_AddStringToObject(ret, "type", "downtime_start");
 			break;
 		case NEBTYPE_DOWNTIME_STOP:
-			json_object_set_new(ret, "operation",
-				json_string("stop"));
+			cJSON_AddStringToObject(ret, "type", "downtime_stop");
 			break;
 	}
 
+	cJSON_AddStringToObject(ret, "host_name", state->host_name);
+	cJSON_AddStringToObject(ret, "service_description", state->service_description);
+	cJSON_AddNumberToObject(ret, "entry_time", state->entry_time);
+	cJSON_AddStringToObject(ret, "author_name", state->author_name);
+	cJSON_AddStringToObject(ret, "comment_data", state->comment_data);
+	cJSON_AddNumberToObject(ret, "start_time", state->start_time);
+	cJSON_AddNumberToObject(ret, "end_time", state->end_time);
+	cJSON_AddNumberToObject(ret, "fixed", state->fixed);
+	cJSON_AddNumberToObject(ret, "duration", state->duration);
+	cJSON_AddNumberToObject(ret, "triggered_by", state->triggered_by);
+	cJSON_AddNumberToObject(ret, "downtime_id", state->downtime_id);
+	return ret;
+}
+
+static cJSON * parse_flapping(nebstruct_flapping_data * state) {
+	cJSON * ret = cJSON_CreateObject();
+
+	if(state->type == NEBTYPE_FLAPPING_START)
+		cJSON_AddStringToObject(ret, "type", "flapping_start");
+	else
+		cJSON_AddStringToObject(ret, "type", "flapping_stop");
+		
+	cJSON_AddStringToObject(ret, "host_name", state->host_name);
+	cJSON_AddStringToObject(ret, "service_description", state->service_description);
+	cJSON_AddNumberToObject(ret, "percent_change", state->percent_change);
+	cJSON_AddNumberToObject(ret, "high_threshold", state->high_threshold);
+	cJSON_AddNumberToObject(ret, "low_threshold", state->low_threshold);
+	cJSON_AddNumberToObject(ret, "comment_id", state->comment_id);
 	return ret;
 }
 
@@ -237,35 +241,35 @@ void free_cb(void * ptr, void * hint) {
 	free(ptr);
 }
 
-static void process_payload(json_t * payload) {
+static void process_payload(cJSON * payload) {
 	zmq_msg_t type, dump;
 	char * payloadstr;
 	int rc;
 
-	json_t * jtype = json_object_get(payload, "type");
-	size_t slen = strlen(json_string_value(jtype));
+	cJSON * jtype = cJSON_GetObjectItem(payload, "type");
+	size_t slen = strlen(jtype->valuestring);
 	zmq_msg_init_size(&type, slen);
-	memcpy(zmq_msg_data(&type), json_string_value(jtype), slen);
+	memcpy(zmq_msg_data(&type), jtype->valuestring, slen);
 	rc = (zmq_send(pubext, &type, ZMQ_SNDMORE|ZMQ_NOBLOCK) == 0) ? 0 : errno;
 	zmq_msg_close(&type);
 	if(rc != 0) {
 	//	syslog(LOG_ERR, "Error sending type header: %s",
 	//		zmq_strerror(rc));
-		json_decref(payload);
+		cJSON_Delete(payload);
 		return;
 	}
 
-	payloadstr = json_dumps(payload, JSON_COMPACT);
+	payloadstr = cJSON_PrintUnformatted(payload);
 	zmq_msg_init_data(&dump, payloadstr, strlen(payloadstr), free_cb, NULL);
 	if((rc = zmq_send(pubext, &dump, ZMQ_NOBLOCK)) != 0)
 		syslog(LOG_ERR, "Error sending payload: %s",
 			zmq_strerror(errno));
 	zmq_msg_close(&dump);
-	json_decref(payload);
+	cJSON_Delete(payload);	
 }
 
 int handle_nagdata(int which, void * obj) {
-	json_t * payload;
+	cJSON * payload = NULL;	
 	nebstruct_process_data * raw = obj;
 	switch(which) {
 	case NEBCALLBACK_HOST_CHECK_DATA:
@@ -309,17 +313,19 @@ int handle_nagdata(int which, void * obj) {
 	case NEBCALLBACK_PROGRAM_STATUS_DATA:
 		payload = parse_program_status(obj);
 		break;
+	case NEBCALLBACK_FLAPPING_DATA:
+		payload = parse_flapping(obj);
+		break;
 	}
 
-	json_object_set_new(payload, "timestamp",
-		parse_timestamp(&raw->timestamp));
+	parse_timestamp(payload, "timestamp", &raw->timestamp);
 	process_payload(payload);
 	return 0;
 }
 
 int handle_startup(int which, void * obj) {
 	struct nebstruct_process_struct *ps = (struct nebstruct_process_struct *)obj;
-	json_t * payload;
+	cJSON * payload;
 	if (ps->type == NEBTYPE_PROCESS_EVENTLOOPSTART) {
 		int numthreads = 1, rc;
 		char * bindto = NULL;
@@ -362,14 +368,14 @@ int handle_startup(int which, void * obj) {
 			return -1;
 		}
 
-		payload = json_object();
-		json_object_set_new(payload, "type", json_string("eventloopstart"));
-		json_object_set_new(payload, "timestamp", parse_timestamp(&ps->timestamp));
+		payload = cJSON_CreateObject();
+		cJSON_AddStringToObject(payload, "type", "eventloopstart");
+		parse_timestamp(payload, "timestamp", &ps->timestamp);
 		process_payload(payload);
 	} else if(ps->type == NEBTYPE_PROCESS_EVENTLOOPEND) {
-		payload = json_object();
-		json_object_set_new(payload, "type", json_string("eventloopend"));
-		json_object_set_new(payload, "timestamp", parse_timestamp(&ps->timestamp));
+		payload = cJSON_CreateObject();
+		cJSON_AddStringToObject(payload, "type", "eventloopend");
+		parse_timestamp(payload, "timestamp", &ps->timestamp);
 		process_payload(payload);
 		zmq_close(pubext);
 		zmq_term(zmq_ctx);

@@ -12,32 +12,21 @@ while(<>) {
 		$curtype = $2;
 		s/_//g;
 #		print "Found struct $1\n";
-		print "static json_t * parse_$curtype(nebstruct_${curtype}_data * state) {\n";
-		print "\tjson_t * ret = json_object();\n\n";
-		print "\tjson_object_set_new(ret, \"type\", json_string(\"${curtype}\"));\n";
+		print "static cJSON * parse_$curtype(nebstruct_${curtype}_data * state) {\n";
+		print "\tcJSON * ret = cJSON_CreateObject();\n\n";
+		print "\tcJSON_AddStringToObject(ret, \"type\", \"${curtype}\");\n";
 		push @types, $curtype;
 	}
-	elsif(/^int ([^;]+);/ && $curtype) {
-		print "\tjson_object_set_new(ret, \"$1\", json_integer(state->$1));\n";
+	elsif(/^(?:int|double|unsigned long|time_t) ([^;]+);/ && $curtype) {
+		print "\tcJSON_AddNumberToObject(ret, \"$1\", state->$1);\n";
 	}
 	elsif(/^struct timeval ([^;]+);/ && $curtype) {
-		print "\tjson_object_set_new(ret, \"$1\", parse_timestamp(&state->$1));\n";
+		print "\tparse_timestamp(ret, \"$1\", &state->$1);\n";
 		#print "Timestamp $1\n";
 	}
 	elsif(/^char \*([^;]+);/ && $curtype) {
-		print "\tjson_object_set_new(ret, \"$1\", json_string(state->$1));\n";
+		print "\tcJSON_AddStringToObject(ret, \"$1\", state->$1);\n";
 #		print "String $1\n";
-	}
-	elsif(/^double ([^;]+);/ && $curtype) {
-		print "\tjson_object_set_new(ret, \"$1\", json_real(state->$1));\n";
-#		print "Double $1\n";
-	}
-	elsif(/^unsigned long ([^;]+);/ && $curtype) {
-		print "\tjson_object_set_new(ret, \"$1\", json_integer(state->$1));\n";
-	}
-	elsif(/^time_t ([^;]+);/ && $curtype) {
-		print "\tjson_object_set_new(ret, \"$1\", json_integer(state->$1));\n";
-	#	print "Time_t $1\n"
 	}
 	elsif(/^}/) {
 		$curtype && print "\treturn ret;\n}\n\n";
