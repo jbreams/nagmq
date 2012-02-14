@@ -246,7 +246,6 @@ static void process_payload(struct payload * payload) {
 	//	syslog(LOG_ERR, "Error sending type header: %s",
 	//		zmq_strerror(rc));
 		free(payload->json_buf);
-		free(payload->type);
 		free(payload);
 		return;
 	}
