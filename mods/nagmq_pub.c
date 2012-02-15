@@ -137,6 +137,7 @@ static struct payload * parse_acknowledgement(nebstruct_acknowledgement_data * s
 	payload_new_string(ret, "host_name", state->host_name);
 	payload_new_string(ret, "service_description", state->service_description);
 	payload_new_integer(ret, "state", state->state);
+	payload_new_integer(ret, "acknowledgement_type", state->acknowledgement_type);
 	payload_new_string(ret, "author_name", state->author_name);
 	payload_new_string(ret, "comment_data", state->comment_data);
 	payload_new_integer(ret, "is_sticky", state->is_sticky);
@@ -316,50 +317,17 @@ int handle_nagdata(int which, void * obj) {
 	return 0;
 }
 
+int setup_zmq(char * args, int type, 
+	void ** ctxo, void ** socko);
+
 int handle_startup(int which, void * obj) {
 	struct nebstruct_process_struct *ps = (struct nebstruct_process_struct *)obj;
 	struct payload * payload;
 	if (ps->type == NEBTYPE_PROCESS_EVENTLOOPSTART) {
-		int numthreads = 1, rc;
-		char * bindto = NULL;
-
-		char * lock = (char*)args, *name, *val;
-		while(*lock != '\0') {
-			name = lock;
-			while(*lock != ',' && *lock != '\0') {
-				if(*lock == '=') {
-					*lock = '\0';
-					val = lock + 1;
-				}
-				lock++;
-			}
-			*lock = '\0';
-			if(strcmp(name, "bind") == 0)
-				bindto = val;
-			else if(strcmp(name, "numthreads") == 0)
-				numthreads = atoi(val);
-		}
-
-		zmq_ctx = zmq_init(numthreads);
-		if(zmq_ctx == NULL) {
-			syslog(LOG_ERR, "Error intializing ZMQ context: %s",
-				zmq_strerror(errno));
+		if(setup_zmq(args, ZMQ_PUB, &zmq_ctx, &pubext) < 0) {
+			nebmodule_deinit(0, 0);
 			return -1;
-		}
-
-		pubext = zmq_socket(zmq_ctx, ZMQ_PUB);
-		if(pubext == NULL) {
-			syslog(LOG_ERR, "Error creating ZMQ socket: %s",
-				zmq_strerror(errno));
-			return -1;
-		}
-
-		rc = zmq_bind(pubext, bindto);
-		if(rc != 0) {
-			syslog(LOG_ERR, "Error binding to %s: %s",
-				bindto, zmq_strerror(errno));
-			return -1;
-		}
+		};
 
 		payload = payload_new();
 		payload_new_string(payload, "type", "eventloopstart");
@@ -379,7 +347,7 @@ int handle_startup(int which, void * obj) {
 }
 
 int nebmodule_init(int flags, char * localargs, nebmodule * handle) {
-	neb_set_module_info(handle, NEBMODULE_MODINFO_TITLE, "nagmq sink");
+	neb_set_module_info(handle, NEBMODULE_MODINFO_TITLE, "nagmq publisher");
 	neb_set_module_info(handle, NEBMODULE_MODINFO_AUTHOR, "Jonathan Reams");
 	neb_set_module_info(handle, NEBMODULE_MODINFO_VERSION, "0.8");
 	neb_set_module_info(handle, NEBMODULE_MODINFO_LICENSE, "Apache v2");
