@@ -79,7 +79,7 @@ static struct payload * parse_host_check(nebstruct_host_check_data * state) {
 		payload_new_string(ret, "type", "host_check_processed");
 		payload_new_integer(ret, "timeout", state->timeout);
 		payload_new_timestamp(ret, "start_time", &state->start_time);
-		payload_new_timestamp(ret, "start_time", &state->end_time);
+		payload_new_timestamp(ret, "end_time", &state->end_time);
 		payload_new_integer(ret, "early_timeout", state->early_timeout);
 		payload_new_double(ret, "execution_time", state->execution_time);
 		payload_new_double(ret, "latency", state->latency);
