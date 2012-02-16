@@ -39,7 +39,7 @@ void payload_new_string(struct payload * po, char * key, char * val) {
 	}
 
 	size_t len = 0;
-	char * ptr = val, *out = po->json_buf + po->bufused;
+	char * ptr = val, *out;
 	char * save;
 	unsigned char token;
 	while((token=*ptr) && ++len) {
@@ -53,7 +53,8 @@ void payload_new_string(struct payload * po, char * key, char * val) {
 	adjust_payload_len(po, len + sizeof("\"\", "));
 	ptr = val;
 	po->bufused += sprintf(po->json_buf + po->bufused, "\"");
-	save = po->json_buf + po->bufused - 1;
+	out = po->json_buf + po->bufused;
+	save = out;
 	while(*ptr != '\0') {
 		if ((unsigned char)*ptr>31 && *ptr!='\"' && *ptr!='\\')
 			*(out++)=*ptr++;
@@ -94,7 +95,7 @@ void payload_new_double(struct payload * po, char * key, double val) {
 	payload_add_key(po, key);
 	adjust_payload_len(po, DBL_MAX_10_EXP + sizeof(", "));
 	po->bufused += snprintf(po->json_buf + po->bufused,
-		DBL_MAX_10_EXP, "%f", val);
+		DBL_MAX_10_EXP, "%f", val) - 1;
 	po->bufused += sprintf(po->json_buf + po->bufused,
 		", ");
 }
@@ -107,13 +108,12 @@ void payload_new_timestamp(struct payload * po,
 	payload_new_integer(po, "tv_sec", tv->tv_sec);
 	payload_new_integer(po, "tv_usec", tv->tv_usec);
 	po->bufused -= 2;
-	po->bufused += sprintf(po->json_buf + (po->bufused - 2),
+	po->bufused += sprintf(po->json_buf + (po->bufused),
 		" }, ");
 } 
 
 void payload_finalize(struct payload * po) {
-	po->bufused -= 2;
-	sprintf(po->json_buf + (po->bufused - 2), " }");
+	sprintf(po->json_buf + po->bufused - 2, " }");
 }
 
 
