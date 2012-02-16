@@ -36,13 +36,15 @@ int setup_zmq(char * args, int type,
 	void ** ctxo, void ** socko);
 
 static void process_status(json_t * payload) {
-	char * host_name = (char*)json_string_value(
-		json_object_get(payload, "host_name"));
-	char * service_description = (char*)json_string_value(
-		json_object_get(payload, "service_description"));
-	if(!host_name ||
-		!json_is_integer(json_object_get(payload, "return_code")) ||
-		!json_is_string(json_object_get(payload, "output"))) {
+	char * host_name, *service_description = NULL, *output;
+	int retcode;
+	time_t timestamp;
+
+	if(json_unpack(payload, "{s:s s:s s?:s s:i s:{s:i}}",
+		"host_name", &host_name, "output", &output,
+		"service_description", &service_description,
+		"return_code", &return_code, "end_time", "tv_sec",
+		&timestamp) != 0) {
 		json_decref(payload);
 		return;
 	}
@@ -56,23 +58,6 @@ static void process_status(json_t * payload) {
 		return;
 	}
 
-	char * output = (char*)json_string_value(
-		json_object_get(payload, "output"));
-	if(output == NULL) {
-		json_decref(payload);
-		return;
-	}
-	int retcode = json_integer_value(
-		json_object_get(payload, "return_code"));
-	
-	json_t * endtimetvsec = (json_object_get(
-		json_object_get(payload, "end_time"), "tv_sec"));
-	if(!endtimetvsec || !json_is_integer(endtimetvsec)) {
-		json_decref(payload);
-		return;
-	}
-
-	time_t timestamp = json_integer_value(endtimetvsec);
 	if(service_target)
 		process_passive_service_check(timestamp, host_name,
 			service_description, retcode, output);
@@ -84,35 +69,26 @@ static void process_status(json_t * payload) {
 }
 
 static void process_acknowledgement(json_t * payload) {
+	char *host_name, *service_description = NULL,
+		*author_name, *comment_data;
+	int persistent_comment = 0, notify_contacts = 0,
+		acknowledgement_type = 0;
 	host * host_target;
 	service * service_target;
 
-	char * service_description = (char*)json_string_value(
-		json_object_get(payload, "service_description"));
-	char * host_name = (char*)json_string_value(
-		json_object_get(payload, "host_name"));
-
-	if(host_name)
-		host_target = find_host(host_name);
-	if(host_target && service_description)
-		service_target = find_service(host_name, service_description);
-
-	if(!json_is_string(json_object_get(payload, "author_name"))||
-		!json_is_string(json_object_get(payload, "comment_data"))||
-		!json_is_integer(json_object_get(payload, "acknowledgement_type"))) {
+	if(json_unpack(payload, "{s:s s?:s s:s s:s s?:i s?:b s?:b s?:b}",
+		"host_name", &host_name, "service_description", &service_description,
+		"author_name", &author_name, "comment_data", &comment_data,
+		"acknowledgement_type", &acknowledgement_type, "notify_contacts",
+		&notify_contacts, "persistent_comment", &persistent_comment) != 0) {
 		json_decref(payload);
 		return;
 	}
-	char * author = (char*)json_string_value(
-		json_object_get(payload, "author_name"));
-	char * ackdata = (char*)json_string_value(
-		json_object_get(payload, "comment_data"));
-	int persistent = json_is_true(
-		json_object_get(payload, "persistent_comment"));
-	int notify = json_is_true(
-		json_object_get(payload, "notify_comments"));
-	int type = json_integer_value(
-		json_object_get(payload, "acknowledgement_type"));
+
+	host_target = find_host(host_name);
+	if(service_description)
+		service_target = find_service(host_name, service_description);
+
 	if(service_target)
 		acknowledge_service_problem(service_target, author, ackdata,
 			type, notify, persistent);
@@ -125,16 +101,14 @@ static void process_acknowledgement(json_t * payload) {
 static void process_cmd(json_t * payload) {
 	host * host_target;
 	service * service_target;
-	char * cmd_name = (char*)json_string_value(
-		json_object_get(payload, "command_name"));
-	if(!cmd_name) {
+	char * host_name, *service_Description = NULL, *command_name;
+
+	if(json_unpack(payload, "{s:s s:?s s:s}",
+		"host_name", &host_name, "service_description", &service_description,
+		"command_name", &command_name) != 0) {
 		json_decref(payload);
 		return;
 	}
-	char * service_description = (char*)json_string_value(
-		json_object_get(payload, "service_description"));
-	char * host_name = (char*)json_string_value(
-		json_object_get(payload, "host_name"));
 
 	if(host_name)
 		host_target = find_host(host_name);
@@ -193,49 +167,46 @@ static void process_cmd(json_t * payload) {
 		disable_passive_host_checks(host_target);
 	else if((strcmp(cmd_name, "schedule_host_check") == 0 && host_target) ||
 		(strcmp(cmd_name, "schedule_service_check") == 0&& service_target)) {
-		json_t * schedatobj = json_object_get(payload, "next_check");
-		if(schedatobj == NULL || !json_is_integer(schedatobj)) {
+		time_t next_check;
+		int force_execution = 0, freshness_check = 0, orphan_check = 0;
+		if(json_unpack("{ s:i s?:b s?:b s:?b }",
+			"next_check", &next_check, "force_execution", &force_execution,
+			"freshness_check", &freshness_check, "orphan_check",
+			&orphan_check) != 0) {
 			json_decref(payload);
 			return;
 		}
-		time_t schedat = json_integer_value(schedatobj);
 		int flags = CHECK_OPTION_NONE;
-		if(json_is_true(json_object_get(payload, "force_execution")))
+		if(force_execution)
 			flags |= CHECK_OPTION_FORCE_EXECUTION;
-		if(json_is_true(json_object_get(payload, "freshness_check")))
+		if(freshness_check)
 			flags |= CHECK_OPTION_FRESHNESS_CHECK;
-		if(json_is_true(json_object_get(payload, "orphan_check")))
+		if(orphan_check)
 			flags |= CHECK_OPTION_ORPHAN_CHECK;
 		if(service_target)
-			schedule_service_check(service_target, schedat, flags);
+			schedule_service_check(service_target, next_check, flags);
 		else
-			schedule_host_check(host_target, schedat, flags);
+			schedule_host_check(host_target, next_check, flags);
 	}
-	else if(strcmp(cmd_name, "enable_and_propagate_notifications") == 0 && host_target) {
-		int affect_top_hosts = json_is_true(
-			json_object_get(payload, "affect_top_host"));
-		int affect_hosts = json_is_true(
-			json_object_get(payload, "affect_hosts"));
-		int affect_services = json_is_true(
-			json_object_get(payload, "affect_services"));
-		int level = 0;
-		if(json_is_integer(json_object_get(payload, "level")))
-			level = json_integer_value(json_object_get(payload, "level"));
-		enable_and_propagate_notifications(host_target, level,
-			affect_top_hosts, affect_hosts, affect_services);
-	}
-	else if(strcmp(cmd_name, "disable_and_propagate_notifications") == 0 && host_target) {
-		int affect_top_hosts = json_is_true(
-			json_object_get(payload, "affect_top_host"));
-		int affect_hosts = json_is_true(
-			json_object_get(payload, "affect_hosts"));
-		int affect_services = json_is_true(
-			json_object_get(payload, "affect_services"));
-		int level = 0;
-		if(json_is_integer(json_object_get(payload, "level")))
-			level = json_integer_value(json_object_get(payload, "level"));
-		disable_and_propagate_notifications(host_target, level,
-			affect_top_hosts, affect_hosts, affect_services);
+	else if((strcmp(cmd_name, "disable_and_propagate_notifications") == 0||
+		strcmp(cmd_name, "enable_and_propagate_notifications") == 0) &&
+		host_target) {
+		int affect_top_host = 0, affect_hosts = 0, affect_services = 0,
+			level = 0;
+		if(json_unpack(payload, "{ s?:b s?:b s?:b s?:i }",
+			"affect_top_host", &affect_top_hosts, "affect_host",
+			&affect_host, "affect_services", &affect_services,
+			"level", &level) != 0) {
+			json_decref(payload);
+			return;
+		}
+		if(strcmp(cmd_name, "disable_and_propagate_notifications") == 0)
+			disable_and_propagate_notifications(host_target, level,
+				affect_top_hosts, affect_hosts, affect_services);
+		else if(strcmp(cmd_name, "enable_and_propagate_notifications") == 0)
+			enable_and_propagate_notifications(host_target, level,
+				affect_top_hosts, affect_hosts, affect_services);
+
 	}
 	else if(strcmp(cmd_name, "remove_host_acknowledgement") == 0 && host_target)
 		remove_host_acknowledgement(host_target);
