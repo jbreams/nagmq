@@ -148,6 +148,10 @@ static struct payload * parse_acknowledgement(nebstruct_acknowledgement_data * s
 
 static struct payload * parse_statechange(nebstruct_statechange_data * state) {
 	struct payload * ret = payload_new();
+	host * host_target = find_host(state->host_name);
+	service * service_target = NULL;
+	if(state->service_description)
+		service_target = find_service(state->host_name, state->service_description);
 
 	payload_new_string(ret, "type", "statechange");
 	payload_new_string(ret, "host_name", state->host_name);
@@ -156,6 +160,17 @@ static struct payload * parse_statechange(nebstruct_statechange_data * state) {
 	payload_new_integer(ret, "current_attempt", state->current_attempt);
 	payload_new_integer(ret, "max_attempts", state->max_attempts);
 	payload_new_string(ret, "output", state->output);
+	if(service_target) {
+		payload_new_integer(ret, "last_state", service_target->last_state);
+		payload_new_integer(ret, "last_hard_state", service_target->last_hard_state);
+		payload_new_integer(ret, "last_check", service_target->last_check);
+		payload_new_integer(ret, "last_state_change", service_target->last_state_change);
+	} else {
+		payload_new_integer(ret, "last_state", host_target->last_state);
+		payload_new_integer(ret, "last_hard_state", host_target->last_hard_state);
+		payload_new_integer(ret, "last_check", host_target->last_check);
+		payload_new_integer(ret, "last_state_change", host_target->last_state_change);
+	}
 	return ret;
 }
 
