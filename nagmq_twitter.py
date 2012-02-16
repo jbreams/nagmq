@@ -16,13 +16,25 @@ sub = zctx.socket(zmq.SUB)
 sub.connect("ipc:///tmp/nagmq.sock")
 sub.setsockopt(zmq.SUBSCRIBE, 'statechange')
 
+cache = ( )
+
 print "Starting event loop"
 while True:
 	type, pstr = sub.recv_multipart()
 	payload = json.loads(pstr)
 	msg = None
+	name = None
+	state = None
 	if('service_description' in payload):
-		state = None
+		name = "{0}@{1}".format(
+			payload['service_description'],
+			payload['host_name'])
+	else:
+		name = payload['host_name']
+	if(payload['state'] == payload['last_state']):
+		print "Skipping {0} (duplicate)".format(name)
+		continue
+	if('service_description' in payload):
 		if(payload['state'] == 0):
 			state = 'OK'
 		elif(payload['state'] == 1):
@@ -31,21 +43,16 @@ while True:
 			state = 'CRITICAL'
 		elif(payload['state'] == 3):
 			state = 'UNKNOWN'
-		msg = "{0}@{1} {2}: {3}".format(
-			payload['service_description'],
-			payload['host_name'],
-			state, payload['output'])
 	else:
-		state = None
 		if(payload['state'] < 2):
 			state = 'UP'
 		else:
 			state = 'DOWN'
-		msg = "{0} {2}: {3}".format(
-			payload['host_name'], state,
-			payload['output'])
+	msg = "{0} {1}: {2} ({3})".format(
+		name, state, payload['output'],
+		payload['timestamp']['tv_sec'])
 	print msg
 	try:
 		api.update_status(msg)
-	except TweepError as te:
-		print "Could not post {0}: {1}".format(msg, te.reason)
+	except Exception, e:
+		print "Could not post {0}: {1}".format(msg, str(e))
