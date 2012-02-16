@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <time.h>
 #include <syslog.h>
+#include <signal.h>
 #define NSCORE 1
 #include "naginclude/nebstructs.h"
 #include "naginclude/nebcallbacks.h"
@@ -35,9 +36,9 @@ int nebmodule_deinit(int flags, int reason) {
 int setup_zmq(char * args, int type, 
 	void ** ctxo, void ** socko);
 
-static void process_status(json_t * payload) {
+static void process_status(json_t * payload, char * type, size_t typelen) {
 	char * host_name, *service_description = NULL, *output;
-	int retcode;
+	int return_code;
 	time_t timestamp;
 
 	if(json_unpack(payload, "{s:s s:s s?:s s:i s:{s:i}}",
@@ -58,13 +59,17 @@ static void process_status(json_t * payload) {
 		return;
 	}
 
-	if(service_target)
+	if(strncmp(type, "service_check_processed", typelen) == 0) {
+		if(!service_description) {
+			json_decref(payload);
+			return;
+		}
 		process_passive_service_check(timestamp, host_name,
-			service_description, retcode, output);
-	else
+			service_description, return_code, output);
+	} else
 		process_passive_host_check(timestamp, host_name,
-			retcode, output);
-
+			return_code, output);
+	process_passive_checks();
 	json_decref(payload);
 }
 
@@ -90,22 +95,22 @@ static void process_acknowledgement(json_t * payload) {
 		service_target = find_service(host_name, service_description);
 
 	if(service_target)
-		acknowledge_service_problem(service_target, author, ackdata,
-			type, notify, persistent);
+		acknowledge_service_problem(service_target, author_name, comment_data,
+			acknowledgement_type, notify_contacts, persistent_comment);
 	else 
-		acknowledge_host_problem(host_target, author, ackdata,
-			type, notify, persistent);
+		acknowledge_host_problem(host_target, author_name, comment_data,
+			acknowledgement_type, notify_contacts, persistent_comment);
 	json_decref(payload);
 }
 
 static void process_cmd(json_t * payload) {
 	host * host_target;
 	service * service_target;
-	char * host_name, *service_Description = NULL, *command_name;
+	char * host_name = NULL, *service_description = NULL, *cmd_name;
 
-	if(json_unpack(payload, "{s:s s:?s s:s}",
+	if(json_unpack(payload, "{s?:s s:?s s:s}",
 		"host_name", &host_name, "service_description", &service_description,
-		"command_name", &command_name) != 0) {
+		"command_name", &cmd_name) != 0) {
 		json_decref(payload);
 		return;
 	}
@@ -131,9 +136,9 @@ static void process_cmd(json_t * payload) {
 		enable_host_notifications(host_target);
 	else if(strcmp(cmd_name, "disable_host_notifications") == 0 && host_target)
 		disable_host_notifications(host_target);
-	else if(strcmp(cmd_name, "start_executing_service_checks"))
+	else if(strcmp(cmd_name, "start_executing_service_checks") == 0)
 		start_executing_service_checks();
-	else if(strcmp(cmd_name, "stop_executing_service_checks"))
+	else if(strcmp(cmd_name, "stop_executing_service_checks") == 0)
 		stop_executing_service_checks();
 	else if(strcmp(cmd_name, "start_accepting_passive_service_checks") == 0)
 		start_accepting_passive_service_checks();
@@ -169,7 +174,7 @@ static void process_cmd(json_t * payload) {
 		(strcmp(cmd_name, "schedule_service_check") == 0&& service_target)) {
 		time_t next_check;
 		int force_execution = 0, freshness_check = 0, orphan_check = 0;
-		if(json_unpack("{ s:i s?:b s?:b s:?b }",
+		if(json_unpack(payload, "{ s:i s?:b s?:b s:?b }",
 			"next_check", &next_check, "force_execution", &force_execution,
 			"freshness_check", &freshness_check, "orphan_check",
 			&orphan_check) != 0) {
@@ -194,18 +199,18 @@ static void process_cmd(json_t * payload) {
 		int affect_top_host = 0, affect_hosts = 0, affect_services = 0,
 			level = 0;
 		if(json_unpack(payload, "{ s?:b s?:b s?:b s?:i }",
-			"affect_top_host", &affect_top_hosts, "affect_host",
-			&affect_host, "affect_services", &affect_services,
+			"affect_top_host", &affect_top_host, "affect_host",
+			&affect_hosts, "affect_services", &affect_services,
 			"level", &level) != 0) {
 			json_decref(payload);
 			return;
 		}
 		if(strcmp(cmd_name, "disable_and_propagate_notifications") == 0)
 			disable_and_propagate_notifications(host_target, level,
-				affect_top_hosts, affect_hosts, affect_services);
+				affect_top_host, affect_hosts, affect_services);
 		else if(strcmp(cmd_name, "enable_and_propagate_notifications") == 0)
 			enable_and_propagate_notifications(host_target, level,
-				affect_top_hosts, affect_hosts, affect_services);
+				affect_top_host, affect_hosts, affect_services);
 
 	}
 	else if(strcmp(cmd_name, "remove_host_acknowledgement") == 0 && host_target)
@@ -220,23 +225,36 @@ void * recv_loop(void * parg) {
 	void * sock;
 	zmq_msg_t type_msg;
 
+	sigset_t signal_set;
+        sigfillset (&signal_set);
+        pthread_sigmask (SIG_BLOCK, &signal_set, NULL);
+
 	pthread_mutex_lock(&recv_loop_mutex);
 	if(setup_zmq((char*)args, ZMQ_SUB, &ctx, &sock) < 0)
 		return NULL;
-	zmq_setsockopt(sock, ZMQ_SUBSCRIBE, "command", sizeof("command"));
-	zmq_setsockopt(sock, ZMQ_SUBSCRIBE, 
-		"service_check_processed", sizeof("service_check_processed"));
-	zmq_setsockopt(sock, ZMQ_SUBSCRIBE,
-		"host_check_processed", sizeof("host_check_processed"));
-	zmq_setsockopt(sock, ZMQ_SUBSCRIBE,
-		"acknowledgement", sizeof("acknowledgement"));
-	pthread_mutex_signal(&init_cond);
+	zmq_setsockopt(sock, ZMQ_SUBSCRIBE, "", 0);
+	pthread_cond_signal(&init_cond);
 	pthread_mutex_unlock(&recv_loop_mutex);
 
 	zmq_msg_init(&type_msg);
-	while(zmq_recv(sock, &type_msg, 0) == 0) {
-		zmq_msg_t payload_msg;
-		int ismore; 
+	while(1) {
+		zmq_msg_t payload_msg, type_msg;
+
+		zmq_msg_init(&type_msg);
+		if(zmq_recv(sock, &type_msg, 0) < 0) {
+			int rc = errno;
+			zmq_msg_close(&type_msg);
+			if(rc == ETERM)
+				return NULL;
+			else if(rc == EINTR)
+				continue;
+			else {
+				syslog(LOG_ERR, "Error receiving message from socket: %s",
+					zmq_strerror(errno));
+				continue;
+			}
+		}
+		int64_t ismore; 
 		size_t imlen = sizeof(ismore);
 		zmq_getsockopt(sock, ZMQ_RCVMORE, &ismore, &imlen);
 		if(!ismore) {
@@ -266,9 +284,9 @@ void * recv_loop(void * parg) {
 		if(strncmp(type, "command", typelen) == 0)
 			process_cmd(payload);
 		else if(strncmp(type, "host_check_processed", typelen) == 0)
-			process_status(payload);
+			process_status(payload, type, typelen);
 		else if(strncmp(type, "service_check_processed", typelen) == 0)
-			process_status(payload);
+			process_status(payload, type, typelen);
 		else if(strncmp(type, "acknowledgement", typelen) == 0)
 			process_acknowledgement(payload);
 		zmq_msg_close(&type_msg);
