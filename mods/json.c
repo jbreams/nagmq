@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <float.h>
+#include <ctype.h>
 #include "json.h"
 
 #define PAGE_SIZE 4096
@@ -114,4 +115,5 @@ void payload_new_timestamp(struct payload * po,
 void payload_finalize(struct payload * po) {
 	sprintf(po->json_buf + po->bufused - 2, " }");
 }
+
 
