@@ -37,7 +37,7 @@ int setup_zmq(char * args, int type,
 
 static void process_status(json_t * payload) {
 	char * host_name, *service_description = NULL, *output;
-	int retcode;
+	int return_code;
 	time_t timestamp;
 
 	if(json_unpack(payload, "{s:s s:s s?:s s:i s:{s:i}}",
@@ -60,10 +60,10 @@ static void process_status(json_t * payload) {
 
 	if(service_target)
 		process_passive_service_check(timestamp, host_name,
-			service_description, retcode, output);
+			service_description, return_code, output);
 	else
 		process_passive_host_check(timestamp, host_name,
-			retcode, output);
+			return_code, output);
 
 	json_decref(payload);
 }

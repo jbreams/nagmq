@@ -1,6 +1,6 @@
 #!/usr/bin/python26
 
-import tweepy, zmq, json
+import tweepy, zmq, json, syslog
 
 keyfile = open('oauthkeys.json', 'r')
 oakeys = json.load(keyfile)
@@ -16,25 +16,36 @@ sub = zctx.socket(zmq.SUB)
 sub.connect("ipc:///tmp/nagmq.sock")
 sub.setsockopt(zmq.SUBSCRIBE, 'statechange')
 
-cache = ( )
+def send_tweet(msg, depth=0):
+	if(depth = 2):
+		return
+	try:
+		api.update_status(msg)
+	except Exception, e:
+		if(e.reason == 'Status is a duplicate'):
+			msg += "({0})".format(
+				payload['timestamp']['tv_sec'])
+			send_tweet(msg, depth + 1)
+		else:
+			syslog.syslog(syslog.LOG_ERR, 
+				"Could not post {0}: {1}".format(msg, str(e)))
 
-print "Starting event loop"
+syslog.syslog('Starting NagMQ Twitter event loop')
 while True:
 	type, pstr = sub.recv_multipart()
 	payload = json.loads(pstr)
 	msg = None
 	name = None
 	state = None
-	if('service_description' in payload):
+	if(payload['service_description'] != None):
 		name = "{0}@{1}".format(
 			payload['service_description'],
 			payload['host_name'])
 	else:
 		name = payload['host_name']
 	if(payload['state'] == payload['last_state']):
-		print "Skipping {0} (duplicate)".format(name)
 		continue
-	if('service_description' in payload):
+	if(payload['service_description'] != None):
 		if(payload['state'] == 0):
 			state = 'OK'
 		elif(payload['state'] == 1):
@@ -48,11 +59,6 @@ while True:
 			state = 'UP'
 		else:
 			state = 'DOWN'
-	msg = "{0} {1}: {2} ({3})".format(
-		name, state, payload['output'],
-		payload['timestamp']['tv_sec'])
-	print msg
-	try:
-		api.update_status(msg)
-	except Exception, e:
-		print "Could not post {0}: {1}".format(msg, str(e))
+	msg = "{0} {1}: {2}".format(
+		name, state, payload['output'])
+	send_tweet(msg)
