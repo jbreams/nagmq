@@ -91,6 +91,17 @@ void payload_new_integer(struct payload * po, char * key, long long val) {
 		"%lli, ", val);
 }
 
+void payload_new_boolean(struct payload * po, char * key, int val) {
+	payload_add_key(po, key);
+	adjust_payload_len(po, sizeof("false, "));
+	if(val > 0)
+		po->bufused += sprintf(po->json_buf + po->bufused,
+			"true, ");
+	else
+		po->bufused += sprintf(po->json_buf + po->bufused,
+			"false, ");
+}
+
 void payload_new_double(struct payload * po, char * key, double val) {
 	payload_add_key(po, key);
 	adjust_payload_len(po, DBL_MAX_10_EXP + sizeof(", "));

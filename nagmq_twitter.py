@@ -45,6 +45,11 @@ while True:
 		name = payload['host_name']
 	if(payload['state'] == payload['last_state']):
 		continue
+	if(payload['problem_has_been_acknowledged'] == True and
+		payload['state'] != 0):
+		continue
+	if(payload['is_flapping'] == True):
+		continue
 	if(payload['service_description'] != None):
 		if(payload['state'] == 0):
 			state = 'OK'
