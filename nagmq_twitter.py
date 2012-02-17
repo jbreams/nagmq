@@ -17,10 +17,10 @@ sub.connect("ipc:///tmp/nagmq.sock")
 sub.setsockopt(zmq.SUBSCRIBE, 'statechange')
 
 def send_tweet(msg, depth=0):
-	if(depth = 2):
+	if(depth == 2):
 		return
 	try:
-		api.update_status(msg)
+		api.update_status(msg[:140])
 	except Exception, e:
 		if(e.reason == 'Status is a duplicate'):
 			msg += "({0})".format(
