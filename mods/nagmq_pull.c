@@ -221,15 +221,8 @@ void * recv_loop(void * parg) {
 	zmq_msg_t type_msg;
 
 	pthread_mutex_lock(&recv_loop_mutex);
-	if(setup_zmq((char*)args, ZMQ_SUB, &ctx, &sock) < 0)
+	if(setup_zmq((char*)args, ZMQ_PULL, &ctx, &sock) < 0)
 		return NULL;
-	zmq_setsockopt(sock, ZMQ_SUBSCRIBE, "command", sizeof("command"));
-	zmq_setsockopt(sock, ZMQ_SUBSCRIBE, 
-		"service_check_processed", sizeof("service_check_processed"));
-	zmq_setsockopt(sock, ZMQ_SUBSCRIBE,
-		"host_check_processed", sizeof("host_check_processed"));
-	zmq_setsockopt(sock, ZMQ_SUBSCRIBE,
-		"acknowledgement", sizeof("acknowledgement"));
 	pthread_mutex_signal(&init_cond);
 	pthread_mutex_unlock(&recv_loop_mutex);
 
