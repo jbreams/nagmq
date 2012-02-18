@@ -11,6 +11,7 @@
 #include "naginclude/nagios.h"
 #include "naginclude/objects.h"
 #include "naginclude/broker.h"
+#include "naginclude/comments.h"
 #include <zmq.h>
 #include <pthread.h>
 #include "jansson.h"
@@ -90,22 +91,42 @@ static void process_acknowledgement(json_t * payload) {
 		service_target = find_service(host_name, service_description);
 
 	if(service_target)
-		acknowledge_service_problem(service_target, author, ackdata,
-			type, notify, persistent);
+		acknowledge_service_problem(service_target, author_name, comment_data,
+			acknowledgement_type, notify_contacts, persistent_comment);
 	else 
-		acknowledge_host_problem(host_target, author, ackdata,
-			type, notify, persistent);
+		acknowledge_host_problem(host_target, author_name, comment_data,
+			acknowledgement_type, notify_contacts, persistent_comment);
 	json_decref(payload);
+}
+
+static void process_comment(json_t * payload) {
+	char * host_name, *service_description = NULL, *comment_data, *author_name;
+	time_t entry_time, expire_time;
+	int persistent = 0, expires = 0;
+	if(json_unpack(payload, "{s:s s?:s s:s s:{s:i} s:b s:b s:i}",
+		"host_name", &host_name, "service_description", &service_description,
+		"comment_data", &comment_data, "timestamp", "tv_sec", &entry_time,
+		"persistent", &persistent, "expires", &expires, "expire_time",
+		&expire_time) != 0) {
+		json_decref(payload);
+		return;
+	}
+
+	add_new_comment((service_description==NULL) ? HOST_COMMENT:SERVICE_COMMENT,
+		USER_COMMENT, host_name, service_description, entry_time, author_name,
+		comment_data, persistent, COMMENTSOURCE_EXTERNAL, expires, expire_time,
+		NULL);
+	json_decret(payload);
 }
 
 static void process_cmd(json_t * payload) {
 	host * host_target;
 	service * service_target;
-	char * host_name, *service_Description = NULL, *command_name;
+	char * host_name, *service_description = NULL, *cmd_name;
 
 	if(json_unpack(payload, "{s:s s:?s s:s}",
 		"host_name", &host_name, "service_description", &service_description,
-		"command_name", &command_name) != 0) {
+		"command_name", &cmd_name) != 0) {
 		json_decref(payload);
 		return;
 	}
@@ -169,7 +190,7 @@ static void process_cmd(json_t * payload) {
 		(strcmp(cmd_name, "schedule_service_check") == 0&& service_target)) {
 		time_t next_check;
 		int force_execution = 0, freshness_check = 0, orphan_check = 0;
-		if(json_unpack("{ s:i s?:b s?:b s:?b }",
+		if(json_unpack(payload, "{ s:i s?:b s?:b s:?b }",
 			"next_check", &next_check, "force_execution", &force_execution,
 			"freshness_check", &freshness_check, "orphan_check",
 			&orphan_check) != 0) {
@@ -194,18 +215,18 @@ static void process_cmd(json_t * payload) {
 		int affect_top_host = 0, affect_hosts = 0, affect_services = 0,
 			level = 0;
 		if(json_unpack(payload, "{ s?:b s?:b s?:b s?:i }",
-			"affect_top_host", &affect_top_hosts, "affect_host",
-			&affect_host, "affect_services", &affect_services,
+			"affect_top_host", &affect_top_host, "affect_hosts",
+			&affect_hosts, "affect_services", &affect_services,
 			"level", &level) != 0) {
 			json_decref(payload);
 			return;
 		}
 		if(strcmp(cmd_name, "disable_and_propagate_notifications") == 0)
 			disable_and_propagate_notifications(host_target, level,
-				affect_top_hosts, affect_hosts, affect_services);
+				affect_top_host, affect_hosts, affect_services);
 		else if(strcmp(cmd_name, "enable_and_propagate_notifications") == 0)
 			enable_and_propagate_notifications(host_target, level,
-				affect_top_hosts, affect_hosts, affect_services);
+				affect_top_host, affect_hosts, affect_services);
 
 	}
 	else if(strcmp(cmd_name, "remove_host_acknowledgement") == 0 && host_target)
@@ -264,6 +285,8 @@ void * recv_loop(void * parg) {
 			process_status(payload);
 		else if(strncmp(type, "acknowledgement", typelen) == 0)
 			process_acknowledgement(payload);
+		else if(strncmp(type, "comment_add", typelen) == 0)
+			process_comment(payload);
 		zmq_msg_close(&type_msg);
 		zmq_msg_init(&type_msg);
 	}

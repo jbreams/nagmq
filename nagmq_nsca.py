@@ -7,7 +7,6 @@ sub = context.socket (zmq.SUB)
 sub.connect("tcp://minotaur:5555")
 sub.setsockopt(zmq.SUBSCRIBE, 'service_check_processed')
 sub.setsockopt(zmq.SUBSCRIBE, 'host_check_processed')
-sub.setsockopt(zmq.SUBSCRIBE, 'comment')
 sub.setsockopt(zmq.SUBSCRIBE, 'acknowledgement')
 sub.setsockopt(zmq.SUBSCRIBE, 'program_status')
 push = context.socket(zmq.PUSH)
@@ -41,9 +40,8 @@ while True:
 	status = json.loads(payload)
 	lastupdate = status['timestamp']['tv_sec']
 
-	if(type != 'program_status'):
+	if(type == 'program_status'):
 		continue
-	if(type == 'service_check_processed'):
-		push.send(type, zmq.SNDMORE)
-		push.send(payload)
+	push.send(type, zmq.SNDMORE)
+	push.send(payload)
 
