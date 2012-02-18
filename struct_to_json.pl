@@ -12,13 +12,13 @@ while(<>) {
 		$curtype = $2;
 		s/_//g;
 #		print "Found struct $1\n";
-		print "static cJSON * parse_$curtype(nebstruct_${curtype}_data * state) {\n";
-		print "\tcJSON * ret = cJSON_CreateObject();\n\n";
-		print "\tcJSON_AddStringToObject(ret, \"type\", \"${curtype}\");\n";
+		print "static struct payload * parse_$curtype(nebstruct_${curtype}_data * state) {\n";
+		print "\tstruct payload * ret = payload_new();\n\n";
+		print "\tpaload_new_string(ret, \"type\", \"${curtype}\");\n";
 		push @types, $curtype;
 	}
 	elsif(/^(?:int|unsigned long|time_t) ([^;]+);/ && $curtype) {
-		print "\tcJSON_AddNumberToObject(ret, \"$1\", state->$1);\n";
+		print "\tpayload_new_integer(ret, \"$1\", state->$1);\n";
 	}
 	elsif(/^double ([^;]+);/ && $curtype) {
 		print "\tpayload_new_double(ret, \"$1\", state->$1);\n";
@@ -28,7 +28,7 @@ while(<>) {
 		#print "Timestamp $1\n";
 	}
 	elsif(/^char \*([^;]+);/ && $curtype) {
-		print "\tcJSON_AddStringToObject(ret, \"$1\", state->$1);\n";
+		print "\tpayload_new_string(ret, \"$1\", state->$1);\n";
 #		print "String $1\n";
 	}
 	elsif(/^}/) {

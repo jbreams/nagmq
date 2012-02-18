@@ -53,6 +53,47 @@ static struct payload * parse_program_status(nebstruct_program_status_data * sta
 	return ret;
 }
 
+static struct payload * parse_event_handler(nebstruct_event_handler_data * state) {
+	struct payload * ret = payload_new();
+	host * host_obj = find_host(state->host_name);
+	service * service_obj = NULL;
+	if(state->service_description)
+		service_obj = find_service(state->host_name,
+			state->service_description);
+
+	payload_new_string(ret, "host_name", state->host_name);
+	payload_new_string(ret, "service_description", state->service_description);
+	payload_new_integer(ret, "state", state->state);
+	if(service_obj) {
+		payload_new_integer(ret, "last_state", service_obj->last_state);
+		payload_new_integer(ret, "last_hard_state", service_obj->last_hard_state);
+		payload_new_integer(ret, "last_check", service_obj->last_check);
+		payload_new_integer(ret, "last_state_change", service_obj->last_state_change);
+	} else {
+		payload_new_integer(ret, "last_state", service_obj->last_state);
+		payload_new_integer(ret, "last_hard_state", service_obj->last_hard_state);
+		payload_new_integer(ret, "last_check", service_obj->last_check);
+		payload_new_integer(ret, "last_state_change", service_obj->last_state_change);
+	}
+
+	if(state->type == NEBTYPE_EVENTHANDLER_START) {
+		payload_new_string(ret, "type", "eventhandler_start");
+		payload_new_string(ret, "command_name", state->command_name);
+		payload_new_string(ret, "command_args", state->command_args);
+		payload_new_string(ret, "command_line", state->command_line);
+	} else {
+		payload_new_string(ret, "type", "eventhandler_stop");
+		payload_new_integer(ret, "timeout", state->timeout);
+		parse_timestamp(ret, "start_time", &state->start_time);
+		parse_timestamp(ret, "end_time", &state->end_time);
+		payload_new_integer(ret, "early_timeout", state->early_timeout);
+		payload_new_double(ret, "execution_time", state->execution_time);
+		payload_new_integer(ret, "return_code", state->return_code);
+		payload_new_string(ret, "output", state->output);
+	}
+	return ret;
+}
+
 static struct payload * parse_host_check(nebstruct_host_check_data * state) {
 	struct payload * ret = payload_new();
 	host * obj = find_host(state->host_name);
@@ -283,6 +324,9 @@ int handle_nagdata(int which, void * obj) {
 	struct payload * payload = NULL;	
 	nebstruct_process_data * raw = obj;
 	switch(which) {
+	case NEBCALLBACK_EVENT_HANDLER_DATA:
+		payload = parse_event_handler(obj);
+		break;
 	case NEBCALLBACK_HOST_CHECK_DATA:
 		switch(raw->type) {
 			case NEBTYPE_HOSTCHECK_INITIATE:

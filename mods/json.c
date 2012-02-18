@@ -126,5 +126,3 @@ void payload_new_timestamp(struct payload * po,
 void payload_finalize(struct payload * po) {
 	sprintf(po->json_buf + po->bufused - 2, " }");
 }
-
-
