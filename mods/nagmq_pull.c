@@ -116,7 +116,31 @@ static void process_comment(json_t * payload) {
 		USER_COMMENT, host_name, service_description, entry_time, author_name,
 		comment_data, persistent, COMMENTSOURCE_EXTERNAL, expires, expire_time,
 		NULL);
-	json_decret(payload);
+	json_decref(payload);
+}
+
+static void process_downtime(json_t * payload) {
+	char * host_name, char * service_description = NULL;
+	char * author_name, *comment_data;
+	time_t start_time, end_time, entry_time;
+	int fixed, downtimeid;
+	unsigned long duration, triggeredby;
+
+	if(json_unpack(payload, "{s:s s?:s s:i s:s s:s s:i s:i s:b s:i s:i}",
+		"host_name", &host_name, "service_description", &service_description,
+		"entry_time", &entry_time, "author_name", &author_name, "comment_data",
+		&comment_data, "start_time", &start_time, "end_time", &end_time,
+		"fixed", &fixed, "duration", &duration, "triggered_by",
+		&triggered_by) != 0) {
+		json_decref(payload);
+		return;
+	}
+
+	schedule_downtime(service_description != NULL ? SERVICE_DOWNTIME:
+		HOST_DOWNTIME, host_name, service_description, entry_time,
+		author_name, comment_data, start_time, end_time, fixed,
+		triggered_by, duration, &downtimeid);
+	json_decref(payload);
 }
 
 static void process_cmd(json_t * payload) {
@@ -152,6 +176,10 @@ static void process_cmd(json_t * payload) {
 		enable_host_notifications(host_target);
 	else if(strcmp(cmd_name, "disable_host_notifications") == 0 && host_target)
 		disable_host_notifications(host_target);
+	else if(strcmp(cmd_name, "remove_host_acknowledgement") == 0 && host_target)
+		remove_host_acknowledgement(host_target);
+	else if(strcmp(cmd_name, "remove_service_acknowledgement") == 0 && service_target)
+		remove_service_acknowledgement(service_target);
 	else if(strcmp(cmd_name, "start_executing_service_checks"))
 		start_executing_service_checks();
 	else if(strcmp(cmd_name, "stop_executing_service_checks"))
@@ -170,6 +198,14 @@ static void process_cmd(json_t * payload) {
 		disable_host_checks(host_target);
 	else if(strcmp(cmd_name, "enable_service_freshness_checks") == 0)
 		enable_service_freshness_checks();
+	else if(strcmp(cmd_name, "start_obsessing_over_service") == 0 && service_target)
+		start_obsessing_over_service(service_target);
+	else if(strcmp(cmd_name, "stop_obsessing_over_service") == 0 && service_target)
+		stop_obsessing_over_sevice(service_target);
+	else if(strcmp(cmd_name, "start_obsessing_over_host") == 0 && host_target)
+		start_obsessing_over_host(host_target);
+	else if(strcmp(cmd_name, "stop_obsessing_over_host") == 0 && host_target)
+		stop_obsessing_over_host(host_target);
 	else if(strcmp(cmd_name, "enable_performance_data") == 0)
 		enable_performance_data();
 	else if(strcmp(cmd_name, "disable_performance_data") == 0)
@@ -229,10 +265,6 @@ static void process_cmd(json_t * payload) {
 				affect_top_host, affect_hosts, affect_services);
 
 	}
-	else if(strcmp(cmd_name, "remove_host_acknowledgement") == 0 && host_target)
-		remove_host_acknowledgement(host_target);
-	else if(strcmp(cmd_name, "remove_service_acknowledgement") == 0 && service_target)
-		remove_service_acknowledgement(service_target);
 
 	json_decref(payload);
 }
@@ -287,6 +319,8 @@ void * recv_loop(void * parg) {
 			process_acknowledgement(payload);
 		else if(strncmp(type, "comment_add", typelen) == 0)
 			process_comment(payload);
+		else if(strncmp(type, "downtime_add", typelen) == 0)
+			process_downtime(payload);
 		zmq_msg_close(&type_msg);
 		zmq_msg_init(&type_msg);
 	}
