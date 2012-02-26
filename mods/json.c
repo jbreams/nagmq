@@ -23,6 +23,8 @@ struct payload * payload_new() {
 }
 
 void payload_add_key(struct payload * po, char * key) {
+	if(key == NULL)
+		return;
 	size_t keylen = strlen(key);
 	adjust_payload_len(po, keylen + sizeof("\"\": "));
 	po->bufused += sprintf(po->json_buf + po->bufused,
@@ -121,7 +123,29 @@ void payload_new_timestamp(struct payload * po,
 	po->bufused -= 2;
 	po->bufused += sprintf(po->json_buf + (po->bufused),
 		" }, ");
-} 
+}
+
+void payload_start_array(struct payload * po, char * key) {
+	payload_add_key(po, key);
+	adjust_payload_len(po, sizeof("[ "));
+	po->bufused += sprintf(po->json_buf + po->bufused, "[ ");
+}
+
+void payload_end_array(struct payload * po) {
+	adjust_payload_len(po, sizeof(", "));
+	sprintf(po->json_buf + po->bufused - 2, " ], ");
+}
+
+void payload_start_object(struct payload * po, char * key) {
+	payload_add_key(po, key);
+	adjust_payload_len(po, sizeof("{ "));
+	po->bufused += sprintf(po->json_buf + po->bufused, "{ ");
+}
+
+void payload_end_object(struct payload * po) {
+	adjust_payload_len(po, sizeof(", "));
+	sprintf(po->json_buf + po->bufused - 2, " }, ");
+}
 
 void payload_finalize(struct payload * po) {
 	sprintf(po->json_buf + po->bufused - 2, " }");

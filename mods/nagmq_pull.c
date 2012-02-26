@@ -12,29 +12,12 @@
 #include "naginclude/objects.h"
 #include "naginclude/broker.h"
 #include "naginclude/comments.h"
+#include "naginclude/downtime.h"
 #include <zmq.h>
 #include <pthread.h>
 #include "jansson.h"
 
-NEB_API_VERSION(CURRENT_NEB_API_VERSION)
-static void * nagmq_handle = NULL;
-static void * ctx;
-static char * args;
-static pthread_t threadid;
-static pthread_cond_t init_cond = PTHREAD_COND_INITIALIZER;
-static pthread_mutex_t recv_loop_mutex = PTHREAD_MUTEX_INITIALIZER;
 extern int errno;
-
-int nebmodule_deinit(int flags, int reason) {
-	neb_deregister_module_callbacks(nagmq_handle);
-	if(args)
-		free(args);
-
-	return 0;
-}
-
-int setup_zmq(char * args, int type, 
-	void ** ctxo, void ** socko);
 
 static void process_status(json_t * payload) {
 	char * host_name, *service_description = NULL, *output;
@@ -120,11 +103,11 @@ static void process_comment(json_t * payload) {
 }
 
 static void process_downtime(json_t * payload) {
-	char * host_name, char * service_description = NULL;
+	char * host_name, * service_description = NULL;
 	char * author_name, *comment_data;
 	time_t start_time, end_time, entry_time;
-	int fixed, downtimeid;
-	unsigned long duration, triggeredby;
+	int fixed;
+	unsigned long duration, triggered_by, downtimeid;
 
 	if(json_unpack(payload, "{s:s s?:s s:i s:s s:s s:i s:i s:b s:i s:i}",
 		"host_name", &host_name, "service_description", &service_description,
@@ -201,7 +184,7 @@ static void process_cmd(json_t * payload) {
 	else if(strcmp(cmd_name, "start_obsessing_over_service") == 0 && service_target)
 		start_obsessing_over_service(service_target);
 	else if(strcmp(cmd_name, "stop_obsessing_over_service") == 0 && service_target)
-		stop_obsessing_over_sevice(service_target);
+		stop_obsessing_over_service(service_target);
 	else if(strcmp(cmd_name, "start_obsessing_over_host") == 0 && host_target)
 		start_obsessing_over_host(host_target);
 	else if(strcmp(cmd_name, "stop_obsessing_over_host") == 0 && host_target)
@@ -263,105 +246,55 @@ static void process_cmd(json_t * payload) {
 		else if(strcmp(cmd_name, "enable_and_propagate_notifications") == 0)
 			enable_and_propagate_notifications(host_target, level,
 				affect_top_host, affect_hosts, affect_services);
-
 	}
 
 	json_decref(payload);
 }
 
-void * recv_loop(void * parg) {
-	void * sock;
-	zmq_msg_t type_msg;
-
-	pthread_mutex_lock(&recv_loop_mutex);
-	if(setup_zmq((char*)args, ZMQ_PULL, &ctx, &sock) < 0)
-		return NULL;
-	pthread_mutex_signal(&init_cond);
-	pthread_mutex_unlock(&recv_loop_mutex);
-
+void process_pull_msg(void * sock) {
+	zmq_msg_t payload_msg, type_msg;
+	int ismore; 
+	size_t imlen = sizeof(ismore);
 	zmq_msg_init(&type_msg);
-	while(zmq_recv(sock, &type_msg, 0) == 0) {
-		zmq_msg_t payload_msg;
-		int ismore; 
-		size_t imlen = sizeof(ismore);
-		zmq_getsockopt(sock, ZMQ_RCVMORE, &ismore, &imlen);
-		if(!ismore) {
-			zmq_msg_close(&type_msg);
-			continue;
-		}
+	
+	if(zmq_recv(sock, &type_msg, 0) == 0) {
+		return;
+	}
 
-		zmq_msg_init(&payload_msg);
-		if(zmq_recv(sock, &payload_msg, 0) != 0) {
-			zmq_msg_close(&payload_msg);
-			zmq_msg_close(&type_msg);
-			zmq_msg_init(&type_msg);
-			continue;
-		}
-
-		json_t * payload = json_loadb(zmq_msg_data(&payload_msg),
-			zmq_msg_size(&payload_msg), 0, NULL);
-		zmq_msg_close(&payload_msg);
-		if(payload == NULL) {
-			zmq_msg_close(&type_msg);
-			zmq_msg_init(&type_msg);
-			continue;		
-		}
-		
-		char * type = zmq_msg_data(&type_msg);
-		size_t typelen = zmq_msg_size(&type_msg);
-		if(strncmp(type, "command", typelen) == 0)
-			process_cmd(payload);
-		else if(strncmp(type, "host_check_processed", typelen) == 0)
-			process_status(payload);
-		else if(strncmp(type, "service_check_processed", typelen) == 0)
-			process_status(payload);
-		else if(strncmp(type, "acknowledgement", typelen) == 0)
-			process_acknowledgement(payload);
-		else if(strncmp(type, "comment_add", typelen) == 0)
-			process_comment(payload);
-		else if(strncmp(type, "downtime_add", typelen) == 0)
-			process_downtime(payload);
+	zmq_getsockopt(sock, ZMQ_RCVMORE, &ismore, &imlen);
+	if(!ismore) {
 		zmq_msg_close(&type_msg);
-		zmq_msg_init(&type_msg);
+		return;
 	}
 
-	return NULL;	
-}
-
-int handle_startup(int which, void * obj) {
-	struct nebstruct_process_struct *ps = (struct nebstruct_process_struct *)obj;
-	if(ps->type == NEBTYPE_PROCESS_EVENTLOOPEND) {
-		zmq_term(ctx);
-		pthread_join(threadid, NULL);
-		return 0;
+	zmq_msg_init(&payload_msg);
+	if(zmq_recv(sock, &payload_msg, 0) != 0) {
+		zmq_msg_close(&payload_msg);
+		zmq_msg_close(&type_msg);
+		return;
 	}
-	else if(ps->type != NEBTYPE_PROCESS_EVENTLOOPSTART)
-		return 0;
 
-	pthread_mutex_lock(&recv_loop_mutex);
-	if(pthread_create(&threadid, NULL, recv_loop, NULL) < 0) {
-		syslog(LOG_ERR, "Error creating ZMQ recv loop: %m");
-		return -1;
+	json_t * payload = json_loadb(zmq_msg_data(&payload_msg),
+		zmq_msg_size(&payload_msg), 0, NULL);
+	zmq_msg_close(&payload_msg);
+	if(payload == NULL) {
+		zmq_msg_close(&type_msg);
+		return;		
 	}
-	pthread_cond_wait(&init_cond, &recv_loop_mutex);
-	pthread_detach(threadid);
-
-	return 0;
-}
-
-int nebmodule_init(int flags, char * localargs, nebmodule * handle) {
-	neb_set_module_info(handle, NEBMODULE_MODINFO_TITLE, "nagmq subscriber");
-	neb_set_module_info(handle, NEBMODULE_MODINFO_AUTHOR, "Jonathan Reams");
-	neb_set_module_info(handle, NEBMODULE_MODINFO_VERSION, "0.8");
-	neb_set_module_info(handle, NEBMODULE_MODINFO_LICENSE, "Apache v2");
-	neb_set_module_info(handle, NEBMODULE_MODINFO_DESC,
-		"Subscribes to Nagios data on 0MQ");
-
-	neb_register_callback(NEBCALLBACK_PROCESS_DATA, handle,
-		0, handle_startup);
-
-	nagmq_handle = handle;
-	args = strdup(localargs);
-
-	return 0;
+	
+	char * type = zmq_msg_data(&type_msg);
+	size_t typelen = zmq_msg_size(&type_msg);
+	if(strncmp(type, "command", typelen) == 0)
+		process_cmd(payload);
+	else if(strncmp(type, "host_check_processed", typelen) == 0)
+		process_status(payload);
+	else if(strncmp(type, "service_check_processed", typelen) == 0)
+		process_status(payload);
+	else if(strncmp(type, "acknowledgement", typelen) == 0)
+		process_acknowledgement(payload);
+	else if(strncmp(type, "comment_add", typelen) == 0)
+		process_comment(payload);
+	else if(strncmp(type, "downtime_add", typelen) == 0)
+		process_downtime(payload);
+	zmq_msg_close(&type_msg);
 }

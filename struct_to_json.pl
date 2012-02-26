@@ -8,10 +8,10 @@ while(<>) {
 	s/\s*$//;
 	s/\s+/ /g;
 	/(type|flags|attr|timestamp);$/ && next;
-	if(/^typedef struct (nebstruct_)?([^\s]+)_struct {/) {
-		$curtype = $2;
+	if(/^(typedef )?struct (nebstruct_)?([^\s]+)_struct {/) {
+		$curtype = $3;
 		s/_//g;
-#		print "Found struct $1\n";
+		print "Found struct $curtype\n";
 		print "static struct payload * parse_$curtype(nebstruct_${curtype}_data * state) {\n";
 		print "\tstruct payload * ret = payload_new();\n\n";
 		print "\tpaload_new_string(ret, \"type\", \"${curtype}\");\n";
