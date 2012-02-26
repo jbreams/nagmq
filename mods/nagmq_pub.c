@@ -18,8 +18,10 @@ extern int errno;
 extern void * handle;
 void * pubext;
 
-void lock_obj(char * hostname, char * service);
-void unlock_obj(char * hostname, char * service);
+void lock_obj(char * hostname, char * service, char ** plugin_output,
+	char ** long_plugin_output, char ** perf_data);
+void unlock_obj(char * hostname, char * service, char * plugin_output,
+	char * long_plugin_output, char * perf_data);
 
 static struct payload * parse_program_status(nebstruct_program_status_data * state) {
 	struct payload * ret = payload_new();	
@@ -52,7 +54,6 @@ static struct payload * parse_event_handler(nebstruct_event_handler_data * state
 		service_obj = find_service(state->host_name,
 			state->service_description);
 
-	lock_obj(state->host_name, state->service_description);
 	payload_new_string(ret, "host_name", state->host_name);
 	payload_new_string(ret, "service_description", state->service_description);
 	payload_new_integer(ret, "state", state->state);
@@ -83,7 +84,6 @@ static struct payload * parse_event_handler(nebstruct_event_handler_data * state
 		payload_new_integer(ret, "return_code", state->return_code);
 		payload_new_string(ret, "output", state->output);
 	}
-	unlock_obj(state->host_name, state->service_description);
 	return ret;
 }
 
@@ -91,7 +91,6 @@ static struct payload * parse_host_check(nebstruct_host_check_data * state) {
 	struct payload * ret = payload_new();
 	host * obj = find_host(state->host_name);
 
-	lock_obj(state->host_name, NULL);
 	payload_new_string(ret, "host_name", state->host_name);
 	payload_new_integer(ret, "current_attempt", state->current_attempt);
 	payload_new_integer(ret, "max_attempts", state->max_attempts);
@@ -111,6 +110,7 @@ static struct payload * parse_host_check(nebstruct_host_check_data * state) {
 		payload_new_integer(ret, "retry_interval", obj->retry_interval);
 		payload_new_boolean(ret, "accept_passive_checks", obj->accept_passive_host_checks);
 	} else if(state->type == NEBTYPE_HOSTCHECK_PROCESSED) {
+		lock_obj(state->host_name, NULL, NULL, NULL, NULL);
 		payload_new_string(ret, "type", "host_check_processed");
 		payload_new_integer(ret, "timeout", state->timeout);
 		payload_new_timestamp(ret, "start_time", &state->start_time);
@@ -122,8 +122,9 @@ static struct payload * parse_host_check(nebstruct_host_check_data * state) {
 		payload_new_string(ret, "output", state->output);
 		payload_new_string(ret, "long_output", state->long_output);
 		payload_new_string(ret, "perf_data", state->perf_data);
+		unlock_obj(state->host_name, NULL, state->output,
+			state->long_output, state->perf_data);
 	}
-	unlock_obj(state->host_name, NULL);
 	return ret;
 }
 
@@ -131,7 +132,6 @@ static struct payload * parse_service_check(nebstruct_service_check_data * state
 	struct payload * ret = payload_new();
 	service * obj = find_service(state->host_name, state->service_description);
 
-	lock_obj(state->host_name, state->service_description);
 	payload_new_string(ret, "host_name", state->host_name);
 	payload_new_string(ret, "service_description", state->service_description);
 	payload_new_integer(ret, "current_attempt", state->current_attempt);
@@ -152,6 +152,7 @@ static struct payload * parse_service_check(nebstruct_service_check_data * state
 		payload_new_integer(ret, "retry_interval", obj->retry_interval);
 		payload_new_boolean(ret, "accept_passive_checks", obj->accept_passive_service_checks);
 	} else if(state->type == NEBTYPE_SERVICECHECK_PROCESSED) {
+		lock_obj(state->host_name, state->service_description, NULL, NULL, NULL);
 		payload_new_string(ret, "type", "service_check_processed");
 		payload_new_timestamp(ret, "start_time", &state->start_time);
 		payload_new_timestamp(ret, "end_time", &state->end_time);
@@ -163,8 +164,9 @@ static struct payload * parse_service_check(nebstruct_service_check_data * state
 		payload_new_string(ret, "long_output", state->long_output);
 		payload_new_string(ret, "perf_data", state->perf_data);
 		payload_new_integer(ret, "timeout", state->timeout);
+		unlock_obj(state->host_name, state->service_description,
+			state->output, state->long_output, state->perf_data);
 	}
-	unlock_obj(state->host_name, state->service_description);
 	return ret;
 }
 
@@ -191,7 +193,6 @@ static struct payload * parse_statechange(nebstruct_statechange_data * state) {
 	if(state->service_description)
 		service_target = find_service(state->host_name, state->service_description);
 
-	lock_obj(state->host_name, state->service_description);
 	payload_new_string(ret, "type", "statechange");
 	payload_new_string(ret, "host_name", state->host_name);
 	payload_new_string(ret, "service_description", state->service_description);
@@ -214,7 +215,6 @@ static struct payload * parse_statechange(nebstruct_statechange_data * state) {
 		payload_new_boolean(ret, "is_flapping", host_target->is_flapping);
 		payload_new_boolean(ret, "problem_has_been_acknowledged", host_target->problem_has_been_acknowledged);
 	}
-	unlock_obj(state->host_name, state->service_description);
 	return ret;
 }
 

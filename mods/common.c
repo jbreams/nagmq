@@ -24,10 +24,14 @@ static pthread_cond_t init_cond = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t recv_loop_mutex = PTHREAD_MUTEX_INITIALIZER;
 void * zmq_ctx;
 json_t * config;
+extern int npassivechecks;
 
 struct lock_skip_obj {
 	char * host_name;
 	char * service_description;
+	char * plugin_output;
+	char * long_plugin_output;
+	char * perf_data;
 	pthread_mutex_t lock;
 };
 
@@ -42,10 +46,12 @@ int lock_obj_compare(void * ar, void * br) {
 	return 0;
 }
 
-void lock_obj(char * hostname, char * service) {
+void lock_obj(char * hostname, char * service, char ** plugin_output,
+	char ** long_plugin_output, char ** perf_data) {
 	if(!lock_skiplist)
 		return;
-	struct lock_skip_obj test = { hostname, service, PTHREAD_MUTEX_INITIALIZER };
+	struct lock_skip_obj test = { hostname, service, NULL, NULL, NULL,
+		PTHREAD_MUTEX_INITIALIZER };
 	struct lock_skip_obj * lock = skiplist_find_first(lock_skiplist, &test, NULL);
 	if(lock == NULL) {
 		lock = malloc(sizeof(struct lock_skip_obj));
@@ -58,16 +64,26 @@ void lock_obj(char * hostname, char * service) {
 		skiplist_insert(lock_skiplist, lock);
 	}
 
+	if(plugin_output)
+		*plugin_output = lock->plugin_output;
+	if(long_plugin_output)
+		*long_plugin_output = lock->long_plugin_output;
+	if(perf_data)
+		*perf_data = lock->perf_data;
+
 	pthread_mutex_lock(&lock->lock);
 }
 
-void unlock_obj(char * hostname, char * service) {
+void unlock_obj(char * hostname, char * service, char * plugin_output,
+	char * long_plugin_output, char * perf_data) {
 	if(!lock_skiplist)
 		return;
-	struct lock_skip_obj test = { hostname, service, PTHREAD_MUTEX_INITIALIZER };
+	struct lock_skip_obj test = { hostname, service, NULL, NULL, NULL,
+		PTHREAD_MUTEX_INITIALIZER };
 	struct lock_skip_obj * lock = skiplist_find_first(lock_skiplist, &test, NULL);
 	if(lock == NULL) {
 		lock = malloc(sizeof(struct lock_skip_obj));
+		memset(lock, 0, sizeof(struct lock_skip_obj));
 		lock->host_name = strdup(hostname);
 		if(service)
 			lock->service_description = strdup(service);
@@ -75,6 +91,19 @@ void unlock_obj(char * hostname, char * service) {
 			lock->service_description = NULL;
 		pthread_mutex_init(&lock->lock, NULL);
 		skiplist_insert(lock_skiplist, lock);
+	}
+
+	if(plugin_output) {
+		free(lock->plugin_output);
+		lock->plugin_output = strdup(plugin_output);
+	}
+	if(long_plugin_output) {
+		free(lock->long_plugin_output);
+		lock->long_plugin_output = strdup(long_plugin_output);
+	}
+	if(perf_data) {
+		free(lock->perf_data);
+		lock->perf_data = strdup(perf_data);
 	}
 
 	pthread_mutex_unlock(&lock->lock);
@@ -89,6 +118,12 @@ int nebmodule_deinit(int flags, int reason) {
 		if(lock->service_description)
 			free(lock->service_description);
 		free(lock->host_name);
+		if(lock->plugin_output)
+			free(lock->plugin_output);
+		if(lock->long_plugin_output)
+			free(lock->long_plugin_output);
+		if(lock->perf_data)
+			free(lock->perf_data);
 		pthread_mutex_destroy(&lock->lock);
 		free(lock);
 	}
@@ -180,7 +215,13 @@ void * recv_loop(void * parg) {
 	void * pullsock, * reqsock;
 	int enablepull = 0, enablereq = 0;
 	zmq_pollitem_t pollables[2];
-	int npollables = 0;
+	int npollables = 0, rc;
+
+	sigset_t signal_set;
+	sigfillset(&signal_set);
+	pthread_sigmask(SIG_BLOCK, &signal_set, NULL);
+
+	pthread_mutex_lock(&recv_loop_mutex);
 
 	if(json_unpack(config, "{ s?:{ s:b } s?:{ s:b } }",
 		"pull", "enable", &enablepull,
@@ -208,15 +249,27 @@ void * recv_loop(void * parg) {
 		pollables[npollables++].events = ZMQ_POLLIN;
 	}
 
-	while(zmq_poll(pollables, npollables, -1) > -1) {
+	lock_skiplist = skiplist_new(15, 0.5, 0, 0, lock_obj_compare);
+	pthread_cond_signal(&init_cond);
+	pthread_mutex_unlock(&recv_loop_mutex);
+
+	while((rc = zmq_poll(pollables, npollables, 20000)) > -1) {
 		int events;
 		size_t size = sizeof(events);
-		zmq_getsockopt(pullsock, ZMQ_EVENTS, &events, &size);
-		if(events == ZMQ_POLLIN)
-			process_pull_msg(pullsock);
-		zmq_getsockopt(reqsock, ZMQ_EVENTS, &events, &size);
-		if(events == ZMQ_POLLIN)
-			process_req_msg(reqsock);
+		if(enablepull) {
+			zmq_getsockopt(pullsock, ZMQ_EVENTS, &events, &size);
+			if(events == ZMQ_POLLIN)
+				process_pull_msg(pullsock);
+		}
+		if(enablereq) {
+			zmq_getsockopt(reqsock, ZMQ_EVENTS, &events, &size);
+			if(events == ZMQ_POLLIN)
+				process_req_msg(reqsock);
+		}
+		if(npassivechecks > 1024 || rc == 0) {
+			process_passive_checks();
+			npassivechecks = 0;
+		}
 	}
 	return NULL;
 }

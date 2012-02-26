@@ -18,6 +18,7 @@
 #include "jansson.h"
 
 extern int errno;
+int npassivechecks = 0;
 
 static void process_status(json_t * payload) {
 	char * host_name, *service_description = NULL, *output;
@@ -49,6 +50,7 @@ static void process_status(json_t * payload) {
 		process_passive_host_check(timestamp, host_name,
 			return_code, output);
 
+	npassivechecks++;
 	json_decref(payload);
 }
 

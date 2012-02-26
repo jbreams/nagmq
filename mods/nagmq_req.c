@@ -19,14 +19,26 @@
 
 extern int errno;
 
-void lock_obj(char * hostname, char * service);
-void unlock_obj(char * hostname, char * service);
+void lock_obj(char * hostname, char * service, char ** plugin_output,
+	char ** long_plugin_output, char ** perf_data);
+void unlock_obj(char * hostname, char * service, char * plugin_output,
+	char * long_plugin_output, char * perf_data);
 
-static void parse_host(host * state, struct payload * ret) {
-	lock_obj(state->name, NULL);
+static void parse_service(service * state, struct payload * ret,
+	int include_host, int include_contacts);
+static void parse_host(host * state, struct payload * ret,
+	int include_services, int include_contacts);
+static void parse_contact(contact * state, struct payload * ret);
+static void parse_contactgroup(contactgroup * state, struct payload * ret);
+
+static void parse_host(host * state, struct payload * ret,
+	int include_services, int include_contacts) {
+	char * plugin_output, *long_plugin_output, *perf_data;
+	lock_obj(state->name, NULL, &plugin_output,
+		&long_plugin_output, &perf_data);
 	payload_start_object(ret, NULL);
 	payload_new_string(ret, "type", "host");
-	payload_new_string(ret, "name", state->name);
+	payload_new_string(ret, "host_name", state->name);
 	payload_new_string(ret, "display_name", state->display_name);
 	payload_new_string(ret, "alias", state->alias);
 	payload_new_string(ret, "address", state->address);
@@ -139,9 +151,6 @@ static void parse_host(host * state, struct payload * ret) {
 	payload_new_integer(ret, "current_state", state->current_state);
 	payload_new_integer(ret, "last_state", state->last_state);
 	payload_new_integer(ret, "last_hard_state", state->last_hard_state);
-	payload_new_string(ret, "plugin_output", state->plugin_output);
-	payload_new_string(ret, "long_plugin_output", state->long_plugin_output);
-	payload_new_string(ret, "perf_data", state->perf_data);
 	payload_new_integer(ret, "current_attempt", state->current_attempt);
 	payload_new_integer(ret, "current_event_id", state->current_event_id);
 	payload_new_integer(ret, "last_event_id", state->last_event_id);
@@ -188,15 +197,40 @@ static void parse_host(host * state, struct payload * ret) {
 	payload_new_integer(ret, "circular_path_checked", state->circular_path_checked);
 	payload_new_integer(ret, "contains_circular_path", state->contains_circular_path);
 	payload_end_object(ret);
-	unlock_obj(state->name, NULL);
+
+	if(include_services) {
+		slck = state->services;
+		while(slck) {
+			parse_service(slck->service_ptr, ret, 0, 0);
+			slck = slck->next;
+		}
+	}
+
+	if(include_contacts) {
+		clck = state->contacts;
+		while(clck) {
+			parse_contact(clck->contact_ptr, ret);
+			clck = clck->next;
+		}
+
+		cglck = state->contact_groups;
+		while(cglck) {
+			parse_contactgroup(cglck->group_ptr, ret);
+			cglck = cglck->next;
+		}
+	}
+	unlock_obj(state->name, NULL, NULL, NULL, NULL);
 }
 
-static void parse_service(service * state, struct payload * ret) {
-	lock_obj(state->host_name, state->description);
+static void parse_service(service * state, struct payload * ret,
+	int include_host, int include_contacts) {
+	char * plugin_output, *long_plugin_output, *perf_data;
+	lock_obj(state->host_name, state->description,
+		&plugin_output, &long_plugin_output, &perf_data);
 	payload_start_object(ret, NULL);
 	payload_new_string(ret, "type", "service");
 	payload_new_string(ret, "host_name", state->host_name);
-	payload_new_string(ret, "description", state->description);
+	payload_new_string(ret, "service_description", state->description);
 	payload_new_string(ret, "display_name", state->display_name);
 	payload_new_string(ret, "service_check_command", state->service_check_command);
 	payload_new_string(ret, "event_handler", state->event_handler);
@@ -271,9 +305,9 @@ static void parse_service(service * state, struct payload * ret) {
 	payload_new_integer(ret, "current_state", state->current_state);
 	payload_new_integer(ret, "last_state", state->last_state);
 	payload_new_integer(ret, "last_hard_state", state->last_hard_state);
-	payload_new_string(ret, "plugin_output", state->plugin_output);
-	payload_new_string(ret, "long_plugin_output", state->long_plugin_output);
-	payload_new_string(ret, "perf_data", state->perf_data);
+	payload_new_string(ret, "plugin_output", plugin_output);
+	payload_new_string(ret, "long_plugin_output", long_plugin_output);
+	payload_new_string(ret, "perf_data", perf_data);
 	payload_new_integer(ret, "next_check", state->next_check);
 	payload_new_boolean(ret, "should_be_scheduled", state->should_be_scheduled);
 	payload_new_integer(ret, "last_check", state->last_check);
@@ -317,7 +351,25 @@ static void parse_service(service * state, struct payload * ret) {
 	payload_new_string(ret, "event_handler_args", state->event_handler_args);
 	payload_new_string(ret, "check_command_args", state->check_command_args);
 	payload_end_object(ret);
-	unlock_obj(state->host_name, state->description);
+
+	if(include_host)
+		parse_host(state->host_ptr, ret, 0, 0);
+
+	if(include_contacts) {
+		clck = state->contacts;
+		while(clck) {
+			parse_contact(clck->contact_ptr, ret);
+			clck = clck->next;
+		}
+
+		cglck = state->contact_groups;
+		while(cglck) {
+			parse_contactgroup(cglck->group_ptr, ret);
+			cglck = cglck->next;
+		}
+	}
+
+	unlock_obj(state->host_name, state->description, NULL, NULL, NULL);
 }
 
 static void parse_hostgroup(hostgroup * state, struct payload * ret) {
@@ -359,7 +411,6 @@ static void parse_servicegroup(servicegroup * state, struct payload * ret) {
 		payload_end_array(ret);
 	} else
 		payload_new_string(ret, "members", NULL);
-
 	payload_end_object(ret);
 }
 
@@ -471,49 +522,14 @@ void process_req_msg(void * sock) {
 			return;
 		}
 		
-		parse_service(svctarget, po);
-		if(include_hosts)
-			parse_host(svctarget->host_ptr, po);
-
-		if(include_contacts) {
-			contactgroupsmember * cgtmp = svctarget->contact_groups;
-			while(cgtmp) {
-				parse_contactgroup(cgtmp->group_ptr, po);
-				cgtmp = cgtmp->next;
-			}
-			contactsmember * ctmp = svctarget->contacts;
-			while(ctmp) {
-				parse_contact(ctmp->contact_ptr, po);
-				ctmp = ctmp->next;
-			}
-		}
+		parse_service(svctarget, po, include_hosts, include_contacts);
 	} else if(host_name) {
 		host * hsttarget = find_host(host_name);
 		if(!hsttarget) {
 			free(po);
 			return;
 		}
-		parse_host(hsttarget, po);
-		if(include_services) {
-			servicesmember * stmp = hsttarget->services;
-			while(stmp) {
-				parse_service(stmp->service_ptr, po);
-				stmp = stmp->next;
-			}
-		}
-
-		if(include_contacts) {
-			contactgroupsmember * cgtmp = hsttarget->contact_groups;
-			while(cgtmp) {
-				parse_contactgroup(cgtmp->group_ptr, po);
-				cgtmp = cgtmp->next;
-			}
-			contactsmember * ctmp = hsttarget->contacts;
-			while(ctmp) {
-				parse_contact(ctmp->contact_ptr, po);
-				ctmp = ctmp->next;
-			}
-		}
+		parse_host(hsttarget, po, include_services, include_contacts);
 	}
 	if(hostgroup_name) {
 		hostgroup * hsttarget = find_hostgroup(hostgroup_name);
@@ -525,7 +541,7 @@ void process_req_msg(void * sock) {
 		if(include_hosts) {
 			hostsmember * htmp = hsttarget->members;
 			while(htmp) {
-				parse_host(htmp->host_ptr, po);
+				parse_host(htmp->host_ptr, po, 0, 0);
 				htmp = htmp->next;
 			}
 		}
@@ -540,7 +556,7 @@ void process_req_msg(void * sock) {
 		if(include_services) {
 			servicesmember * stmp = svctarget->members;
 			while(stmp) {
-				parse_service(stmp->service_ptr, po);
+				parse_service(stmp->service_ptr, po, 0, 0);
 				stmp = stmp->next;
 			}
 		}
