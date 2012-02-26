@@ -188,7 +188,7 @@ void * getsock(char * forwhat, int type) {
 		if(json_is_string(bind) && zmq_bind(sock,
 			json_string_value(bind)) != 0) {
 			syslog(LOG_ERR, "Error binding %s to %s: %s",
-				forwhat, bind, zmq_strerror(errno));
+				forwhat, json_string_value(bind), zmq_strerror(errno));
 			zmq_close(sock);
 			return NULL;
 		} else if(json_is_array(bind)) {

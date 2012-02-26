@@ -51,7 +51,7 @@ static void process_status(json_t * payload, char * type, size_t typelen) {
 		}
 		process_passive_service_check(timestamp, host_name,
 			service_description, return_code, output);
-	else
+	} else
 		process_passive_host_check(timestamp, host_name,
 			return_code, output);
 
@@ -294,9 +294,9 @@ void process_pull_msg(void * sock) {
 	if(strncmp(type, "command", typelen) == 0)
 		process_cmd(payload);
 	else if(strncmp(type, "host_check_processed", typelen) == 0)
-		process_status(payload);
+		process_status(payload, type, typelen);
 	else if(strncmp(type, "service_check_processed", typelen) == 0)
-		process_status(payload);
+		process_status(payload, type, typelen);
 	else if(strncmp(type, "acknowledgement", typelen) == 0)
 		process_acknowledgement(payload);
 	else if(strncmp(type, "comment_add", typelen) == 0)
