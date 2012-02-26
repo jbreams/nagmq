@@ -14,21 +14,14 @@
 #include <zmq.h>
 #include "json.h"
 
-static void * nagmq_handle = NULL;
-static void * zmq_ctx = NULL;
-static void * pubext = NULL;
 extern int errno;
-static char * args = NULL;
+extern void * handle;
+void * pubext;
 
-NEB_API_VERSION(CURRENT_NEB_API_VERSION)
-
-int nebmodule_deinit(int flags, int reason) {
-	neb_deregister_module_callbacks(nagmq_handle);
-	if(args)
-		free(args);
-
-	return 0;
-}
+void lock_obj(char * hostname, char * service, char ** plugin_output,
+	char ** long_plugin_output, char ** perf_data);
+void unlock_obj(char * hostname, char * service, char * plugin_output,
+	char * long_plugin_output, char * perf_data);
 
 static struct payload * parse_program_status(nebstruct_program_status_data * state) {
 	struct payload * ret = payload_new();	
@@ -39,17 +32,58 @@ static struct payload * parse_program_status(nebstruct_program_status_data * sta
 	payload_new_integer(ret, "daemon_mode", state->daemon_mode);
 	payload_new_integer(ret, "last_command_check", state->last_command_check);
 	payload_new_integer(ret, "last_log_rotation", state->last_log_rotation);
-	payload_new_integer(ret, "notifications_enabled", state->notifications_enabled);
-	payload_new_integer(ret, "active_service_checks_enabled", state->active_service_checks_enabled);
-	payload_new_integer(ret, "passive_service_checks_enabled", state->passive_service_checks_enabled);
-	payload_new_integer(ret, "active_host_checks_enabled", state->active_host_checks_enabled);
-	payload_new_integer(ret, "passive_host_checks_enabled", state->passive_host_checks_enabled);
-	payload_new_integer(ret, "event_handlers_enabled", state->event_handlers_enabled);
-	payload_new_integer(ret, "flap_detection_enabled", state->flap_detection_enabled);
-	payload_new_integer(ret, "failure_prediction_enabled", state->failure_prediction_enabled);
-	payload_new_integer(ret, "process_performance_data", state->process_performance_data);
-	payload_new_integer(ret, "obsess_over_hosts", state->obsess_over_hosts);
-	payload_new_integer(ret, "obsess_over_services", state->obsess_over_services);
+	payload_new_boolean(ret, "notifications_enabled", state->notifications_enabled);
+	payload_new_boolean(ret, "active_service_checks_enabled", state->active_service_checks_enabled);
+	payload_new_boolean(ret, "passive_service_checks_enabled", state->passive_service_checks_enabled);
+	payload_new_boolean(ret, "active_host_checks_enabled", state->active_host_checks_enabled);
+	payload_new_boolean(ret, "passive_host_checks_enabled", state->passive_host_checks_enabled);
+	payload_new_boolean(ret, "event_handlers_enabled", state->event_handlers_enabled);
+	payload_new_boolean(ret, "flap_detection_enabled", state->flap_detection_enabled);
+	payload_new_boolean(ret, "failure_prediction_enabled", state->failure_prediction_enabled);
+	payload_new_boolean(ret, "process_performance_data", state->process_performance_data);
+	payload_new_boolean(ret, "obsess_over_hosts", state->obsess_over_hosts);
+	payload_new_boolean(ret, "obsess_over_services", state->obsess_over_services);
+	return ret;
+}
+
+static struct payload * parse_event_handler(nebstruct_event_handler_data * state) {
+	struct payload * ret = payload_new();
+	host * host_obj = find_host(state->host_name);
+	service * service_obj = NULL;
+	if(state->service_description)
+		service_obj = find_service(state->host_name,
+			state->service_description);
+
+	payload_new_string(ret, "host_name", state->host_name);
+	payload_new_string(ret, "service_description", state->service_description);
+	payload_new_integer(ret, "state", state->state);
+	if(service_obj) {
+		payload_new_integer(ret, "last_state", service_obj->last_state);
+		payload_new_integer(ret, "last_hard_state", service_obj->last_hard_state);
+		payload_new_integer(ret, "last_check", service_obj->last_check);
+		payload_new_integer(ret, "last_state_change", service_obj->last_state_change);
+	} else {
+		payload_new_integer(ret, "last_state", host_obj->last_state);
+		payload_new_integer(ret, "last_hard_state", host_obj->last_hard_state);
+		payload_new_integer(ret, "last_check", host_obj->last_check);
+		payload_new_integer(ret, "last_state_change", host_obj->last_state_change);
+	}
+
+	if(state->type == NEBTYPE_EVENTHANDLER_START) {
+		payload_new_string(ret, "type", "eventhandler_start");
+		payload_new_string(ret, "command_name", state->command_name);
+		payload_new_string(ret, "command_args", state->command_args);
+		payload_new_string(ret, "command_line", state->command_line);
+	} else {
+		payload_new_string(ret, "type", "eventhandler_stop");
+		payload_new_integer(ret, "timeout", state->timeout);
+		payload_new_timestamp(ret, "start_time", &state->start_time);
+		payload_new_timestamp(ret, "end_time", &state->end_time);
+		payload_new_integer(ret, "early_timeout", state->early_timeout);
+		payload_new_double(ret, "execution_time", state->execution_time);
+		payload_new_integer(ret, "return_code", state->return_code);
+		payload_new_string(ret, "output", state->output);
+	}
 	return ret;
 }
 
@@ -71,11 +105,12 @@ static struct payload * parse_host_check(nebstruct_host_check_data * state) {
 		payload_new_string(ret, "command_name", state->command_name);
 		payload_new_string(ret, "command_args", state->command_args);
 		payload_new_string(ret, "command_line", state->command_line);
-		payload_new_integer(ret, "has_been_checked", obj->has_been_checked);
+		payload_new_boolean(ret, "has_been_checked", obj->has_been_checked);
 		payload_new_integer(ret, "check_interval", obj->check_interval);
 		payload_new_integer(ret, "retry_interval", obj->retry_interval);
-		payload_new_integer(ret, "accept_passive_checks", obj->accept_passive_host_checks);
+		payload_new_boolean(ret, "accept_passive_checks", obj->accept_passive_host_checks);
 	} else if(state->type == NEBTYPE_HOSTCHECK_PROCESSED) {
+		lock_obj(state->host_name, NULL, NULL, NULL, NULL);
 		payload_new_string(ret, "type", "host_check_processed");
 		payload_new_integer(ret, "timeout", state->timeout);
 		payload_new_timestamp(ret, "start_time", &state->start_time);
@@ -87,6 +122,8 @@ static struct payload * parse_host_check(nebstruct_host_check_data * state) {
 		payload_new_string(ret, "output", state->output);
 		payload_new_string(ret, "long_output", state->long_output);
 		payload_new_string(ret, "perf_data", state->perf_data);
+		unlock_obj(state->host_name, NULL, state->output,
+			state->long_output, state->perf_data);
 	}
 	return ret;
 }
@@ -110,11 +147,12 @@ static struct payload * parse_service_check(nebstruct_service_check_data * state
 		payload_new_string(ret, "command_name", state->command_name);
 		payload_new_string(ret, "command_args", state->command_args);
 		payload_new_string(ret, "command_line", state->command_line);
-		payload_new_integer(ret, "has_been_checked", obj->has_been_checked);
+		payload_new_boolean(ret, "has_been_checked", obj->has_been_checked);
 		payload_new_integer(ret, "check_interval", obj->check_interval);
 		payload_new_integer(ret, "retry_interval", obj->retry_interval);
-		payload_new_integer(ret, "accept_passive_checks", obj->accept_passive_service_checks);
+		payload_new_boolean(ret, "accept_passive_checks", obj->accept_passive_service_checks);
 	} else if(state->type == NEBTYPE_SERVICECHECK_PROCESSED) {
+		lock_obj(state->host_name, state->service_description, NULL, NULL, NULL);
 		payload_new_string(ret, "type", "service_check_processed");
 		payload_new_timestamp(ret, "start_time", &state->start_time);
 		payload_new_timestamp(ret, "end_time", &state->end_time);
@@ -126,6 +164,8 @@ static struct payload * parse_service_check(nebstruct_service_check_data * state
 		payload_new_string(ret, "long_output", state->long_output);
 		payload_new_string(ret, "perf_data", state->perf_data);
 		payload_new_integer(ret, "timeout", state->timeout);
+		unlock_obj(state->host_name, state->service_description,
+			state->output, state->long_output, state->perf_data);
 	}
 	return ret;
 }
@@ -140,14 +180,18 @@ static struct payload * parse_acknowledgement(nebstruct_acknowledgement_data * s
 	payload_new_integer(ret, "acknowledgement_type", state->acknowledgement_type);
 	payload_new_string(ret, "author_name", state->author_name);
 	payload_new_string(ret, "comment_data", state->comment_data);
-	payload_new_integer(ret, "is_sticky", state->is_sticky);
-	payload_new_integer(ret, "persistent_comment", state->persistent_comment);
-	payload_new_integer(ret, "notify_contacts", state->notify_contacts);
+	payload_new_boolean(ret, "is_sticky", state->is_sticky);
+	payload_new_boolean(ret, "persistent_comment", state->persistent_comment);
+	payload_new_boolean(ret, "notify_contacts", state->notify_contacts);
 	return ret;
 }
 
 static struct payload * parse_statechange(nebstruct_statechange_data * state) {
 	struct payload * ret = payload_new();
+	host * host_target = find_host(state->host_name);
+	service * service_target = NULL;
+	if(state->service_description)
+		service_target = find_service(state->host_name, state->service_description);
 
 	payload_new_string(ret, "type", "statechange");
 	payload_new_string(ret, "host_name", state->host_name);
@@ -156,6 +200,21 @@ static struct payload * parse_statechange(nebstruct_statechange_data * state) {
 	payload_new_integer(ret, "current_attempt", state->current_attempt);
 	payload_new_integer(ret, "max_attempts", state->max_attempts);
 	payload_new_string(ret, "output", state->output);
+	if(service_target) {
+		payload_new_integer(ret, "last_state", service_target->last_state);
+		payload_new_integer(ret, "last_hard_state", service_target->last_hard_state);
+		payload_new_integer(ret, "last_check", service_target->last_check);
+		payload_new_integer(ret, "last_state_change", service_target->last_state_change);
+		payload_new_boolean(ret, "is_flapping", service_target->is_flapping);
+		payload_new_boolean(ret, "problem_has_been_acknowledged", service_target->problem_has_been_acknowledged);
+	} else {
+		payload_new_integer(ret, "last_state", host_target->last_state);
+		payload_new_integer(ret, "last_hard_state", host_target->last_hard_state);
+		payload_new_integer(ret, "last_check", host_target->last_check);
+		payload_new_integer(ret, "last_state_change", host_target->last_state_change);
+		payload_new_boolean(ret, "is_flapping", host_target->is_flapping);
+		payload_new_boolean(ret, "problem_has_been_acknowledged", host_target->problem_has_been_acknowledged);
+	}
 	return ret;
 }
 
@@ -169,9 +228,9 @@ static struct payload * parse_comment(nebstruct_comment_data * state) {
 		payload_new_integer(ret, "entry_time", state->entry_time);
 		payload_new_string(ret, "author_name", state->author_name);
 		payload_new_string(ret, "comment_data", state->comment_data);
-		payload_new_integer(ret, "persistent", state->persistent);
+		payload_new_boolean(ret, "persistent", state->persistent);
 		payload_new_integer(ret, "source", state->source);
-		payload_new_integer(ret, "expires", state->expires);
+		payload_new_boolean(ret, "expires", state->expires);
 		payload_new_integer(ret, "expire_time", state->expire_time);
 	} else if(state->type == NEBTYPE_COMMENT_DELETE) {
 		payload_new_string(ret, "type", "comment_delete");
@@ -207,7 +266,7 @@ static struct payload * parse_downtime(nebstruct_downtime_data * state) {
 	payload_new_string(ret, "comment_data", state->comment_data);
 	payload_new_integer(ret, "start_time", state->start_time);
 	payload_new_integer(ret, "end_time", state->end_time);
-	payload_new_integer(ret, "fixed", state->fixed);
+	payload_new_boolean(ret, "fixed", state->fixed);
 	payload_new_integer(ret, "duration", state->duration);
 	payload_new_integer(ret, "triggered_by", state->triggered_by);
 	payload_new_integer(ret, "downtime_id", state->downtime_id);
@@ -235,7 +294,7 @@ void free_cb(void * ptr, void * hint) {
 	free(ptr);
 }
 
-static void process_payload(struct payload * payload) {
+void process_payload(struct payload * payload) {
 	zmq_msg_t type, dump;
 	int rc;
 
@@ -247,7 +306,6 @@ static void process_payload(struct payload * payload) {
 	//	syslog(LOG_ERR, "Error sending type header: %s",
 	//		zmq_strerror(rc));
 		free(payload->json_buf);
-		free(payload->type);
 		free(payload);
 		return;
 	}
@@ -265,6 +323,9 @@ int handle_nagdata(int which, void * obj) {
 	struct payload * payload = NULL;	
 	nebstruct_process_data * raw = obj;
 	switch(which) {
+	case NEBCALLBACK_EVENT_HANDLER_DATA:
+		payload = parse_event_handler(obj);
+		break;
 	case NEBCALLBACK_HOST_CHECK_DATA:
 		switch(raw->type) {
 			case NEBTYPE_HOSTCHECK_INITIATE:
@@ -317,43 +378,21 @@ int handle_nagdata(int which, void * obj) {
 	return 0;
 }
 
-int setup_zmq(char * args, int type, 
-	void ** ctxo, void ** socko);
+void * getsock(char * what, int type);
 
-int handle_startup(int which, void * obj) {
-	struct nebstruct_process_struct *ps = (struct nebstruct_process_struct *)obj;
-	struct payload * payload;
-	if (ps->type == NEBTYPE_PROCESS_EVENTLOOPSTART) {
-		if(setup_zmq(args, ZMQ_PUB, &zmq_ctx, &pubext) < 0) {
-			nebmodule_deinit(0, 0);
-			return -1;
-		};
+int handle_pubstartup() {
+	pubext = getsock("publisher", ZMQ_PUB);
+	if(pubext == NULL)
+		return -1;
 
-		payload = payload_new();
-		payload_new_string(payload, "type", "eventloopstart");
-		payload_new_timestamp(payload, "timestamp", &ps->timestamp);
-		payload_finalize(payload);
-		process_payload(payload);
-	} else if(ps->type == NEBTYPE_PROCESS_EVENTLOOPEND) {
-		payload = payload_new();
-		payload_new_string(payload, "type", "eventloopend");
-		payload_new_timestamp(payload, "timestamp", &ps->timestamp);
-		payload_finalize(payload);
-		process_payload(payload);
-		zmq_close(pubext);
-		zmq_term(zmq_ctx);
-	}
-	return 0;
-}
-
-int nebmodule_init(int flags, char * localargs, nebmodule * handle) {
-	neb_set_module_info(handle, NEBMODULE_MODINFO_TITLE, "nagmq publisher");
-	neb_set_module_info(handle, NEBMODULE_MODINFO_AUTHOR, "Jonathan Reams");
-	neb_set_module_info(handle, NEBMODULE_MODINFO_VERSION, "0.8");
-	neb_set_module_info(handle, NEBMODULE_MODINFO_LICENSE, "Apache v2");
-	neb_set_module_info(handle, NEBMODULE_MODINFO_DESC,
-		"Publishes Nagios data to 0MQ");
-
+	neb_register_callback(NEBCALLBACK_COMMENT_DATA, handle,
+		0, handle_nagdata);
+	neb_register_callback(NEBCALLBACK_DOWNTIME_DATA, handle,
+		0, handle_nagdata);
+	neb_register_callback(NEBCALLBACK_PROGRAM_STATUS_DATA, handle,
+		0, handle_nagdata);
+	neb_register_callback(NEBCALLBACK_EVENT_HANDLER_DATA, handle,
+		0, handle_nagdata);
 	neb_register_callback(NEBCALLBACK_HOST_CHECK_DATA, handle,
 		0, handle_nagdata);
 	neb_register_callback(NEBCALLBACK_SERVICE_CHECK_DATA, handle,
@@ -362,17 +401,6 @@ int nebmodule_init(int flags, char * localargs, nebmodule * handle) {
 		0, handle_nagdata);
 	neb_register_callback(NEBCALLBACK_STATE_CHANGE_DATA, handle,
 		0, handle_nagdata);
-	neb_register_callback(NEBCALLBACK_PROCESS_DATA, handle,
-		0, handle_startup);
-	neb_register_callback(NEBCALLBACK_COMMENT_DATA, handle,
-		0, handle_nagdata);
-	neb_register_callback(NEBCALLBACK_DOWNTIME_DATA, handle,
-		0, handle_nagdata);
-	neb_register_callback(NEBCALLBACK_PROGRAM_STATUS_DATA, handle,
-		0, handle_nagdata);
-
-	nagmq_handle = handle;
-	args = strdup(localargs);
-
 	return 0;
 }
+
