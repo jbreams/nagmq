@@ -43,7 +43,9 @@ while True:
 			payload['host_name'])
 	else:
 		name = payload['host_name']
-	if(payload['state'] == payload['last_state']):
+	if(payload['state'] != payload['last_hard_state']):
+		continue
+	if(payload['current_attempt'] == 1):
 		continue
 	if(payload['problem_has_been_acknowledged'] == True and
 		payload['state'] != 0):
