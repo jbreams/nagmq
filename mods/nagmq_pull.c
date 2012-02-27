@@ -55,7 +55,7 @@ static void process_status(json_t * payload, char * type, size_t typelen) {
 		process_passive_host_check(timestamp, host_name,
 			return_code, output);
 
-	npassivechecks++;
+	process_passive_checks();
 	json_decref(payload);
 }
 
@@ -264,9 +264,8 @@ void process_pull_msg(void * sock) {
 	size_t imlen = sizeof(ismore);
 	zmq_msg_init(&type_msg);
 	
-	if(zmq_recv(sock, &type_msg, 0) == 0) {
+	if(zmq_recv(sock, &type_msg, 0) != 0)
 		return;
-	}
 
 	zmq_getsockopt(sock, ZMQ_RCVMORE, &ismore, &imlen);
 	if(!ismore) {

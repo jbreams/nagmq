@@ -47,7 +47,7 @@ static void parse_host(host * state, struct payload * ret,
 	if(slck) {
 		payload_start_array(ret, "services");
 		while(slck) {
-			payload_new_string(ret, NULL, slck->service_description);
+			payload_new_string(ret, NULL, slck->service_ptr->description);
 			slck = slck->next;
 		}
 		payload_end_array(ret);
@@ -151,6 +151,9 @@ static void parse_host(host * state, struct payload * ret,
 	payload_new_integer(ret, "current_state", state->current_state);
 	payload_new_integer(ret, "last_state", state->last_state);
 	payload_new_integer(ret, "last_hard_state", state->last_hard_state);
+	payload_new_string(ret, "plugin_output", plugin_output);
+	payload_new_string(ret, "long_plugin_output", long_plugin_output);
+	payload_new_string(ret, "perf_data", perf_data);
 	payload_new_integer(ret, "current_attempt", state->current_attempt);
 	payload_new_integer(ret, "current_event_id", state->current_event_id);
 	payload_new_integer(ret, "last_event_id", state->last_event_id);

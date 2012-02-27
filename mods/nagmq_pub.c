@@ -15,7 +15,7 @@
 #include "json.h"
 
 extern int errno;
-extern void * handle;
+extern nebmodule * handle;
 void * pubext;
 
 void lock_obj(char * hostname, char * service, char ** plugin_output,
@@ -381,7 +381,7 @@ int handle_nagdata(int which, void * obj) {
 void * getsock(char * what, int type);
 
 int handle_pubstartup() {
-	pubext = getsock("publisher", ZMQ_PUB);
+	pubext = getsock("publish", ZMQ_PUB);
 	if(pubext == NULL)
 		return -1;
 

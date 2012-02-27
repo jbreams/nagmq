@@ -4,7 +4,7 @@ import json
 context = zmq.Context()
  
 subscriber = context.socket (zmq.SUB)
-subscriber.connect("ipc:///tmp/nagmq.sock")
+subscriber.connect("ipc:///tmp/nagmqpub.sock")
 subscriber.setsockopt(zmq.SUBSCRIBE, "")
 
 while True:

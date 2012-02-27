@@ -23,6 +23,7 @@ static pthread_t threadid;
 static pthread_cond_t init_cond = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t recv_loop_mutex = PTHREAD_MUTEX_INITIALIZER;
 void * zmq_ctx;
+nebmodule * handle;
 json_t * config;
 extern int npassivechecks;
 
@@ -38,9 +39,14 @@ struct lock_skip_obj {
 int lock_obj_compare(void * ar, void * br) {
 	struct lock_skip_obj *a = ar, *b = br;
 	int r;
-	if(a->service_description &&
-		(r = strcmp(a->service_description, b->service_description)) != 0)
-		return r;
+	if(a->service_description || b->service_description) {
+		if(a->service_description && !b->service_description)
+			return -1;
+		else if(!a->service_description && b->service_description)
+			return 1;
+		else if((r = strcmp(a->service_description, b->service_description)) != 0)
+			return r;
+	}
 	if((r = strcmp(a->host_name, b->host_name)) != 0)
 		return r;
 	return 0;
@@ -55,6 +61,7 @@ void lock_obj(char * hostname, char * service, char ** plugin_output,
 	struct lock_skip_obj * lock = skiplist_find_first(lock_skiplist, &test, NULL);
 	if(lock == NULL) {
 		lock = malloc(sizeof(struct lock_skip_obj));
+		memset(lock, 0, sizeof(struct lock_skip_obj));
 		lock->host_name = strdup(hostname);
 		if(service)
 			lock->service_description = strdup(service);
@@ -94,15 +101,18 @@ void unlock_obj(char * hostname, char * service, char * plugin_output,
 	}
 
 	if(plugin_output) {
-		free(lock->plugin_output);
+		if(lock->plugin_output)
+			free(lock->plugin_output);
 		lock->plugin_output = strdup(plugin_output);
 	}
 	if(long_plugin_output) {
-		free(lock->long_plugin_output);
+		if(lock->long_plugin_output)
+			free(lock->long_plugin_output);
 		lock->long_plugin_output = strdup(long_plugin_output);
 	}
 	if(perf_data) {
-		free(lock->perf_data);
+		if(lock->perf_data)
+			free(lock->perf_data);
 		lock->perf_data = strdup(perf_data);
 	}
 
@@ -253,9 +263,22 @@ void * recv_loop(void * parg) {
 	pthread_cond_signal(&init_cond);
 	pthread_mutex_unlock(&recv_loop_mutex);
 
-	while((rc = zmq_poll(pollables, npollables, 20000)) > -1) {
+	while(1) {
 		int events;
 		size_t size = sizeof(events);
+		if((rc = zmq_poll(pollables, npollables, 20000)) < 0) {
+			rc = errno;
+			if(rc == ETERM)
+				break;
+			else if(rc == EINTR)
+				continue;
+			else {
+				syslog(LOG_ERR, "Error polling for events: %s",
+					zmq_strerror(rc));
+				continue;
+			}
+		}
+
 		if(enablepull) {
 			zmq_getsockopt(pullsock, ZMQ_EVENTS, &events, &size);
 			if(events == ZMQ_POLLIN)
@@ -266,11 +289,12 @@ void * recv_loop(void * parg) {
 			if(events == ZMQ_POLLIN)
 				process_req_msg(reqsock);
 		}
-		if(npassivechecks > 1024 || rc == 0) {
-			process_passive_checks();
-			npassivechecks = 0;
-		}
 	}
+
+	if(enablereq)
+		zmq_close(reqsock);
+	if(enablepull)
+		zmq_close(pullsock);
 	return NULL;
 }
 
@@ -336,7 +360,7 @@ int handle_startup(int which, void * obj) {
 	return 0;
 }
 
-int nebmodule_init(int flags, char * localargs, nebmodule * handle) {
+int nebmodule_init(int flags, char * localargs, nebmodule * lhandle) {
 	json_error_t loaderr;
 	neb_set_module_info(handle, NEBMODULE_MODINFO_TITLE, "nagmq subscriber");
 	neb_set_module_info(handle, NEBMODULE_MODINFO_AUTHOR, "Jonathan Reams");
@@ -352,7 +376,8 @@ int nebmodule_init(int flags, char * localargs, nebmodule * handle) {
 		return -1;
 	}
 
-	neb_register_callback(NEBCALLBACK_PROCESS_DATA, handle,
+	handle = lhandle;
+	neb_register_callback(NEBCALLBACK_PROCESS_DATA, lhandle,
 		0, handle_startup);
 
 	return 0;

@@ -80,7 +80,7 @@ void payload_new_string(struct payload * po, char * key, char * val) {
 		}
 	}
 	*out = '\0';
-	if(strcmp(key, "type") == 0)
+	if(key && strcmp(key, "type") == 0)
 		po->type = strdup(save);
 	po->bufused += out - save;
 	po->bufused += sprintf(po->json_buf + po->bufused, "\", ");
@@ -133,7 +133,9 @@ void payload_start_array(struct payload * po, char * key) {
 
 void payload_end_array(struct payload * po) {
 	adjust_payload_len(po, sizeof(", "));
-	sprintf(po->json_buf + po->bufused - 2, " ], ");
+	if(*(po->json_buf + po->bufused - 2) != '[')
+		po->bufused -= 2;
+	po->bufused += sprintf(po->json_buf + po->bufused, " ], ");
 }
 
 void payload_start_object(struct payload * po, char * key) {
@@ -144,7 +146,9 @@ void payload_start_object(struct payload * po, char * key) {
 
 void payload_end_object(struct payload * po) {
 	adjust_payload_len(po, sizeof(", "));
-	sprintf(po->json_buf + po->bufused - 2, " }, ");
+	if(*(po->json_buf + po->bufused - 2) != '{')
+		po->bufused -= 2;
+	po->bufused += sprintf(po->json_buf + po->bufused, " }, ");
 }
 
 void payload_finalize(struct payload * po) {
