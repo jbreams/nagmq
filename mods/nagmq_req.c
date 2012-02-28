@@ -527,7 +527,8 @@ void process_req_msg(void * sock) {
 	char * hostgroup_name = NULL, *servicegroup_name = NULL;
 	char * contact_name = NULL, *contactgroup_name = NULL;
 	int include_services = 0, include_hosts = 0, include_contacts = 0;
-	int list_hosts = 0, list_services = 0, brief = 0;
+	int list_hosts = 0, brief = 0;
+	json_t * list_services = NULL;
 	struct payload * po;
 
 	zmq_msg_init(&reqmsg);
@@ -539,7 +540,7 @@ void process_req_msg(void * sock) {
 	if(req == NULL)
 		return;
 
-	if(json_unpack(req, "{ s?:s s?:s s?:s s?:s s?:s s?:s s?:b s?:b"
+	if(json_unpack(req, "{ s?:s s?:s s?:s s?:s s?:s s?:s s?:o s?:b"
 		" s?:b s?:b s?:b s?b }",
 		"host_name", &host_name, "service_description",
 		&service_description, "hostgroup_name", &hostgroup_name,
@@ -576,8 +577,13 @@ void process_req_msg(void * sock) {
 		payload_start_array(po, "services");
 		service * tmp_svc = service_list;
 		while(tmp_svc) {
+			if(!json_is_true(list_services) &&
+				!(json_is_string(list_services) &&
+				strcmp(json_string_value(list_services),
+					tmp_svc->description) == 0))
+				continue;
 			payload_start_object(po, NULL);
-			payload_new_string(po, "host_name", tmp_svc->host_name);
+			payload_new_string(po, "host_name", tmp_svc->host_ptr->name);
 			payload_new_string(po, "service_description", tmp_svc->description);
 			payload_end_object(po);
 			tmp_svc = tmp_svc->next;
