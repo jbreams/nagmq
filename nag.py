@@ -1,6 +1,6 @@
 #!/usr/bin/python26
 
-import json, time, zmq, re
+import json, time, zmq, re, os, pwd
 from optparse import OptionParser
 
 op = OptionParser(usage = "[opts] {verb} {noun} [service]@{host|hostgroup}")
@@ -163,6 +163,10 @@ def status_to_string(val, ishost):
 		elif(val == 3):
 			return "UNKNOWN"
 
+username = pwd.getpwuid(os.getuid())[0]
+if(username not in contacts):
+	print "{0} not authorized to view target".format(username)
+	exit(-1)
 
 if(myverb == 'status'):
 	for h in sorted(hosts.keys()):
@@ -184,7 +188,7 @@ else:
 	for h in sorted(host.keys()):
 		if(myverb == 'add' and mynoun == 'acknowledgement'):
 			cmd = { type:'acknowledgement', 'host_name':h,
-				author_name:os.getusername(), comment_data:opts['comment'],
+				author_name:username, comment_data:opts['comment'],
 				time_stamp: { tv_sec: time.time() }, notify_contacts:opts['notify'],
 				persistent_comment:opts['persistent'] }
 			if(hosts[h]['hard_state'] == 0):
