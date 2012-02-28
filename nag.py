@@ -5,16 +5,17 @@ from optparse import OptionParser
 
 op = OptionParser(usage = "[opts] {verb} {noun} [service]@{host|hostgroup}")
 op.add_option("-c", "--comment", type="string", action="store", dest="comment",
-	help="The comment to be added to the command")
+	help="The comment to be added to the command", default="")
 op.add_option("-p", "--persistent", action="store_true", dest="persistent",
-	help="Any comment created will be persistent")
+	help="Any comment created will be persistent", default=False)
 op.add_option("-n", "--notify", action="store_true", dest="notify",
-	help="Notify contacts about action")
+	help="Notify contacts about action", default=False)
 
 (opts, args) = op.parse_args()
 if(len(args) < 2):
 	print "Did not specify enough arguments!"
 	exit(-1)
+print opts
 
 validverbs = [ 'start', 'stop', 'add', 'remove', 'check', 'status' ]
 validnouns = [ 'acknowledgement', 'notifications', 'checks' ]
@@ -166,7 +167,7 @@ def status_to_string(val, ishost):
 username = pwd.getpwuid(os.getuid())[0]
 if(username not in contacts):
 	print "{0} not authorized to view target".format(username)
-	exit(-1)
+#	exit(-1)
 
 if(myverb == 'status'):
 	for h in sorted(hosts.keys()):
@@ -184,24 +185,25 @@ elif(myverb == 'check'):
 	print "Not implemented!"
 else:
 	pushsock = ctx.socket(zmq.PUSH)
-	pushsock.connect("tcp://minotaur:5556")
-	for h in sorted(host.keys()):
+	pushsock.connect("ipc:///tmp/nagmqpull.sock")
+	for h in sorted(hosts.keys()):
 		if(myverb == 'add' and mynoun == 'acknowledgement'):
-			cmd = { type:'acknowledgement', 'host_name':h,
-				author_name:username, comment_data:opts['comment'],
-				time_stamp: { tv_sec: time.time() }, notify_contacts:opts['notify'],
-				persistent_comment:opts['persistent'] }
-			if(hosts[h]['hard_state'] == 0):
-				print "[{0}]: No hard problem".format(h)
-			elif(hosts[h]['problem_has_been_acknowledged'] == False):
-				print "[{0}]: Acknowledged".format(h)
-				pushsock.send_json(cmd)
-			else:
-				print "[{0}]: Already acknowledged".format(h)
+			cmd = { 'type':'acknowledgement', 'host_name':h,
+				'author_name':username, 'comment_data': opts.comment,
+				'time_stamp': { 'tv_sec': time.time() }, 'notify_contacts':opts.notify,
+				'persistent_comment':opts.persistent }
+			if(mytarget == None and justservices != True):
+				if(hosts[h]['current_state'] == 0):
+					print "[{0}]: No hard problem".format(h)
+				elif(hosts[h]['problem_has_been_acknowledged'] == False):
+					print "[{0}]: Acknowledged".format(h)
+					pushsock.send_json(cmd)
+				else:
+					print "[{0}]: Already acknowledged".format(h)
 			for s in sorted(hosts[h]['services']):
 				name = "{0}@{1}".format(s, h)
 				if(name in services):
-					if(services[name]['hard_state'] == 0):
+					if(services[name]['current_state'] == 0):
 						print "[{0}]: No hard problem".format(name)
 					elif(services[name]['problem_has_been_acknowledged'] == False):
 						cmd['service_description'] = s
@@ -210,13 +212,14 @@ else:
 					else:
 						print "[{0}]: Already acknowledged".format(name)
 		elif(myverb == 'remove' and mynoun == 'acknowledgement'):
-			cmd = { 'host_name':h, type:'command',
+			cmd = { 'host_name':h, 'type':'command',
 				command:'remove_host_acknowledgement' }
-			if(hosts[h]['problem_has_been_acknowledged'] == True):
-				print "[{0}]: Acknowledgment removed".format(h)
-				pushsock.send_json(cmd)
-			else:
-				print "[{0}]: No acknowledgement to remove".format(h)
+                        if(mytarget == None and justservices != True):
+				if(hosts[h]['problem_has_been_acknowledged'] == True):
+					print "[{0}]: Acknowledgment removed".format(h)
+					pushsock.send_json(cmd)
+				else:
+					print "[{0}]: No acknowledgement to remove".format(h)
 			for s in sorted(hosts[h]['services']):
 				name = "{0}@{1}".format(s, h)
 				if(name in services):
@@ -228,27 +231,23 @@ else:
 					else:
 						print "[{0}]: No acknowledgement to remove".format(name)
 		elif(myverb == 'start' or myverb == 'stop'):
-			cmd = { 'host_name':h, type:'command' }
-			if(mynoun == 'notifications'):
+			cmd = { 'host_name':h, 'type':'command' }
+			if(mynoun == 'notifications' and (mytarget == None and justservices != True)):
 				if(myverb == 'start'):
 					cmd['command'] = 'start_host_notifications'
+					print "[{0}]: Notifications enabled".format(h)
 				else:
 					cmd['command'] = 'stop_host_notifications'
-				if(hosts[h]['notifications_enabled'] == False):
-					print "[{0}]: Notifications enabled".format(h)
-					pushsock.send_json(cmd)
-				else:
 					print "[{0}]: Notifications already enabled".format(h)
-			if(mynoun == 'checks'):
+				pushsock.send_json(cmd)
+			if(mynoun == 'checks' and (mytarget == None and justservices != True)):
 				if(myverb == 'start'):
+					print "[{0}]: Checks enabled".format(h)
 					cmd['command'] = 'enable_host_checks'
 				else:
-					cmd['command'] = 'disable_host_checks'
-				if(hosts[h]['checks_enabled'] == False):
-					print "[{0}]: Checks enabled".format(h)
-					pushsock.send_json(cmd)
-				else:
 					print "[{0}]: Checks already enabled".format(h)
+					cmd['command'] = 'disable_host_checks'
+				pushsock.send_json(cmd)
 
 			for s in sorted(hosts[h]['services']):
 				name = "{0}@{1}".format(s, h)
@@ -256,20 +255,19 @@ else:
 					cmd['service_description'] = s
 					if(mynoun == 'notifications'):
 						if(myverb == 'start'):
-							print "[{0}]: Notifications enabled"
+							print "[{0}]: Notifications enabled".format(name)
 							cmd['command'] = 'start_service_notifications'
 						else:
-							print "[{0}]: Notifications disabled"
+							print "[{0}]: Notifications disabled".format(name)
 							cmd['command'] = 'stop_service_notifications'
-						if(services[name]['notifications_enabled'] == False):
-							pushsock.send_json(cmd)
+						pushsock.send_json(cmd)
 					if(mynoun == 'checks'):
 						if(myverb == 'start'):
-							print "[{0}]: Checks enabled".format(h)
+							print "[{0}]: Checks enabled".format(name)
 							cmd['command'] = 'enable_service_checks'
 						else:
-							print "[{0}]: Checks disabled".format(h)
+							print "[{0}]: Checks disabled".format(name)
 							cmd['command'] = 'stop_service_checks'
-						if(services[name]['checks_enabled'] == False):
-							pushsock.send_json(cmd)
+						print cmd
+						pushsock.send_json(cmd)
 
