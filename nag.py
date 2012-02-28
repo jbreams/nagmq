@@ -166,7 +166,7 @@ def status_to_string(val, ishost):
 
 if(myverb == 'status'):
 	for h in sorted(hosts.keys()):
-		if(mytarget == None or justservices):
+		if(mytarget == None and justservices != True):
 			print "[{0}]: {1} {2}".format(
 				h, status_to_string(hosts[h]['current_state'], False),
 					hosts[h]['plugin_output'])
@@ -268,3 +268,4 @@ else:
 							cmd['command'] = 'stop_service_checks'
 						if(services[name]['checks_enabled'] == False):
 							pushsock.send_json(cmd)
+
