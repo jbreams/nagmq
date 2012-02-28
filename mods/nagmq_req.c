@@ -25,14 +25,15 @@ void unlock_obj(char * hostname, char * service, char * plugin_output,
 	char * long_plugin_output, char * perf_data);
 
 static void parse_service(service * state, struct payload * ret,
-	int include_host, int include_contacts);
+	int include_host, int include_contacts, int brief);
 static void parse_host(host * state, struct payload * ret,
-	int include_services, int include_contacts);
+	int include_services, int include_contacts, int brief);
 static void parse_contact(contact * state, struct payload * ret);
-static void parse_contactgroup(contactgroup * state, struct payload * ret);
+static void parse_contactgroup(contactgroup * state, struct payload * ret,
+	int include_contacts);
 
 static void parse_host(host * state, struct payload * ret,
-	int include_services, int include_contacts) {
+	int include_services, int include_contacts, int brief) {
 	char * plugin_output, *long_plugin_output, *perf_data;
 	lock_obj(state->name, NULL, &plugin_output,
 		&long_plugin_output, &perf_data);
@@ -97,7 +98,7 @@ static void parse_host(host * state, struct payload * ret,
 	} else
 		payload_new_string(ret, "contact_groups", NULL);
 
-	payload_new_string(ret, "host_check_command", state->host_check_command);
+	payload_new_string(ret, "check_command", state->host_check_command);
 	payload_new_integer(ret, "initial_state", state->initial_state);
 	payload_new_double(ret, "check_interval", state->check_interval);
 	payload_new_double(ret, "retry_interval", state->retry_interval);
@@ -127,26 +128,31 @@ static void parse_host(host * state, struct payload * ret,
 	payload_new_boolean(ret, "checks_enabled", state->checks_enabled);
 	payload_new_boolean(ret, "accept_passive_host_checks", state->accept_passive_host_checks);
 	payload_new_boolean(ret, "event_handler_enabled", state->event_handler_enabled);
-	payload_new_boolean(ret, "retain_status_information", state->retain_status_information);
-	payload_new_boolean(ret, "retain_nonstatus_information", state->retain_nonstatus_information);
 	payload_new_boolean(ret, "failure_prediction_enabled", state->failure_prediction_enabled);
 	payload_new_string(ret, "failure_prediction_options", state->failure_prediction_options);
 	payload_new_boolean(ret, "obsess_over_host", state->obsess_over_host);
-	payload_new_string(ret, "notes", state->notes);
-	payload_new_string(ret, "notes_url", state->notes_url);
-	payload_new_string(ret, "action_url", state->action_url);
-	payload_new_string(ret, "icon_image", state->icon_image);
-	payload_new_string(ret, "icon_image_alt", state->icon_image_alt);
-	payload_new_string(ret, "vrml_image", state->vrml_image);
-	payload_new_string(ret, "statusmap_image", state->statusmap_image);
-	payload_new_integer(ret, "have_2d_coords", state->have_2d_coords);
-	payload_new_integer(ret, "x_2d", state->x_2d);
-	payload_new_integer(ret, "y_2d", state->y_2d);
-	payload_new_integer(ret, "have_3d_coords", state->have_3d_coords);
-	payload_new_double(ret, "x_3d", state->x_3d);
-	payload_new_double(ret, "y_3d", state->y_3d);
-	payload_new_double(ret, "z_3d", state->z_3d);
-	payload_new_integer(ret, "should_be_drawn", state->should_be_drawn);
+	if(!brief) {
+		payload_new_string(ret, "notes", state->notes);
+		payload_new_string(ret, "notes_url", state->notes_url);
+		payload_new_string(ret, "action_url", state->action_url);
+		payload_new_string(ret, "icon_image", state->icon_image);
+		payload_new_string(ret, "icon_image_alt", state->icon_image_alt);
+		payload_new_string(ret, "vrml_image", state->vrml_image);
+		payload_new_string(ret, "statusmap_image", state->statusmap_image);
+		payload_new_integer(ret, "have_2d_coords", state->have_2d_coords);
+		payload_new_integer(ret, "x_2d", state->x_2d);
+		payload_new_integer(ret, "y_2d", state->y_2d);
+		payload_new_integer(ret, "have_3d_coords", state->have_3d_coords);
+		payload_new_double(ret, "x_3d", state->x_3d);
+		payload_new_double(ret, "y_3d", state->y_3d);
+		payload_new_double(ret, "z_3d", state->z_3d);
+		payload_new_integer(ret, "should_be_drawn", state->should_be_drawn);
+		payload_new_boolean(ret, "retain_status_information", state->retain_status_information);
+		payload_new_boolean(ret, "retain_nonstatus_information", state->retain_nonstatus_information);
+		payload_new_integer(ret, "modified_attributes", state->modified_attributes);
+		payload_new_integer(ret, "circular_path_checked", state->circular_path_checked);
+		payload_new_integer(ret, "contains_circular_path", state->contains_circular_path);
+	}
 	payload_new_integer(ret, "problem_has_been_acknowledged", state->problem_has_been_acknowledged);
 	payload_new_integer(ret, "current_state", state->current_state);
 	payload_new_integer(ret, "last_state", state->last_state);
@@ -194,17 +200,13 @@ static void parse_host(host * state, struct payload * ret,
 	payload_new_boolean(ret, "is_flapping", state->is_flapping);
 	payload_new_integer(ret, "flapping_comment_id", state->flapping_comment_id);
 	payload_new_double(ret, "percent_state_change", state->percent_state_change);
-	payload_new_integer(ret, "total_services", state->total_services);
 	payload_new_integer(ret, "total_service_check_interval", state->total_service_check_interval);
-	payload_new_integer(ret, "modified_attributes", state->modified_attributes);
-	payload_new_integer(ret, "circular_path_checked", state->circular_path_checked);
-	payload_new_integer(ret, "contains_circular_path", state->contains_circular_path);
 	payload_end_object(ret);
 
 	if(include_services) {
 		slck = state->services;
 		while(slck) {
-			parse_service(slck->service_ptr, ret, 0, 0);
+			parse_service(slck->service_ptr, ret, 0, 0, brief);
 			slck = slck->next;
 		}
 	}
@@ -218,7 +220,7 @@ static void parse_host(host * state, struct payload * ret,
 
 		cglck = state->contact_groups;
 		while(cglck) {
-			parse_contactgroup(cglck->group_ptr, ret);
+			parse_contactgroup(cglck->group_ptr, ret, include_contacts);
 			cglck = cglck->next;
 		}
 	}
@@ -226,7 +228,7 @@ static void parse_host(host * state, struct payload * ret,
 }
 
 static void parse_service(service * state, struct payload * ret,
-	int include_host, int include_contacts) {
+	int include_host, int include_contacts, int brief) {
 	char * plugin_output, *long_plugin_output, *perf_data;
 	lock_obj(state->host_name, state->description,
 		&plugin_output, &long_plugin_output, &perf_data);
@@ -235,7 +237,7 @@ static void parse_service(service * state, struct payload * ret,
 	payload_new_string(ret, "host_name", state->host_name);
 	payload_new_string(ret, "service_description", state->description);
 	payload_new_string(ret, "display_name", state->display_name);
-	payload_new_string(ret, "service_check_command", state->service_check_command);
+	payload_new_string(ret, "check_command", state->service_check_command);
 	payload_new_string(ret, "event_handler", state->event_handler);
 	payload_new_integer(ret, "initial_state", state->initial_state);
 	payload_new_double(ret, "check_interval", state->check_interval);
@@ -292,17 +294,20 @@ static void parse_service(service * state, struct payload * ret,
 	payload_new_boolean(ret, "accept_passive_service_checks", state->accept_passive_service_checks);
 	payload_new_boolean(ret, "event_handler_enabled", state->event_handler_enabled);
 	payload_new_boolean(ret, "checks_enabled", state->checks_enabled);
-	payload_new_boolean(ret, "retain_status_information", state->retain_status_information);
-	payload_new_boolean(ret, "retain_nonstatus_information", state->retain_nonstatus_information);
 	payload_new_boolean(ret, "notifications_enabled", state->notifications_enabled);
 	payload_new_boolean(ret, "obsess_over_service", state->obsess_over_service);
 	payload_new_boolean(ret, "failure_prediction_enabled", state->failure_prediction_enabled);
 	payload_new_string(ret, "failure_prediction_options", state->failure_prediction_options);
-	payload_new_string(ret, "notes", state->notes);
-	payload_new_string(ret, "notes_url", state->notes_url);
-	payload_new_string(ret, "action_url", state->action_url);
-	payload_new_string(ret, "icon_image", state->icon_image);
-	payload_new_string(ret, "icon_image_alt", state->icon_image_alt);
+	if(!brief) {
+		payload_new_string(ret, "notes", state->notes);
+		payload_new_string(ret, "notes_url", state->notes_url);
+		payload_new_string(ret, "action_url", state->action_url);
+		payload_new_string(ret, "icon_image", state->icon_image);
+		payload_new_string(ret, "icon_image_alt", state->icon_image_alt);
+		payload_new_integer(ret, "modified_attributes", state->modified_attributes);
+		payload_new_boolean(ret, "retain_status_information", state->retain_status_information);
+		payload_new_boolean(ret, "retain_nonstatus_information", state->retain_nonstatus_information);
+	}
 	payload_new_boolean(ret, "problem_has_been_acknowledged", state->problem_has_been_acknowledged);
 	payload_new_integer(ret, "host_problem_at_last_check", state->host_problem_at_last_check);
 	payload_new_integer(ret, "current_state", state->current_state);
@@ -350,13 +355,12 @@ static void parse_service(service * state, struct payload * ret,
 	payload_new_boolean(ret, "is_flapping", state->is_flapping);
 	payload_new_integer(ret, "flapping_comment_id", state->flapping_comment_id);
 	payload_new_double(ret, "percent_state_change", state->percent_state_change);
-	payload_new_integer(ret, "modified_attributes", state->modified_attributes);
 	payload_new_string(ret, "event_handler_args", state->event_handler_args);
-	payload_new_string(ret, "check_command_args", state->check_command_args);
+	payload_new_string(ret, "command_args", state->check_command_args);
 	payload_end_object(ret);
 
 	if(include_host)
-		parse_host(state->host_ptr, ret, 0, 0);
+		parse_host(state->host_ptr, ret, 0, 0, brief);
 
 	if(include_contacts) {
 		clck = state->contacts;
@@ -367,7 +371,7 @@ static void parse_service(service * state, struct payload * ret,
 
 		cglck = state->contact_groups;
 		while(cglck) {
-			parse_contactgroup(cglck->group_ptr, ret);
+			parse_contactgroup(cglck->group_ptr, ret, include_contacts);
 			cglck = cglck->next;
 		}
 	}
@@ -375,7 +379,8 @@ static void parse_service(service * state, struct payload * ret,
 	unlock_obj(state->host_name, state->description, NULL, NULL, NULL);
 }
 
-static void parse_hostgroup(hostgroup * state, struct payload * ret) {
+static void parse_hostgroup(hostgroup * state, struct payload * ret,
+	int include_hosts) {
 	payload_start_object(ret, NULL);
 	payload_new_string(ret, "type", "hostgroup");
 	payload_new_string(ret, "group_name", state->group_name);
@@ -394,9 +399,17 @@ static void parse_hostgroup(hostgroup * state, struct payload * ret) {
 	} else
 		payload_new_string(ret, "members", NULL);
 	payload_end_object(ret);
+	if(include_hosts) {
+		hostsmember * htmp = state->members;
+		while(htmp) {
+			parse_host(htmp->host_ptr, ret, 0, 0, 0);
+			htmp = htmp->next;
+		}
+	}
 }
 
-static void parse_servicegroup(servicegroup * state, struct payload * ret) {
+static void parse_servicegroup(servicegroup * state, struct payload * ret,
+	int include_services) {
 	payload_start_object(ret, NULL);
 	payload_new_string(ret, "type", "servicegroup");
 	payload_new_string(ret, "group_name", state->group_name);
@@ -415,6 +428,13 @@ static void parse_servicegroup(servicegroup * state, struct payload * ret) {
 	} else
 		payload_new_string(ret, "members", NULL);
 	payload_end_object(ret);
+	if(include_services) {
+		servicesmember * stmp = state->members;
+		while(stmp) {
+			parse_service(stmp->service_ptr, ret, 0, 0, 0);
+			stmp = stmp->next;
+		}
+	}
 }
 
 static void parse_contact(contact * state, struct payload * ret) {
@@ -458,7 +478,11 @@ static void parse_contact(contact * state, struct payload * ret) {
 	payload_end_object(ret);
 }
 
-static void parse_contactgroup(contactgroup * state, struct payload * ret) {
+extern host * host_list;
+extern service * service_list;
+
+static void parse_contactgroup(contactgroup * state, struct payload * ret,
+	int include_contacts) {
 	payload_start_object(ret, NULL);
 	payload_new_string(ret, "type", "contactgroup");
 	payload_new_string(ret, "group_name", state->group_name);
@@ -474,9 +498,27 @@ static void parse_contactgroup(contactgroup * state, struct payload * ret) {
 	} else
 		payload_new_string(ret, "members", NULL);
 	payload_end_object(ret);
+
+	if(include_contacts) {
+		contactsmember * ctmp = state->members;
+		while(ctmp) {
+			parse_contact(ctmp->contact_ptr, ret);
+			ctmp = ctmp->next;
+		}
+	}
 }
 
 void free_cb(void * ptr, void * hint);
+
+void send_msg(void * sock, struct payload * po) {
+	sprintf(po->json_buf + po->bufused -2, " ]");
+	zmq_msg_t outmsg;
+	zmq_msg_init_data(&outmsg, po->json_buf, po->bufused, free_cb, NULL);
+	zmq_send(sock, &outmsg, 0);
+	zmq_msg_close(&outmsg);
+	free(po->type);
+	free(po);
+}
 
 void process_req_msg(void * sock) {
 	zmq_msg_t reqmsg;
@@ -485,6 +527,7 @@ void process_req_msg(void * sock) {
 	char * hostgroup_name = NULL, *servicegroup_name = NULL;
 	char * contact_name = NULL, *contactgroup_name = NULL;
 	int include_services = 0, include_hosts = 0, include_contacts = 0;
+	int list_hosts = 0, list_services = 0, brief = 0;
 	struct payload * po;
 
 	zmq_msg_init(&reqmsg);
@@ -496,14 +539,16 @@ void process_req_msg(void * sock) {
 	if(req == NULL)
 		return;
 
-	if(json_unpack(req, "{ s?:s s?:s s?:s s?:s s?:s s?:s s?:b s?:b s?:b }",
+	if(json_unpack(req, "{ s?:s s?:s s?:s s?:s s?:s s?:s s?:b s?:b"
+		" s?:b s?:b s?:b s?b }",
 		"host_name", &host_name, "service_description",
 		&service_description, "hostgroup_name", &hostgroup_name,
 		"servicegroup_name", &servicegroup_name,
 		"contact_name", &contact_name, "contactgroup_name",
 		&contactgroup_name, "include_services", &include_services,
 		"include_hosts", &include_hosts, "include_contacts",
-		&include_contacts) != 0) {
+		&include_contacts, "list_hosts", &list_hosts, 
+		"list_services", &list_services, "brief", &brief) != 0) {
 		json_decref(req);
 		return;
 	}
@@ -512,89 +557,133 @@ void process_req_msg(void * sock) {
 	memset(po, 0, sizeof(struct payload));
 	payload_start_array(po, NULL);
 
+	if(list_hosts) {
+		payload_start_object(po, NULL);
+		payload_new_string(po, "type", "host_list");
+		payload_start_array(po, "hosts");
+		host * tmp_host = host_list;
+		while(tmp_host) {
+			payload_new_string(po, NULL, tmp_host->name);
+			tmp_host = tmp_host->next;
+		}
+		payload_end_array(po);
+		payload_end_object(po);
+	}
+
+	if(list_services) {
+		payload_start_object(po, NULL);
+		payload_new_string(po, "type", "service_list");
+		payload_start_array(po, "services");
+		service * tmp_svc = service_list;
+		while(tmp_svc) {
+			payload_start_object(po, NULL);
+			payload_new_string(po, "host_name", tmp_svc->host_name);
+			payload_new_string(po, "service_description", tmp_svc->description);
+			payload_end_object(po);
+			tmp_svc = tmp_svc->next;
+		}
+		payload_end_array(po);
+		payload_end_object(po);
+	}
+
 	if(service_description) {
 		service * svctarget;
 		if(!host_name) {
-			free(po);
+			payload_start_object(po, NULL);
+			payload_new_string(po, "type", "error");
+			payload_new_string(po, "msg", "No hostname specified for service");
+			payload_new_string(po, "service_description", service_description);
+			payload_end_object(po);
+			send_msg(sock, po);
+			json_decref(req);
 			return;
 		}
 
 		svctarget = find_service(host_name, service_description);
 		if(!svctarget) {
-			free(po);
+			payload_start_object(po, NULL);
+			payload_new_string(po, "type", "error");
+			payload_new_string(po, "msg", "Could not find service");
+			payload_new_string(po, "service_description", service_description);
+			payload_new_string(po, "host_name", host_name);
+			payload_end_object(po);
+			send_msg(sock, po);
+			json_decref(req);
 			return;
 		}
 		
-		parse_service(svctarget, po, include_hosts, include_contacts);
+		parse_service(svctarget, po, include_hosts, include_contacts, brief);
 	} else if(host_name) {
 		host * hsttarget = find_host(host_name);
 		if(!hsttarget) {
-			free(po);
+			payload_start_object(po, NULL);
+			payload_new_string(po, "type", "error");
+			payload_new_string(po, "msg", "Could not find host");
+			payload_new_string(po, "host_name", host_name);
+			payload_end_object(po);
+			send_msg(sock, po);
+			json_decref(req);
 			return;
 		}
-		parse_host(hsttarget, po, include_services, include_contacts);
+		parse_host(hsttarget, po, include_services, include_contacts, brief);
 	}
 	if(hostgroup_name) {
 		hostgroup * hsttarget = find_hostgroup(hostgroup_name);
 		if(hsttarget == NULL) {
-			free(po);
+			payload_start_object(po, NULL);
+			payload_new_string(po, "type", "error");
+			payload_new_string(po, "msg", "Could not find hostgroup");
+			payload_new_string(po, "hostgroup_name", hostgroup_name);
+			payload_end_object(po);
+			send_msg(sock, po);
+			json_decref(req);
 			return;
 		}
-		parse_hostgroup(hsttarget, po);
-		if(include_hosts) {
-			hostsmember * htmp = hsttarget->members;
-			while(htmp) {
-				parse_host(htmp->host_ptr, po, 0, 0);
-				htmp = htmp->next;
-			}
-		}
+		parse_hostgroup(hsttarget, po, include_hosts);
 	}
 	if(servicegroup_name) {
 		servicegroup * svctarget = find_servicegroup(servicegroup_name);
 		if(svctarget == NULL) {
-			free(po);
+			payload_start_object(po, NULL);
+			payload_new_string(po, "type", "error");
+			payload_new_string(po, "msg", "Could not find servicegroup");
+			payload_new_string(po, "servicegroup_name", servicegroup_name);
+			payload_end_object(po);
+			send_msg(sock, po);
+			json_decref(req);
 			return;
 		}
-		parse_servicegroup(svctarget, po);
-		if(include_services) {
-			servicesmember * stmp = svctarget->members;
-			while(stmp) {
-				parse_service(stmp->service_ptr, po, 0, 0);
-				stmp = stmp->next;
-			}
-		}
+		parse_servicegroup(svctarget, po, include_services);
 	}
 	if(contactgroup_name) {
 		contactgroup * cntarget = find_contactgroup(contactgroup_name);
 		if(cntarget == NULL) {
-			free(po);
+			payload_start_object(po, NULL);
+			payload_new_string(po, "type", "error");
+			payload_new_string(po, "msg", "Could not find contactgroup");
+			payload_new_string(po, "contactgroup_name", contactgroup_name);
+			payload_end_object(po);
+			send_msg(sock, po);
+			json_decref(req);
 			return;
 		}
-		parse_contactgroup(cntarget, po);
-		if(include_contacts) {
-			contactsmember * ctmp = cntarget->members;
-			while(ctmp) {
-				parse_contact(ctmp->contact_ptr, po);
-				ctmp = ctmp->next;
-			}
-		}
+		parse_contactgroup(cntarget, po, include_contacts);
 	}
 	if(contact_name) {
 		contact * cntarget = find_contact(contact_name);
 		if(cntarget == NULL) {
-			free(po);
+			payload_start_object(po, NULL);
+			payload_new_string(po, "type", "error");
+			payload_new_string(po, "msg", "Could not find contact");
+			payload_new_string(po, "contact_name", contact_name);
+			payload_end_object(po);
+			send_msg(sock, po);
+			json_decref(req);
 			return;
 		}
 		parse_contact(cntarget, po);
 	}
 
-	sprintf(po->json_buf + po->bufused -2, " ]");
-	zmq_msg_t outmsg;
-	zmq_msg_init_data(&outmsg, po->json_buf, po->bufused, free_cb, NULL);
-	zmq_send(sock, &outmsg, 0);
-	zmq_msg_close(&outmsg);
 	json_decref(req);
-	free(po->type);
-	free(po);
+	send_msg(sock, po);
 }
-
