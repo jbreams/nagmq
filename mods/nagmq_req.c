@@ -540,8 +540,8 @@ void process_req_msg(void * sock) {
 	if(req == NULL)
 		return;
 
-	if(json_unpack(req, "{ s?:s s?:s s?:s s?:s s?:s s?:s s?:o s?:b"
-		" s?:b s?:b s?:b s?b }",
+	if(json_unpack(req, "{ s?:s s?:s s?:s s?:s s?:s s?:s s?:b s?:b"
+		" s?:b s?:b s?:o s?b }",
 		"host_name", &host_name, "service_description",
 		&service_description, "hostgroup_name", &hostgroup_name,
 		"servicegroup_name", &servicegroup_name,
@@ -580,8 +580,10 @@ void process_req_msg(void * sock) {
 			if(!json_is_true(list_services) &&
 				!(json_is_string(list_services) &&
 				strcmp(json_string_value(list_services),
-					tmp_svc->description) == 0))
+					tmp_svc->description) == 0)) {
+				tmp_svc = tmp_svc->next;
 				continue;
+			}
 			payload_start_object(po, NULL);
 			payload_new_string(po, "host_name", tmp_svc->host_ptr->name);
 			payload_new_string(po, "service_description", tmp_svc->description);
