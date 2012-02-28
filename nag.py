@@ -15,7 +15,6 @@ op.add_option("-n", "--notify", action="store_true", dest="notify",
 if(len(args) < 2):
 	print "Did not specify enough arguments!"
 	exit(-1)
-print opts
 
 validverbs = [ 'start', 'stop', 'add', 'remove', 'check', 'status' ]
 validnouns = [ 'acknowledgement', 'notifications', 'checks' ]
@@ -55,7 +54,7 @@ contacts = [ ]
 
 ctx = zmq.Context()
 reqsock = ctx.socket(zmq.REQ)
-reqsock.connect("ipc:///tmp/nagmqreply.sock")
+reqsock.connect("ipc:///tmp/nagmqreq.sock")
 
 def parse_object(o, lr):
 	if(o['type'] == 'hostgroup'):
@@ -167,7 +166,7 @@ def status_to_string(val, ishost):
 username = pwd.getpwuid(os.getuid())[0]
 if(username not in contacts):
 	print "{0} not authorized to view target".format(username)
-#	exit(-1)
+	exit(-1)
 
 if(myverb == 'status'):
 	for h in sorted(hosts.keys()):
@@ -268,6 +267,5 @@ else:
 						else:
 							print "[{0}]: Checks disabled".format(name)
 							cmd['command_name'] = 'disable_service_checks'
-						print cmd
 						pushsock.send_json(cmd)
 
