@@ -259,37 +259,26 @@ static void process_cmd(json_t * payload) {
 }
 
 void process_pull_msg(void * sock) {
-	zmq_msg_t payload_msg, type_msg;
-	int64_t ismore; 
-	size_t imlen = sizeof(ismore);
-	zmq_msg_init(&type_msg);
-	
-	if(zmq_recv(sock, &type_msg, 0) != 0)
-		return;
-
-	zmq_getsockopt(sock, ZMQ_RCVMORE, &ismore, &imlen);
-	if(!ismore) {
-		zmq_msg_close(&type_msg);
-		return;
-	}
+	zmq_msg_t payload_msg;
+	char * type = NULL;
 
 	zmq_msg_init(&payload_msg);
 	if(zmq_recv(sock, &payload_msg, 0) != 0) {
 		zmq_msg_close(&payload_msg);
-		zmq_msg_close(&type_msg);
 		return;
 	}
 
 	json_t * payload = json_loadb(zmq_msg_data(&payload_msg),
 		zmq_msg_size(&payload_msg), 0, NULL);
 	zmq_msg_close(&payload_msg);
-	if(payload == NULL) {
-		zmq_msg_close(&type_msg);
+	if(payload == NULL)
 		return;		
-	}
 	
-	char * type = zmq_msg_data(&type_msg);
-	size_t typelen = zmq_msg_size(&type_msg);
+	if(json_unpack(payload, "{ s:s }", "type", &type) != 0) {
+		json_decref(payload);
+		return;
+	}
+	size_t typelen = strlen(type);
 	if(strncmp(type, "command", typelen) == 0)
 		process_cmd(payload);
 	else if(strncmp(type, "host_check_processed", typelen) == 0)
@@ -302,5 +291,4 @@ void process_pull_msg(void * sock) {
 		process_comment(payload);
 	else if(strncmp(type, "downtime_add", typelen) == 0)
 		process_downtime(payload);
-	zmq_msg_close(&type_msg);
 }
