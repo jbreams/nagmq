@@ -55,7 +55,7 @@ contacts = [ ]
 
 ctx = zmq.Context()
 reqsock = ctx.socket(zmq.REQ)
-reqsock.connect("tcp://minotaur.cc.columbia.edu:5557")
+reqsock.connect("ipc:///tmp/nagmqreply.sock")
 
 def parse_object(o, lr):
 	if(o['type'] == 'hostgroup'):
@@ -213,7 +213,7 @@ else:
 						print "[{0}]: Already acknowledged".format(name)
 		elif(myverb == 'remove' and mynoun == 'acknowledgement'):
 			cmd = { 'host_name':h, 'type':'command',
-				command:'remove_host_acknowledgement' }
+				'command_name':'remove_host_acknowledgement' }
                         if(mytarget == None and justservices != True):
 				if(hosts[h]['problem_has_been_acknowledged'] == True):
 					print "[{0}]: Acknowledgment removed".format(h)
@@ -225,7 +225,7 @@ else:
 				if(name in services):
 					if(services[name]['problem_has_been_acknowledged'] == True):
 						cmd['service_description'] = s
-						cmd['command'] = 'remove_service_acknowledgement'
+						cmd['command_name'] = 'remove_service_acknowledgement'
 						pushsock.send_json(cmd)
 						print "[{0}]: Acknowledgment removed".format(name)
 					else:
@@ -234,19 +234,19 @@ else:
 			cmd = { 'host_name':h, 'type':'command' }
 			if(mynoun == 'notifications' and (mytarget == None and justservices != True)):
 				if(myverb == 'start'):
-					cmd['command'] = 'start_host_notifications'
+					cmd['command_name'] = 'enable_host_notifications'
 					print "[{0}]: Notifications enabled".format(h)
 				else:
-					cmd['command'] = 'stop_host_notifications'
+					cmd['command_name'] = 'disable_host_notifications'
 					print "[{0}]: Notifications already enabled".format(h)
 				pushsock.send_json(cmd)
 			if(mynoun == 'checks' and (mytarget == None and justservices != True)):
 				if(myverb == 'start'):
 					print "[{0}]: Checks enabled".format(h)
-					cmd['command'] = 'enable_host_checks'
+					cmd['command_name'] = 'enable_host_checks'
 				else:
 					print "[{0}]: Checks already enabled".format(h)
-					cmd['command'] = 'disable_host_checks'
+					cmd['command_name'] = 'disable_host_checks'
 				pushsock.send_json(cmd)
 
 			for s in sorted(hosts[h]['services']):
@@ -256,18 +256,18 @@ else:
 					if(mynoun == 'notifications'):
 						if(myverb == 'start'):
 							print "[{0}]: Notifications enabled".format(name)
-							cmd['command'] = 'start_service_notifications'
+							cmd['command_name'] = 'enable_service_notifications'
 						else:
 							print "[{0}]: Notifications disabled".format(name)
-							cmd['command'] = 'stop_service_notifications'
+							cmd['command_name'] = 'disable_service_notifications'
 						pushsock.send_json(cmd)
 					if(mynoun == 'checks'):
 						if(myverb == 'start'):
 							print "[{0}]: Checks enabled".format(name)
-							cmd['command'] = 'enable_service_checks'
+							cmd['command_name'] = 'enable_service_checks'
 						else:
 							print "[{0}]: Checks disabled".format(name)
-							cmd['command'] = 'stop_service_checks'
+							cmd['command_name'] = 'disable_service_checks'
 						print cmd
 						pushsock.send_json(cmd)
 

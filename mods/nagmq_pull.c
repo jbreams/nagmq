@@ -66,8 +66,8 @@ static void process_acknowledgement(json_t * payload) {
 		acknowledgement_type = 0;
 	host * host_target;
 	service * service_target;
-
-	if(json_unpack(payload, "{s:s s?:s s:s s:s s?:i s?:b s?:b s?:b}",
+	json_error_t err;
+	if(json_unpack_ex(payload, &err, 0, "{s:s s?:s s:s s:s s?:i s?:b s?:b s?:b}",
 		"host_name", &host_name, "service_description", &service_description,
 		"author_name", &author_name, "comment_data", &comment_data,
 		"acknowledgement_type", &acknowledgement_type, "notify_contacts",
