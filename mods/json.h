@@ -6,6 +6,7 @@ struct payload {
 };
 
 struct payload * payload_new();
+void adjust_payload_len(struct payload * po, size_t len);
 void payload_add_key(struct payload * po, char * key);
 void payload_new_string(struct payload * po, char * key, char * val);
 void payload_new_integer(struct payload * po, char * key, long long val);

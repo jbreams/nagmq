@@ -3,10 +3,10 @@
 import zmq
 
 ctx = zmq.Context();
-pub = ctx.socket(zmq.PUB)
-sub = ctx.socket(zmq.SUB)
+req = ctx.socket(zmq.XREQ)
+rep = ctx.socket(zmq.XREP)
 
-pub.bind("tcp://*:5555")
-sub.connect("ipc:///tmp/nagmq.sock")
-sub.setsockopt(zmq.SUBSCRIBE, '')
-zmq.device(zmq.FORWARDER, sub, pub)
+rep.bind("tcp://*:5555")
+req.connect("ipc:///tmp/nagmqreq.sock")
+#sub.setsockopt(zmq.SUBSCRIBE, '')
+zmq.device(zmq.QUEUE, rep, req)
