@@ -511,7 +511,7 @@ static void parse_contactgroup(contactgroup * state, struct payload * ret,
 void free_cb(void * ptr, void * hint);
 
 void send_msg(void * sock, struct payload * po) {
-	sprintf(po->json_buf + po->bufused -2, " ]");
+	sprintf(po->json_buf + po->bufused - 2, " ]");
 	zmq_msg_t outmsg;
 	zmq_msg_init_data(&outmsg, po->json_buf, po->bufused, free_cb, NULL);
 	zmq_send(sock, &outmsg, 0);
@@ -527,7 +527,7 @@ void process_req_msg(void * sock) {
 	char * hostgroup_name = NULL, *servicegroup_name = NULL;
 	char * contact_name = NULL, *contactgroup_name = NULL;
 	int include_services = 0, include_hosts = 0, include_contacts = 0;
-	int list_hosts = 0, brief = 0;
+	int list_hosts = 0, brief = 0, expand_lists = 0;
 	json_t * list_services = NULL;
 	struct payload * po;
 
@@ -541,7 +541,7 @@ void process_req_msg(void * sock) {
 		return;
 
 	if(json_unpack(req, "{ s?:s s?:s s?:s s?:s s?:s s?:s s?:b s?:b"
-		" s?:b s?:b s?:o s?b }",
+		" s?:b s?:b s?:o s?b s?:b }",
 		"host_name", &host_name, "service_description",
 		&service_description, "hostgroup_name", &hostgroup_name,
 		"servicegroup_name", &servicegroup_name,
@@ -549,7 +549,8 @@ void process_req_msg(void * sock) {
 		&contactgroup_name, "include_services", &include_services,
 		"include_hosts", &include_hosts, "include_contacts",
 		&include_contacts, "list_hosts", &list_hosts, 
-		"list_services", &list_services, "brief", &brief) != 0) {
+		"list_services", &list_services, "brief", &brief,
+		"expand_lists", &expand_lists) != 0) {
 		json_decref(req);
 		return;
 	}
@@ -559,22 +560,32 @@ void process_req_msg(void * sock) {
 	payload_start_array(po, NULL);
 
 	if(list_hosts) {
-		payload_start_object(po, NULL);
-		payload_new_string(po, "type", "host_list");
-		payload_start_array(po, "hosts");
+		if(!expand_lists) {
+			payload_start_object(po, NULL);
+			payload_new_string(po, "type", "host_list");
+			payload_start_array(po, "hosts");
+		}
 		host * tmp_host = host_list;
 		while(tmp_host) {
-			payload_new_string(po, NULL, tmp_host->name);
+			if(expand_lists)
+				parse_host(tmp_host, po, include_services, include_contacts, brief);
+			else
+				payload_new_string(po, NULL, tmp_host->name);
 			tmp_host = tmp_host->next;
 		}
-		payload_end_array(po);
-		payload_end_object(po);
+		if(!expand_lists) {
+			payload_end_array(po);
+			payload_end_object(po);
+		}
 	}
 
 	if(list_services) {
-		payload_start_object(po, NULL);
-		payload_new_string(po, "type", "service_list");
-		payload_start_array(po, "services");
+		int64_t count;
+		if(!expand_lists) {
+			payload_start_object(po, NULL);
+			payload_new_string(po, "type", "service_list");
+			payload_start_array(po, "services");
+		}
 		service * tmp_svc = service_list;
 		while(tmp_svc) {
 			if(!json_is_true(list_services) &&
@@ -584,13 +595,24 @@ void process_req_msg(void * sock) {
 				tmp_svc = tmp_svc->next;
 				continue;
 			}
-			payload_start_object(po, NULL);
-			payload_new_string(po, "host_name", tmp_svc->host_ptr->name);
-			payload_new_string(po, "service_description", tmp_svc->description);
-			payload_end_object(po);
+			if(expand_lists)
+				parse_service(tmp_svc, po, include_hosts, include_contacts, brief);
+			else {
+				payload_start_object(po, NULL);
+				payload_new_string(po, "host_name", tmp_svc->host_ptr->name);
+				payload_new_string(po, "service_description", tmp_svc->description);
+				payload_end_object(po);
+			}
+			count++;
 			tmp_svc = tmp_svc->next;
 		}
-		payload_end_array(po);
+		if(!expand_lists) {
+			payload_end_array(po);
+			payload_end_object(po);
+		}
+		payload_start_object(po, NULL);
+		payload_new_string(po, "type", "service_count");
+		payload_new_integer(po, "count", count);
 		payload_end_object(po);
 	}
 
