@@ -132,6 +132,7 @@ else:
 	for o in resp:
 		parse_object(o, False)
 	
+justservices = False
 if(len(services) == 0 and len(hosts) == 0):
 	if(mytarget):
 		print "Could not find any matching services or hosts";
@@ -142,6 +143,7 @@ if(len(services) == 0 and len(hosts) == 0):
 		resp = json.loads(reqsock.recv())
 		for o in resp:
 			parse_object(o, True)
+	justservices = True
 
 contacts = list(set(contacts))
 
@@ -164,9 +166,10 @@ def status_to_string(val, ishost):
 
 if(myverb == 'status'):
 	for h in sorted(hosts.keys()):
-		print "[{0}]: {1} {2}".format(
-			h, status_to_string(hosts[h]['current_state'], False),
-				hosts[h]['plugin_output'])
+		if(mytarget == None or justservices):
+			print "[{0}]: {1} {2}".format(
+				h, status_to_string(hosts[h]['current_state'], False),
+					hosts[h]['plugin_output'])
 		for s in sorted(hosts[h]['services']):
 			name = "{0}@{1}".format(s, h)
 			if(name in services):
