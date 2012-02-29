@@ -168,6 +168,9 @@ if(username not in contacts):
 	print "{0} not authorized to view target".format(username)
 	exit(-1)
 
+pushsock = ctx.socket(zmq.PUSH)
+pushsock.connect("ipc:///tmp/nagmqpull.sock")
+
 if(myverb == 'status'):
 	for h in sorted(hosts.keys()):
 		if(mytarget == None and justservices != True):
@@ -181,10 +184,40 @@ if(myverb == 'status'):
 					name, status_to_string(services[name]['current_state'], False),
 					services[name]['plugin_output'])
 elif(myverb == 'check'):
-	print "Not implemented!"
+	subsock = ctx.socket(zmq.SUB)
+	subsock.connect("ipc:///tmp/nagmq.sock")
+	sub.setsockopt(zmq.SUBSCRIBE, 'service_check_processed')
+	sub.setsockopt(zmq.SUBSCRIBE, 'host_check_processed')
+	unseen = [ ]
+	for h in hosts.keys():
+		cmd = { 'type':'command', 'command_name':'schedule_host_check',
+			'next_check':0, 'force_check': True, 'host_name': h }
+		pushsock.send_json(cmd)
+		unseen[h] = True
+		cmd['command_name'] = 'schedule_service_check'
+		for s in hosts[h]['services']:
+			cmd['service_description'] = s
+			pushsock.send_json(cmd)
+			name = "{0}@{1}".format(h, s)
+			unseen[name] = True
+	while (len(seen) > 0):
+		mtype, pstr = zmq.recv_multipart()
+		pload = json.loads(pstr)
+		name = None
+		hstcheck = False
+		if(mtype == 'host_check_processed'):
+			name = payload['host_name']
+			hstcheck = True
+		if(mtype == 'service_check_processed'):
+			name = "{0}@{1}".format(payload['host_name'],
+				payload['service_description'])
+		if(name not in unseen):
+			continue
+		print "[{0}]: {1} {2}".format(
+					name, status_to_string(pload['current_state'], hstcheck),
+					pload['plugin_output'])
+		del unseen[name]
 else:
-	pushsock = ctx.socket(zmq.PUSH)
-	pushsock.connect("ipc:///tmp/nagmqpull.sock")
 	for h in sorted(hosts.keys()):
 		if(myverb == 'add' and mynoun == 'acknowledgement'):
 			cmd = { 'type':'acknowledgement', 'host_name':h,
