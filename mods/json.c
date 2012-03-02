@@ -7,6 +7,27 @@
 
 #define PAGE_SIZE 4096
 
+/* A "mixing table" of 256 distinct values, in pseudo-random order. */
+static unsigned char mixtable[256] = {
+251, 175, 119, 215, 81, 14, 79, 191, 103, 49, 181, 143, 186, 157, 0,
+232, 31, 32, 55, 60, 152, 58, 17, 237, 174, 70, 160, 144, 220, 90, 57,
+223, 59, 3, 18, 140, 111, 166, 203, 196, 134, 243, 124, 95, 222, 179,
+197, 65, 180, 48, 36, 15, 107, 46, 233, 130, 165, 30, 123, 161, 209, 23,
+97, 16, 40, 91, 219, 61, 100, 10, 210, 109, 250, 127, 22, 138, 29, 108,
+244, 67, 207, 9, 178, 204, 74, 98, 126, 249, 167, 116, 34, 77, 193,
+200, 121, 5, 20, 113, 71, 35, 128, 13, 182, 94, 25, 226, 227, 199, 75,
+27, 41, 245, 230, 224, 43, 225, 177, 26, 155, 150, 212, 142, 218, 115,
+241, 73, 88, 105, 39, 114, 62, 255, 192, 201, 145, 214, 168, 158, 221,
+148, 154, 122, 12, 84, 82, 163, 44, 139, 228, 236, 205, 242, 217, 11,
+187, 146, 159, 64, 86, 239, 195, 42, 106, 198, 118, 112, 184, 172, 87,
+2, 173, 117, 176, 229, 247, 253, 137, 185, 99, 164, 102, 147, 45, 66,
+231, 52, 141, 211, 194, 206, 246, 238, 56, 110, 78, 248, 63, 240, 189,
+93, 92, 51, 53, 183, 19, 171, 72, 50, 33, 104, 101, 69, 8, 252, 83, 120,
+76, 135, 85, 54, 202, 125, 188, 213, 96, 235, 136, 208, 162, 129, 190,
+132, 156, 38, 47, 1, 7, 254, 24, 4, 216, 131, 89, 21, 28, 133, 37, 153,
+149, 80, 170, 68, 6, 169, 234, 151
+};
+
 void adjust_payload_len(struct payload * po, size_t len) {
 	if(po->bufused + len < po->buflen)
 		return;
@@ -22,17 +43,32 @@ struct payload * payload_new() {
 	return ret;
 }
 
-void payload_add_key(struct payload * po, char * key) {
+int payload_add_key(struct payload * po, char * key) {
 	if(key == NULL)
-		return;
+		return 1;
 	size_t keylen = strlen(key);
+	unsigned char hash = keylen;
+	int i;
+	if(po->keys) {
+		for(i = keylen; i > 0;)
+			hash = mixtable[hash ^ key[i--]];
+		struct keybucket * b = po->keys[i];
+		while(b && strcmp(b->key, key) != 0)
+			b = b->next;
+		
+		if(!b)
+			return 0;
+	}
+
 	adjust_payload_len(po, keylen + sizeof("\"\": "));
 	po->bufused += sprintf(po->json_buf + po->bufused,
 		"\"%s\": ", key);
+	return 1;
 }
 
 void payload_new_string(struct payload * po, char * key, char * val) {
-	payload_add_key(po, key);
+	if(!payload_add_key(po, key))
+		return;
 	if(val == NULL) {
 		adjust_payload_len(po, sizeof("null, "));
 		po->bufused += sprintf(po->json_buf + po->bufused,
@@ -87,14 +123,16 @@ void payload_new_string(struct payload * po, char * key, char * val) {
 }
 
 void payload_new_integer(struct payload * po, char * key, long long val) {
-	payload_add_key(po, key);
+	if(!payload_add_key(po, key))
+		return;
 	adjust_payload_len(po, sizeof("INT64_MAX, "));
 	po->bufused += sprintf(po->json_buf + po->bufused,
 		"%lli, ", val);
 }
 
 void payload_new_boolean(struct payload * po, char * key, int val) {
-	payload_add_key(po, key);
+	if(!payload_add_key(po, key))
+		return;
 	adjust_payload_len(po, sizeof("false, "));
 	if(val > 0)
 		po->bufused += sprintf(po->json_buf + po->bufused,
@@ -105,7 +143,8 @@ void payload_new_boolean(struct payload * po, char * key, int val) {
 }
 
 void payload_new_double(struct payload * po, char * key, double val) {
-	payload_add_key(po, key);
+	if(!payload_add_key(po, key))
+		return;
 	adjust_payload_len(po, DBL_MAX_10_EXP + sizeof(", "));
 	po->bufused += snprintf(po->json_buf + po->bufused,
 		DBL_MAX_10_EXP, "%f", val) - 1;
@@ -115,7 +154,8 @@ void payload_new_double(struct payload * po, char * key, double val) {
 
 void payload_new_timestamp(struct payload * po,
 	char* key, struct timeval * tv) {
-	payload_add_key(po, key);
+	if(!payload_add_key(po, key))
+		return;
 	adjust_payload_len(po, sizeof("{  }, "));
 	po->bufused += sprintf(po->json_buf + po->bufused, "{ ");
 	payload_new_integer(po, "tv_sec", tv->tv_sec);
@@ -125,10 +165,13 @@ void payload_new_timestamp(struct payload * po,
 		" }, ");
 }
 
-void payload_start_array(struct payload * po, char * key) {
+int payload_start_array(struct payload * po, char * key) {
+	if(!payload_add_key(po, key))
+		return 0;
 	payload_add_key(po, key);
 	adjust_payload_len(po, sizeof("[ "));
 	po->bufused += sprintf(po->json_buf + po->bufused, "[ ");
+	return 1;
 }
 
 void payload_end_array(struct payload * po) {
@@ -138,10 +181,12 @@ void payload_end_array(struct payload * po) {
 	po->bufused += sprintf(po->json_buf + po->bufused, " ], ");
 }
 
-void payload_start_object(struct payload * po, char * key) {
-	payload_add_key(po, key);
+int payload_start_object(struct payload * po, char * key) {
+	if(!payload_add_key(po, key))
+		return 0;
 	adjust_payload_len(po, sizeof("{ "));
 	po->bufused += sprintf(po->json_buf + po->bufused, "{ ");
+	return 1;
 }
 
 void payload_end_object(struct payload * po) {
@@ -152,5 +197,37 @@ void payload_end_object(struct payload * po) {
 }
 
 void payload_finalize(struct payload * po) {
-	sprintf(po->json_buf + po->bufused - 2, " }");
+	if(po->json_buf[0] == '[')
+		sprintf(po->json_buf + po->bufused - 2, " }");
+	else
+		sprintf(po->json_buf + po->bufused - 2, " }");
+	if(po->keys) {
+		int i;
+		for(i = 0; i < 255; i++) {
+			struct keybucket * t;
+			t = po->keys[i];
+			while(t) {
+				struct keybucket * p = t->next;
+				free(p->key);
+				free(t);
+				t = p;
+			}
+		}
+		free(po->keys);
+	}
+}
+
+void payload_hash_key(struct payload * po, const char * key) {
+	unsigned char hash = strlen(key);
+	int i;
+	if(!po->keys) {
+		po->keys = malloc(sizeof(char*) * 255);
+		memset(po->keys, 0, sizeof(char*) * 255);
+	}
+	for(i = hash; i > 0;)
+		hash = mixtable[hash ^ key[i--]];
+	struct keybucket * n = malloc(sizeof(struct keybucket));
+	n->key = strdup(key);
+	n->next = po->keys[hash]->next;
+	po->keys[hash] = n;
 }

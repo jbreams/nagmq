@@ -355,8 +355,6 @@ static void parse_service(service * state, struct payload * ret,
 	payload_new_boolean(ret, "is_flapping", state->is_flapping);
 	payload_new_integer(ret, "flapping_comment_id", state->flapping_comment_id);
 	payload_new_double(ret, "percent_state_change", state->percent_state_change);
-	payload_new_string(ret, "event_handler_args", state->event_handler_args);
-	payload_new_string(ret, "command_args", state->check_command_args);
 	payload_end_object(ret);
 
 	if(include_host)
@@ -511,7 +509,7 @@ static void parse_contactgroup(contactgroup * state, struct payload * ret,
 void free_cb(void * ptr, void * hint);
 
 void send_msg(void * sock, struct payload * po) {
-	sprintf(po->json_buf + po->bufused - 2, " ]");
+	payload_finalize(po);
 	zmq_msg_t outmsg;
 	zmq_msg_init_data(&outmsg, po->json_buf, po->bufused, free_cb, NULL);
 	zmq_send(sock, &outmsg, 0);
@@ -528,7 +526,7 @@ void process_req_msg(void * sock) {
 	char * contact_name = NULL, *contactgroup_name = NULL;
 	int include_services = 0, include_hosts = 0, include_contacts = 0;
 	int list_hosts = 0, brief = 0, expand_lists = 0;
-	json_t * list_services = NULL;
+	json_t * list_services = NULL, *keys = NULL;
 	struct payload * po;
 
 	zmq_msg_init(&reqmsg);
@@ -541,7 +539,7 @@ void process_req_msg(void * sock) {
 		return;
 
 	if(json_unpack(req, "{ s?:s s?:s s?:s s?:s s?:s s?:s s?:b s?:b"
-		" s?:b s?:b s?:o s?b s?:b }",
+		" s?:b s?:b s?:o s?b s?:b s?:o }",
 		"host_name", &host_name, "service_description",
 		&service_description, "hostgroup_name", &hostgroup_name,
 		"servicegroup_name", &servicegroup_name,
@@ -550,7 +548,7 @@ void process_req_msg(void * sock) {
 		"include_hosts", &include_hosts, "include_contacts",
 		&include_contacts, "list_hosts", &list_hosts, 
 		"list_services", &list_services, "brief", &brief,
-		"expand_lists", &expand_lists) != 0) {
+		"expand_lists", &expand_lists, "keys", &keys) != 0) {
 		json_decref(req);
 		return;
 	}
@@ -558,6 +556,16 @@ void process_req_msg(void * sock) {
 	po = malloc(sizeof(struct payload));
 	memset(po, 0, sizeof(struct payload));
 	payload_start_array(po, NULL);
+
+	if(keys != NULL && json_is_array(keys)) {
+		int i;
+		for(i = 0; i < json_array_size(keys); i++) {
+			json_t * keytmp = json_array_get(keys, i);
+			if(!json_is_string(keytmp))
+				continue;
+			payload_hash_key(po, json_string_value(keytmp));
+		}
+	}
 
 	if(list_hosts) {
 		if(!expand_lists) {

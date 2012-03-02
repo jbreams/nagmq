@@ -200,6 +200,7 @@ elif(myverb == 'check'):
 			pushsock.send_json(cmd)
 			name = "{0}@{1}".format(h, s)
 			unseen[name] = True
+	print "Queued checks for {0}".format(unseen.keys())
 	while (len(seen) > 0):
 		mtype, pstr = zmq.recv_multipart()
 		pload = json.loads(pstr)
