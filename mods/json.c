@@ -228,7 +228,7 @@ void payload_hash_key(struct payload * po, const char * key) {
 	struct keybucket * n = malloc(sizeof(struct keybucket));
 	n->key = strdup(key);
 	if(po->keys[hash])
-		n->next = po->keys[hash]->next;
+		n->next = po->keys[hash];
 	else
 		n->next = NULL;
 	po->keys[hash] = n;
