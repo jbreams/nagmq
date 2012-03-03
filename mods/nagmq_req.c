@@ -25,16 +25,18 @@ void unlock_obj(char * hostname, char * service, char * plugin_output,
 	char * long_plugin_output, char * perf_data);
 
 static void parse_service(service * state, struct payload * ret,
-	int include_host, int include_contacts, int brief);
+	int include_host, int include_contacts);
 static void parse_host(host * state, struct payload * ret,
-	int include_services, int include_contacts, int brief);
+	int include_services, int include_contacts);
 static void parse_contact(contact * state, struct payload * ret);
 static void parse_contactgroup(contactgroup * state, struct payload * ret,
 	int include_contacts);
 
 static void parse_host(host * state, struct payload * ret,
-	int include_services, int include_contacts, int brief) {
+	int include_services, int include_contacts) {
 	char * plugin_output, *long_plugin_output, *perf_data;
+	int rc;
+
 	lock_obj(state->name, NULL, &plugin_output,
 		&long_plugin_output, &perf_data);
 	payload_start_object(ret, NULL);
@@ -45,57 +47,52 @@ static void parse_host(host * state, struct payload * ret,
 	payload_new_string(ret, "address", state->address);
 
 	servicesmember * slck = state->services;
-	if(slck) {
-		payload_start_array(ret, "services");
+	if(slck && (rc = payload_start_array(ret, "services"))) {
 		while(slck) {
 			payload_new_string(ret, NULL, slck->service_ptr->description);
 			slck = slck->next;
 		}
 		payload_end_array(ret);
-	} else
+	} else if(rc)
 		payload_new_string(ret, "services", NULL);
 	hostsmember *hlck = state->parent_hosts;
-	if(hlck) {
-		payload_start_array(ret, "parent_hosts");
+	if(hlck && (rc = payload_start_array(ret, "parent_hosts"))) {
 		while(hlck) {
 			payload_new_string(ret, NULL, hlck->host_name);
 			hlck = hlck->next;
 		}
 		payload_end_array(ret);
-	} else
+	} else if(rc)
 		payload_new_string(ret, "parent_hosts", NULL);
 
 	hlck = state->child_hosts;
-	if(hlck) {
-		payload_start_array(ret, "child_hosts");
+	if(hlck && (rc = payload_start_array(ret, "child_hosts"))) {
 		while(hlck) {
 			payload_new_string(ret, NULL, hlck->host_name);
 			hlck = hlck->next;
 		}
 		payload_end_array(ret);
-	} else
+	} else if(rc)
 		payload_new_string(ret, "child_hosts", NULL);
 
 	contactsmember * clck = state->contacts;
-	if(clck) {
-		payload_start_array(ret, "contacts");
+	if(clck && (rc = payload_start_array(ret, "contacts"))) {
 		while(clck) {
 			payload_new_string(ret, NULL, clck->contact_name);
 			clck = clck->next;
 		}
 		payload_end_array(ret);
-	} else
+	} else if(rc)
 		payload_new_string(ret, "contacts", NULL);
 
 	contactgroupsmember * cglck = state->contact_groups;
-	if(cglck) {
-		payload_start_array(ret, "contact_groups");
+	if(cglck && payload_start_array(ret, "contact_groups")) {
 		while(cglck) {
 			payload_new_string(ret, NULL, cglck->group_name);
 			cglck = cglck->next;
 		}
 		payload_end_array(ret);
-	} else
+	} else if(rc)
 		payload_new_string(ret, "contact_groups", NULL);
 
 	payload_new_string(ret, "check_command", state->host_check_command);
@@ -131,28 +128,26 @@ static void parse_host(host * state, struct payload * ret,
 	payload_new_boolean(ret, "failure_prediction_enabled", state->failure_prediction_enabled);
 	payload_new_string(ret, "failure_prediction_options", state->failure_prediction_options);
 	payload_new_boolean(ret, "obsess_over_host", state->obsess_over_host);
-	if(!brief) {
-		payload_new_string(ret, "notes", state->notes);
-		payload_new_string(ret, "notes_url", state->notes_url);
-		payload_new_string(ret, "action_url", state->action_url);
-		payload_new_string(ret, "icon_image", state->icon_image);
-		payload_new_string(ret, "icon_image_alt", state->icon_image_alt);
-		payload_new_string(ret, "vrml_image", state->vrml_image);
-		payload_new_string(ret, "statusmap_image", state->statusmap_image);
-		payload_new_integer(ret, "have_2d_coords", state->have_2d_coords);
-		payload_new_integer(ret, "x_2d", state->x_2d);
-		payload_new_integer(ret, "y_2d", state->y_2d);
-		payload_new_integer(ret, "have_3d_coords", state->have_3d_coords);
-		payload_new_double(ret, "x_3d", state->x_3d);
-		payload_new_double(ret, "y_3d", state->y_3d);
-		payload_new_double(ret, "z_3d", state->z_3d);
-		payload_new_integer(ret, "should_be_drawn", state->should_be_drawn);
-		payload_new_boolean(ret, "retain_status_information", state->retain_status_information);
-		payload_new_boolean(ret, "retain_nonstatus_information", state->retain_nonstatus_information);
-		payload_new_integer(ret, "modified_attributes", state->modified_attributes);
-		payload_new_integer(ret, "circular_path_checked", state->circular_path_checked);
-		payload_new_integer(ret, "contains_circular_path", state->contains_circular_path);
-	}
+	payload_new_string(ret, "notes", state->notes);
+	payload_new_string(ret, "notes_url", state->notes_url);
+	payload_new_string(ret, "action_url", state->action_url);
+	payload_new_string(ret, "icon_image", state->icon_image);
+	payload_new_string(ret, "icon_image_alt", state->icon_image_alt);
+	payload_new_string(ret, "vrml_image", state->vrml_image);
+	payload_new_string(ret, "statusmap_image", state->statusmap_image);
+	payload_new_integer(ret, "have_2d_coords", state->have_2d_coords);
+	payload_new_integer(ret, "x_2d", state->x_2d);
+	payload_new_integer(ret, "y_2d", state->y_2d);
+	payload_new_integer(ret, "have_3d_coords", state->have_3d_coords);
+	payload_new_double(ret, "x_3d", state->x_3d);
+	payload_new_double(ret, "y_3d", state->y_3d);
+	payload_new_double(ret, "z_3d", state->z_3d);
+	payload_new_integer(ret, "should_be_drawn", state->should_be_drawn);
+	payload_new_boolean(ret, "retain_status_information", state->retain_status_information);
+	payload_new_boolean(ret, "retain_nonstatus_information", state->retain_nonstatus_information);
+	payload_new_integer(ret, "modified_attributes", state->modified_attributes);
+	payload_new_integer(ret, "circular_path_checked", state->circular_path_checked);
+	payload_new_integer(ret, "contains_circular_path", state->contains_circular_path);
 	payload_new_integer(ret, "problem_has_been_acknowledged", state->problem_has_been_acknowledged);
 	payload_new_integer(ret, "current_state", state->current_state);
 	payload_new_integer(ret, "last_state", state->last_state);
@@ -190,23 +185,25 @@ static void parse_host(host * state, struct payload * ret,
 	payload_new_boolean(ret, "check_flapping_recovery_notification", state->check_flapping_recovery_notification);
 	payload_new_integer(ret, "scheduled_downtime_depth", state->scheduled_downtime_depth);
 	payload_new_integer(ret, "pending_flex_downtime", state->pending_flex_downtime);
-	payload_start_array(ret, "state_history");
-	int i;
-	for(i = 0; i < state->state_history_index; i++) {
-		payload_new_integer(ret, NULL, state->state_history[i]);
+	if(payload_start_array(ret, "state_history")) {
+		int i;
+		for(i = 0; i < state->state_history_index; i++) {
+			payload_new_integer(ret, NULL, state->state_history[i]);
+		}
+		payload_end_array(ret);
 	}
-	payload_end_array(ret);
 	payload_new_integer(ret, "last_state_history_update", state->last_state_history_update);
 	payload_new_boolean(ret, "is_flapping", state->is_flapping);
 	payload_new_integer(ret, "flapping_comment_id", state->flapping_comment_id);
 	payload_new_double(ret, "percent_state_change", state->percent_state_change);
 	payload_new_integer(ret, "total_service_check_interval", state->total_service_check_interval);
 	payload_end_object(ret);
+	unlock_obj(state->name, NULL, NULL, NULL, NULL);
 
 	if(include_services) {
 		slck = state->services;
 		while(slck) {
-			parse_service(slck->service_ptr, ret, 0, 0, brief);
+			parse_service(slck->service_ptr, ret, 0, 0);
 			slck = slck->next;
 		}
 	}
@@ -224,12 +221,12 @@ static void parse_host(host * state, struct payload * ret,
 			cglck = cglck->next;
 		}
 	}
-	unlock_obj(state->name, NULL, NULL, NULL, NULL);
 }
 
 static void parse_service(service * state, struct payload * ret,
-	int include_host, int include_contacts, int brief) {
+	int include_host, int include_contacts) {
 	char * plugin_output, *long_plugin_output, *perf_data;
+	int rc;
 	lock_obj(state->host_name, state->description,
 		&plugin_output, &long_plugin_output, &perf_data);
 	payload_start_object(ret, NULL);
@@ -245,25 +242,23 @@ static void parse_service(service * state, struct payload * ret,
 	payload_new_integer(ret, "max_attempts", state->max_attempts);
 	payload_new_integer(ret, "parallelize", state->parallelize);
 	contactsmember * clck = state->contacts;
-	if(clck) {
-		payload_start_array(ret, "contacts");
+	if(clck && (rc = payload_start_array(ret, "contacts"))) {
 		while(clck) {
 			payload_new_string(ret, NULL, clck->contact_name);
 			clck = clck->next;
 		}
 		payload_end_array(ret);
-	} else
+	} else if(rc)
 		payload_new_string(ret, "contacts", NULL);
 
 	contactgroupsmember * cglck = state->contact_groups;
-	if(cglck) {
-		payload_start_array(ret, "contact_groups");
+	if(cglck && (rc = payload_start_array(ret, "contact_groups"))) {
 		while(cglck) {
 			payload_new_string(ret, NULL, cglck->group_name);
 			cglck = cglck->next;
 		}
 		payload_end_array(ret);
-	} else
+	} else if(rc)
 		payload_new_string(ret, "contact_groups", NULL);
 
 	payload_new_double(ret, "notification_interval", state->notification_interval);
@@ -298,16 +293,14 @@ static void parse_service(service * state, struct payload * ret,
 	payload_new_boolean(ret, "obsess_over_service", state->obsess_over_service);
 	payload_new_boolean(ret, "failure_prediction_enabled", state->failure_prediction_enabled);
 	payload_new_string(ret, "failure_prediction_options", state->failure_prediction_options);
-	if(!brief) {
-		payload_new_string(ret, "notes", state->notes);
-		payload_new_string(ret, "notes_url", state->notes_url);
-		payload_new_string(ret, "action_url", state->action_url);
-		payload_new_string(ret, "icon_image", state->icon_image);
-		payload_new_string(ret, "icon_image_alt", state->icon_image_alt);
-		payload_new_integer(ret, "modified_attributes", state->modified_attributes);
-		payload_new_boolean(ret, "retain_status_information", state->retain_status_information);
-		payload_new_boolean(ret, "retain_nonstatus_information", state->retain_nonstatus_information);
-	}
+	payload_new_string(ret, "notes", state->notes);
+	payload_new_string(ret, "notes_url", state->notes_url);
+	payload_new_string(ret, "action_url", state->action_url);
+	payload_new_string(ret, "icon_image", state->icon_image);
+	payload_new_string(ret, "icon_image_alt", state->icon_image_alt);
+	payload_new_integer(ret, "modified_attributes", state->modified_attributes);
+	payload_new_boolean(ret, "retain_status_information", state->retain_status_information);
+	payload_new_boolean(ret, "retain_nonstatus_information", state->retain_nonstatus_information);
 	payload_new_boolean(ret, "problem_has_been_acknowledged", state->problem_has_been_acknowledged);
 	payload_new_integer(ret, "host_problem_at_last_check", state->host_problem_at_last_check);
 	payload_new_integer(ret, "current_state", state->current_state);
@@ -347,20 +340,20 @@ static void parse_service(service * state, struct payload * ret,
 	payload_new_integer(ret, "check_options", state->check_options);
 	payload_new_integer(ret, "scheduled_downtime_depth", state->scheduled_downtime_depth);
 	payload_new_boolean(ret, "pending_flex_downtime", state->pending_flex_downtime);
-	payload_start_array(ret, "state_history");
-	int i;
-	for(i = 0; i < state->state_history_index; i++)
-		payload_new_integer(ret, NULL, state->state_history[i]);
-	payload_end_array(ret);
+	if(payload_start_array(ret, "state_history")) {
+		int i;
+		for(i = 0; i < state->state_history_index; i++)
+			payload_new_integer(ret, NULL, state->state_history[i]);
+		payload_end_array(ret);
+	}
 	payload_new_boolean(ret, "is_flapping", state->is_flapping);
 	payload_new_integer(ret, "flapping_comment_id", state->flapping_comment_id);
 	payload_new_double(ret, "percent_state_change", state->percent_state_change);
-	payload_new_string(ret, "event_handler_args", state->event_handler_args);
-	payload_new_string(ret, "command_args", state->check_command_args);
 	payload_end_object(ret);
+	unlock_obj(state->host_name, state->description, NULL, NULL, NULL);
 
 	if(include_host)
-		parse_host(state->host_ptr, ret, 0, 0, brief);
+		parse_host(state->host_ptr, ret, 0, 0);
 
 	if(include_contacts) {
 		clck = state->contacts;
@@ -375,9 +368,8 @@ static void parse_service(service * state, struct payload * ret,
 			cglck = cglck->next;
 		}
 	}
-
-	unlock_obj(state->host_name, state->description, NULL, NULL, NULL);
 }
+
 
 static void parse_hostgroup(hostgroup * state, struct payload * ret,
 	int include_hosts) {
@@ -402,7 +394,7 @@ static void parse_hostgroup(hostgroup * state, struct payload * ret,
 	if(include_hosts) {
 		hostsmember * htmp = state->members;
 		while(htmp) {
-			parse_host(htmp->host_ptr, ret, 0, 0, 0);
+			parse_host(htmp->host_ptr, ret, 0, 0);
 			htmp = htmp->next;
 		}
 	}
@@ -431,7 +423,7 @@ static void parse_servicegroup(servicegroup * state, struct payload * ret,
 	if(include_services) {
 		servicesmember * stmp = state->members;
 		while(stmp) {
-			parse_service(stmp->service_ptr, ret, 0, 0, 0);
+			parse_service(stmp->service_ptr, ret, 0, 0);
 			stmp = stmp->next;
 		}
 	}
@@ -511,7 +503,7 @@ static void parse_contactgroup(contactgroup * state, struct payload * ret,
 void free_cb(void * ptr, void * hint);
 
 void send_msg(void * sock, struct payload * po) {
-	sprintf(po->json_buf + po->bufused - 2, " ]");
+	payload_finalize(po);
 	zmq_msg_t outmsg;
 	zmq_msg_init_data(&outmsg, po->json_buf, po->bufused, free_cb, NULL);
 	zmq_send(sock, &outmsg, 0);
@@ -528,7 +520,7 @@ void process_req_msg(void * sock) {
 	char * contact_name = NULL, *contactgroup_name = NULL;
 	int include_services = 0, include_hosts = 0, include_contacts = 0;
 	int list_hosts = 0, brief = 0, expand_lists = 0;
-	json_t * list_services = NULL;
+	json_t * list_services = NULL, *keys = NULL;
 	struct payload * po;
 
 	zmq_msg_init(&reqmsg);
@@ -541,7 +533,7 @@ void process_req_msg(void * sock) {
 		return;
 
 	if(json_unpack(req, "{ s?:s s?:s s?:s s?:s s?:s s?:s s?:b s?:b"
-		" s?:b s?:b s?:o s?b s?:b }",
+		" s?:b s?:b s?:o s?:b s?:o }",
 		"host_name", &host_name, "service_description",
 		&service_description, "hostgroup_name", &hostgroup_name,
 		"servicegroup_name", &servicegroup_name,
@@ -549,8 +541,8 @@ void process_req_msg(void * sock) {
 		&contactgroup_name, "include_services", &include_services,
 		"include_hosts", &include_hosts, "include_contacts",
 		&include_contacts, "list_hosts", &list_hosts, 
-		"list_services", &list_services, "brief", &brief,
-		"expand_lists", &expand_lists) != 0) {
+		"list_services", &list_services,
+		"expand_lists", &expand_lists, "keys", &keys) != 0) {
 		json_decref(req);
 		return;
 	}
@@ -558,6 +550,16 @@ void process_req_msg(void * sock) {
 	po = malloc(sizeof(struct payload));
 	memset(po, 0, sizeof(struct payload));
 	payload_start_array(po, NULL);
+
+	if(keys != NULL && json_is_array(keys)) {
+		int i;
+		for(i = 0; i < json_array_size(keys); i++) {
+			json_t * keytmp = json_array_get(keys, i);
+			if(!json_is_string(keytmp))
+				continue;
+			payload_hash_key(po, json_string_value(keytmp));
+		}
+	}
 
 	if(list_hosts) {
 		if(!expand_lists) {
@@ -568,7 +570,7 @@ void process_req_msg(void * sock) {
 		host * tmp_host = host_list;
 		while(tmp_host) {
 			if(expand_lists)
-				parse_host(tmp_host, po, include_services, include_contacts, brief);
+				parse_host(tmp_host, po, include_services, include_contacts);
 			else
 				payload_new_string(po, NULL, tmp_host->name);
 			tmp_host = tmp_host->next;
@@ -596,7 +598,7 @@ void process_req_msg(void * sock) {
 				continue;
 			}
 			if(expand_lists)
-				parse_service(tmp_svc, po, include_hosts, include_contacts, brief);
+				parse_service(tmp_svc, po, include_hosts, include_contacts);
 			else {
 				payload_start_object(po, NULL);
 				payload_new_string(po, "host_name", tmp_svc->host_ptr->name);
@@ -642,7 +644,7 @@ void process_req_msg(void * sock) {
 			return;
 		}
 		
-		parse_service(svctarget, po, include_hosts, include_contacts, brief);
+		parse_service(svctarget, po, include_hosts, include_contacts);
 	} else if(host_name) {
 		host * hsttarget = find_host(host_name);
 		if(!hsttarget) {
@@ -655,7 +657,7 @@ void process_req_msg(void * sock) {
 			json_decref(req);
 			return;
 		}
-		parse_host(hsttarget, po, include_services, include_contacts, brief);
+		parse_host(hsttarget, po, include_services, include_contacts);
 	}
 	if(hostgroup_name) {
 		hostgroup * hsttarget = find_hostgroup(hostgroup_name);

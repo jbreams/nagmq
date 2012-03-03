@@ -18,6 +18,9 @@ if(len(args) < 2):
 
 validverbs = [ 'start', 'stop', 'add', 'remove', 'check', 'status' ]
 validnouns = [ 'acknowledgement', 'notifications', 'checks' ]
+keys = ['host_name', 'services', 'hosts', 'contacts', 'contact_groups',
+	'service_description', 'current_state', 'members', 'type', 'name',
+	'problem_has_been_acknowledged', 'plugin_output' ]
 myverb = None
 mynoun = None
 mysvc = None
@@ -41,6 +44,13 @@ if(myverb == None or
 	print "Did not specify a valid noun or verb!"
 	exit(-1)
 
+
+ctx = zmq.Context()
+reqsock = ctx.socket(zmq.REQ)
+reqsock.connect("ipc:///tmp/nagmqreq.sock")
+pushsock = ctx.socket(zmq.PUSH)
+pushsock.connect("ipc:///tmp/nagmqpull.sock")
+
 argn = 2;
 if(myverb == 'check' or myverb == 'status'):
 	argn = 1
@@ -52,15 +62,12 @@ services = dict()
 hosts = dict()
 contacts = [ ]
 
-ctx = zmq.Context()
-reqsock = ctx.socket(zmq.REQ)
-reqsock.connect("ipc:///tmp/nagmqreq.sock")
-
 def parse_object(o, lr):
 	if(o['type'] == 'hostgroup'):
 		for h in o['members']:
 			if h not in hosts:
-				reqsock.send_json({'host_name': h, 'include_contacts': True})
+				reqsock.send_json({'host_name': h, 'include_contacts': True,
+					'keys': keys})
 				resp = json.loads(reqsock.recv());
 				for so in resp:
 					parse_object(so, lr)
@@ -72,7 +79,8 @@ def parse_object(o, lr):
 			name = "{0}@{1}".format(s, o['host_name'])
 			if(name not in services):
 				reqsock.send_json({'host_name': o['host_name'],
-					'service_description': s, 'include_contacts': True})
+					'service_description': s, 'include_contacts': True,
+					'keys': keys})
 				resp = json.loads(reqsock.recv());
 				for so in resp:
 					parse_object(so, lr)
@@ -81,7 +89,7 @@ def parse_object(o, lr):
 				contacts.append(c)
 		if(o['contact_groups'] != None):
 			for g in o['contact_groups']:
-				reqsock.send_json(dict(contactgroup_name=g))
+				reqsock.send_json(dict(contactgroup_name=g, keys=keys))
 				resp = json.loads(reqsock.recv())
 				for co in resp:
 					parse_object(co, lr)
@@ -93,7 +101,7 @@ def parse_object(o, lr):
 				contacts.append(c)
 		if(o['contact_groups'] != None):
 			for g in o['contact_groups']:
-				reqsock.send_json(dict(contactgroup_name=g))
+				reqsock.send_json(dict(contactgroup_name=g, keys=keys))
 				resp = json.loads(reqsock.recv())
 				for co in resp:
 					parse_object(co, lr)		
@@ -105,29 +113,27 @@ def parse_object(o, lr):
 
 			
 if(mytarget != None):
-	targetreq = dict(host_name=mytarget, include_contacts=True, brief=True)
-	reqsock.send_json(targetreq)
+	reqsock.send_json({ 'host_name': mytarget,
+		'include_contacts': True, 'keys': keys })
 	resp = json.loads(reqsock.recv())
 	for o in resp:
 		parse_object(o, False)
 
-	targetreq = dict(hostgroup_name=mytarget, brief=True,
-		include_hosts=True, include_contacts=True)
-	reqsock.send_json(targetreq)
+	reqsock.send_json({ 'hostgroup_name': mytarget,
+		'keys': keys, 'include_hosts': True, 'include_contacts': True })
 	resp = json.loads(reqsock.recv())
 	for o in resp:
 		parse_object(o, False)
 
 else:
-	targetreq = dict(host_name=mysvc)
-	reqsock.send_json(targetreq)
+	reqsock.send_json({ 'host_name':mysvc, 'keys': keys })
 	raw = reqsock.recv()
 	resp = json.loads(raw)
 	for o in resp:
 		parse_object(o, False)
 
-	targetreq = dict(hostgroup_name=mysvc, include_hosts=True, brief=True)
-	reqsock.send_json(targetreq)
+	reqsock.send_json({ 'hostgroup_name': mysvc,
+		'include_hosts': True, 'keys': keys})
 	resp = json.loads(reqsock.recv())
 	for o in resp:
 		parse_object(o, False)
@@ -138,8 +144,8 @@ if(len(services) == 0 and len(hosts) == 0):
 		print "Could not find any matching services or hosts";
 		exit(-1);
 	else:
-		reqsock.send_json(dict(list_services=mysvc, expand_lists=True,
-			brief=True, include_hosts=True))
+		reqsock.send_json({ 'list_services':mysvc, 'expand_lists': True,
+			'keys': keys, 'include_hosts':True })
 		resp = json.loads(reqsock.recv())
 		for o in resp:
 			parse_object(o, True)
@@ -167,9 +173,6 @@ username = pwd.getpwuid(os.getuid())[0]
 if(username not in contacts):
 	print "{0} not authorized to view target".format(username)
 	#exit(-1)
-
-pushsock = ctx.socket(zmq.PUSH)
-pushsock.connect("ipc:///tmp/nagmqpull.sock")
 
 if(myverb == 'status'):
 	for h in sorted(hosts.keys()):
@@ -202,6 +205,7 @@ elif(myverb == 'check'):
 			unseen[name] = True
 	while (len(unseen) > 0):
 		mtype, pstr = subsock.recv_multipart()
+	print "Queued checks for {0}".format(unseen.keys())
 		pload = json.loads(pstr)
 		name = None
 		hstcheck = False
