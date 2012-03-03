@@ -52,7 +52,7 @@ int payload_add_key(struct payload * po, char * key) {
 	if(po->keys) {
 		for(i = keylen; i > 0;)
 			hash = mixtable[hash ^ key[i--]];
-		struct keybucket * b = po->keys[i];
+		struct keybucket * b = po->keys[hash];
 		while(b && strcmp(b->key, key) != 0)
 			b = b->next;
 		
@@ -168,7 +168,6 @@ void payload_new_timestamp(struct payload * po,
 int payload_start_array(struct payload * po, char * key) {
 	if(!payload_add_key(po, key))
 		return 0;
-	payload_add_key(po, key);
 	adjust_payload_len(po, sizeof("[ "));
 	po->bufused += sprintf(po->json_buf + po->bufused, "[ ");
 	return 1;
@@ -198,7 +197,7 @@ void payload_end_object(struct payload * po) {
 
 void payload_finalize(struct payload * po) {
 	if(po->json_buf[0] == '[')
-		sprintf(po->json_buf + po->bufused - 2, " }");
+		sprintf(po->json_buf + po->bufused - 2, " ]");
 	else
 		sprintf(po->json_buf + po->bufused - 2, " }");
 	if(po->keys) {
@@ -208,7 +207,7 @@ void payload_finalize(struct payload * po) {
 			t = po->keys[i];
 			while(t) {
 				struct keybucket * p = t->next;
-				free(p->key);
+				free(t->key);
 				free(t);
 				t = p;
 			}
@@ -221,13 +220,16 @@ void payload_hash_key(struct payload * po, const char * key) {
 	unsigned char hash = strlen(key);
 	int i;
 	if(!po->keys) {
-		po->keys = malloc(sizeof(char*) * 255);
-		memset(po->keys, 0, sizeof(char*) * 255);
+		po->keys = malloc(sizeof(struct keybucket*) * 256);
+		memset(po->keys, 0, sizeof(struct keybucket*) * 256);
 	}
 	for(i = hash; i > 0;)
 		hash = mixtable[hash ^ key[i--]];
 	struct keybucket * n = malloc(sizeof(struct keybucket));
 	n->key = strdup(key);
-	n->next = po->keys[hash]->next;
+	if(po->keys[hash])
+		n->next = po->keys[hash]->next;
+	else
+		n->next = NULL;
 	po->keys[hash] = n;
 }
