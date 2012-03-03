@@ -166,7 +166,7 @@ def status_to_string(val, ishost):
 username = pwd.getpwuid(os.getuid())[0]
 if(username not in contacts):
 	print "{0} not authorized to view target".format(username)
-	exit(-1)
+	#exit(-1)
 
 pushsock = ctx.socket(zmq.PUSH)
 pushsock.connect("ipc:///tmp/nagmqpull.sock")
@@ -186,36 +186,36 @@ if(myverb == 'status'):
 elif(myverb == 'check'):
 	subsock = ctx.socket(zmq.SUB)
 	subsock.connect("ipc:///tmp/nagmq.sock")
-	sub.setsockopt(zmq.SUBSCRIBE, 'service_check_processed')
-	sub.setsockopt(zmq.SUBSCRIBE, 'host_check_processed')
-	unseen = [ ]
+	subsock.setsockopt(zmq.SUBSCRIBE, 'service_check_processed')
+	subsock.setsockopt(zmq.SUBSCRIBE, 'host_check_processed')
+	unseen = { }
 	for h in hosts.keys():
 		cmd = { 'type':'command', 'command_name':'schedule_host_check',
-			'next_check':0, 'force_check': True, 'host_name': h }
+			'next_check':time.time(), 'force_check': True, 'host_name': h }
 		pushsock.send_json(cmd)
 		unseen[h] = True
 		cmd['command_name'] = 'schedule_service_check'
 		for s in hosts[h]['services']:
 			cmd['service_description'] = s
 			pushsock.send_json(cmd)
-			name = "{0}@{1}".format(h, s)
+			name = "{0}@{1}".format(s, h)
 			unseen[name] = True
-	while (len(seen) > 0):
-		mtype, pstr = zmq.recv_multipart()
+	while (len(unseen) > 0):
+		mtype, pstr = subsock.recv_multipart()
 		pload = json.loads(pstr)
 		name = None
 		hstcheck = False
 		if(mtype == 'host_check_processed'):
-			name = payload['host_name']
+			name = pload['host_name']
 			hstcheck = True
 		if(mtype == 'service_check_processed'):
-			name = "{0}@{1}".format(payload['host_name'],
-				payload['service_description'])
+			name = "{0}@{1}".format(pload['service_description'],
+				pload['host_name'])
 		if(name not in unseen):
 			continue
 		print "[{0}]: {1} {2}".format(
-					name, status_to_string(pload['current_state'], hstcheck),
-					pload['plugin_output'])
+					name, status_to_string(pload['state'], hstcheck),
+					pload['output'])
 		del unseen[name]
 else:
 	for h in sorted(hosts.keys()):

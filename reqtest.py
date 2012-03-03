@@ -3,8 +3,10 @@ context = zmq.Context()
 
 pub = context.socket(zmq.REQ)
 pub.connect("ipc:///tmp/nagmqreq.sock")
-pub.send('{ "host_name": "fakefakityfakefakefake", "include_services": true, "include_contacts": true }')
+pub.send('{ "host_name": "minotaur", "include_services": true, "include_contacts": true }')
 resp = json.loads(pub.recv())
+
+print resp
 
 def status_to_string(val, ishost):
 	if(ishost):
