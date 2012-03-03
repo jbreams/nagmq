@@ -53,7 +53,7 @@ static void parse_host(host * state, struct payload * ret,
 			slck = slck->next;
 		}
 		payload_end_array(ret);
-	} else if(rc)
+	} else
 		payload_new_string(ret, "services", NULL);
 	hostsmember *hlck = state->parent_hosts;
 	if(hlck && (rc = payload_start_array(ret, "parent_hosts"))) {
@@ -62,7 +62,7 @@ static void parse_host(host * state, struct payload * ret,
 			hlck = hlck->next;
 		}
 		payload_end_array(ret);
-	} else if(rc)
+	} else
 		payload_new_string(ret, "parent_hosts", NULL);
 
 	hlck = state->child_hosts;
@@ -72,7 +72,7 @@ static void parse_host(host * state, struct payload * ret,
 			hlck = hlck->next;
 		}
 		payload_end_array(ret);
-	} else if(rc)
+	} else
 		payload_new_string(ret, "child_hosts", NULL);
 
 	contactsmember * clck = state->contacts;
@@ -82,7 +82,7 @@ static void parse_host(host * state, struct payload * ret,
 			clck = clck->next;
 		}
 		payload_end_array(ret);
-	} else if(rc)
+	} else
 		payload_new_string(ret, "contacts", NULL);
 
 	contactgroupsmember * cglck = state->contact_groups;
@@ -92,7 +92,7 @@ static void parse_host(host * state, struct payload * ret,
 			cglck = cglck->next;
 		}
 		payload_end_array(ret);
-	} else if(rc)
+	} else
 		payload_new_string(ret, "contact_groups", NULL);
 
 	payload_new_string(ret, "check_command", state->host_check_command);
@@ -248,7 +248,7 @@ static void parse_service(service * state, struct payload * ret,
 			clck = clck->next;
 		}
 		payload_end_array(ret);
-	} else if(rc)
+	} else
 		payload_new_string(ret, "contacts", NULL);
 
 	contactgroupsmember * cglck = state->contact_groups;
@@ -258,7 +258,7 @@ static void parse_service(service * state, struct payload * ret,
 			cglck = cglck->next;
 		}
 		payload_end_array(ret);
-	} else if(rc)
+	} else
 		payload_new_string(ret, "contact_groups", NULL);
 
 	payload_new_double(ret, "notification_interval", state->notification_interval);
@@ -388,7 +388,7 @@ static void parse_hostgroup(hostgroup * state, struct payload * ret,
 			hlck = hlck->next;
 		}
 		payload_end_array(ret);
-	} else if(rc)
+	} else
 		payload_new_string(ret, "members", NULL);
 	payload_end_object(ret);
 	if(include_hosts) {
@@ -417,7 +417,7 @@ static void parse_servicegroup(servicegroup * state, struct payload * ret,
 			slck = slck->next;
 		}
 		payload_end_array(ret);
-	} else if(rc)
+	} else
 		payload_new_string(ret, "members", NULL);
 	payload_end_object(ret);
 	if(include_services) {
@@ -442,7 +442,7 @@ static void parse_contact(contact * state, struct payload * ret) {
 		for(i = 0; i < MAX_CONTACT_ADDRESSES; i++)
 			payload_new_string(ret, NULL, state->address[i]);
 		payload_end_array(ret);
-	} else if(rc)
+	} else
 		payload_new_string(ret, "address", NULL);
 	payload_new_boolean(ret, "notify_on_service_unknown", state->notify_on_service_unknown);
 	payload_new_boolean(ret, "notify_on_service_warning", state->notify_on_service_warning);
@@ -487,7 +487,7 @@ static void parse_contactgroup(contactgroup * state, struct payload * ret,
 			clck = clck->next;
 		}
 		payload_end_array(ret);
-	} else if(rc)
+	} else
 		payload_new_string(ret, "members", NULL);
 	payload_end_object(ret);
 

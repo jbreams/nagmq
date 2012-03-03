@@ -9,8 +9,6 @@ keys = ['host_name', 'services', 'hosts', 'contacts', 'contact_groups',
 pub.send_json({ "host_name": "minotaur", "include_services": True, "include_contacts": True, 'keys': keys })
 resp = json.loads(pub.recv())
 
-print resp
-
 def status_to_string(val, ishost):
 	if(ishost):
 		if(val < 2):
