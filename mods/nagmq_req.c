@@ -519,7 +519,7 @@ void process_req_msg(void * sock) {
 	char * hostgroup_name = NULL, *servicegroup_name = NULL;
 	char * contact_name = NULL, *contactgroup_name = NULL;
 	int include_services = 0, include_hosts = 0, include_contacts = 0;
-	int list_hosts = 0, brief = 0, expand_lists = 0;
+	int list_hosts = 0, expand_lists = 0;
 	json_t * list_services = NULL, *keys = NULL;
 	struct payload * po;
 

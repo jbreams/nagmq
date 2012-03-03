@@ -205,7 +205,6 @@ elif(myverb == 'check'):
 			unseen[name] = True
 	while (len(unseen) > 0):
 		mtype, pstr = subsock.recv_multipart()
-	print "Queued checks for {0}".format(unseen.keys())
 		pload = json.loads(pstr)
 		name = None
 		hstcheck = False
