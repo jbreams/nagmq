@@ -53,7 +53,7 @@ static void parse_host(host * state, struct payload * ret,
 			slck = slck->next;
 		}
 		payload_end_array(ret);
-	} else if(rc)
+	} else
 		payload_new_string(ret, "services", NULL);
 	hostsmember *hlck = state->parent_hosts;
 	if(hlck && (rc = payload_start_array(ret, "parent_hosts"))) {
@@ -62,7 +62,7 @@ static void parse_host(host * state, struct payload * ret,
 			hlck = hlck->next;
 		}
 		payload_end_array(ret);
-	} else if(rc)
+	} else
 		payload_new_string(ret, "parent_hosts", NULL);
 
 	hlck = state->child_hosts;
@@ -72,7 +72,7 @@ static void parse_host(host * state, struct payload * ret,
 			hlck = hlck->next;
 		}
 		payload_end_array(ret);
-	} else if(rc)
+	} else
 		payload_new_string(ret, "child_hosts", NULL);
 
 	contactsmember * clck = state->contacts;
@@ -82,17 +82,17 @@ static void parse_host(host * state, struct payload * ret,
 			clck = clck->next;
 		}
 		payload_end_array(ret);
-	} else if(rc)
+	} else
 		payload_new_string(ret, "contacts", NULL);
 
 	contactgroupsmember * cglck = state->contact_groups;
-	if(cglck && payload_start_array(ret, "contact_groups")) {
+	if(cglck && (rc = payload_start_array(ret, "contact_groups"))) {
 		while(cglck) {
 			payload_new_string(ret, NULL, cglck->group_name);
 			cglck = cglck->next;
 		}
 		payload_end_array(ret);
-	} else if(rc)
+	} else
 		payload_new_string(ret, "contact_groups", NULL);
 
 	payload_new_string(ret, "check_command", state->host_check_command);
@@ -248,7 +248,7 @@ static void parse_service(service * state, struct payload * ret,
 			clck = clck->next;
 		}
 		payload_end_array(ret);
-	} else if(rc)
+	} else
 		payload_new_string(ret, "contacts", NULL);
 
 	contactgroupsmember * cglck = state->contact_groups;
@@ -258,7 +258,7 @@ static void parse_service(service * state, struct payload * ret,
 			cglck = cglck->next;
 		}
 		payload_end_array(ret);
-	} else if(rc)
+	} else
 		payload_new_string(ret, "contact_groups", NULL);
 
 	payload_new_double(ret, "notification_interval", state->notification_interval);
@@ -373,6 +373,7 @@ static void parse_service(service * state, struct payload * ret,
 
 static void parse_hostgroup(hostgroup * state, struct payload * ret,
 	int include_hosts) {
+	int rc;
 	payload_start_object(ret, NULL);
 	payload_new_string(ret, "type", "hostgroup");
 	payload_new_string(ret, "group_name", state->group_name);
@@ -381,8 +382,7 @@ static void parse_hostgroup(hostgroup * state, struct payload * ret,
 	payload_new_string(ret, "notes_url", state->notes_url);
 	payload_new_string(ret, "action_url", state->action_url);
 	hostsmember *hlck = state->members;
-	if(hlck) {
-		payload_start_array(ret, "members");
+	if(hlck && (rc = payload_start_array(ret, "members"))) {
 		while(hlck) {
 			payload_new_string(ret, NULL, hlck->host_name);
 			hlck = hlck->next;
@@ -402,6 +402,7 @@ static void parse_hostgroup(hostgroup * state, struct payload * ret,
 
 static void parse_servicegroup(servicegroup * state, struct payload * ret,
 	int include_services) {
+	int rc;
 	payload_start_object(ret, NULL);
 	payload_new_string(ret, "type", "servicegroup");
 	payload_new_string(ret, "group_name", state->group_name);
@@ -410,8 +411,7 @@ static void parse_servicegroup(servicegroup * state, struct payload * ret,
 	payload_new_string(ret, "notes_url", state->notes_url);
 	payload_new_string(ret, "action_url", state->action_url);
 	servicesmember *slck = state->members;
-	if(slck) {
-		payload_start_array(ret, "members");
+	if(slck && (rc = payload_start_array(ret, "members"))) {
 		while(slck) {
 			payload_new_string(ret, NULL, slck->service_description);
 			slck = slck->next;
@@ -431,13 +431,13 @@ static void parse_servicegroup(servicegroup * state, struct payload * ret,
 
 static void parse_contact(contact * state, struct payload * ret) {
 	payload_start_object(ret, NULL);
+	int rc;
 	payload_new_string(ret, "type", "contact");
 	payload_new_string(ret, "name", state->name);
 	payload_new_string(ret, "alias", state->alias);
 	payload_new_string(ret, "email", state->email);
 	payload_new_string(ret, "pager", state->pager);
-	if(state->address[0]) {
-		payload_start_array(ret, "address");
+	if(state->address[0] && (rc = payload_start_array(ret, "address"))) {
 		int i;
 		for(i = 0; i < MAX_CONTACT_ADDRESSES; i++)
 			payload_new_string(ret, NULL, state->address[i]);
@@ -475,13 +475,13 @@ extern service * service_list;
 
 static void parse_contactgroup(contactgroup * state, struct payload * ret,
 	int include_contacts) {
+	int rc;
 	payload_start_object(ret, NULL);
 	payload_new_string(ret, "type", "contactgroup");
 	payload_new_string(ret, "group_name", state->group_name);
 	payload_new_string(ret, "alias", state->alias);
 	contactsmember * clck = state->members;
-	if(clck) {
-		payload_start_array(ret, "members");
+	if(clck && (rc = payload_start_array(ret, "members"))) {
 		while(clck) {
 			payload_new_string(ret, NULL, clck->contact_name);
 			clck = clck->next;
@@ -519,7 +519,7 @@ void process_req_msg(void * sock) {
 	char * hostgroup_name = NULL, *servicegroup_name = NULL;
 	char * contact_name = NULL, *contactgroup_name = NULL;
 	int include_services = 0, include_hosts = 0, include_contacts = 0;
-	int list_hosts = 0, brief = 0, expand_lists = 0;
+	int list_hosts = 0, expand_lists = 0;
 	json_t * list_services = NULL, *keys = NULL;
 	struct payload * po;
 
