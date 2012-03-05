@@ -34,11 +34,8 @@ static void parse_contactgroup(contactgroup * state, struct payload * ret,
 
 static void parse_host(host * state, struct payload * ret,
 	int include_services, int include_contacts) {
-	char * plugin_output, *long_plugin_output, *perf_data;
 	int rc;
 
-	lock_obj(state->name, NULL, &plugin_output,
-		&long_plugin_output, &perf_data);
 	payload_start_object(ret, NULL);
 	payload_new_string(ret, "type", "host");
 	payload_new_string(ret, "host_name", state->name);
@@ -152,9 +149,17 @@ static void parse_host(host * state, struct payload * ret,
 	payload_new_integer(ret, "current_state", state->current_state);
 	payload_new_integer(ret, "last_state", state->last_state);
 	payload_new_integer(ret, "last_hard_state", state->last_hard_state);
-	payload_new_string(ret, "plugin_output", plugin_output);
-	payload_new_string(ret, "long_plugin_output", long_plugin_output);
-	payload_new_string(ret, "perf_data", perf_data);
+
+	if(payload_has_keys(ret, "plugin_output",
+		"long_plugin_output", "perf_data", NULL) > 0) {
+		char * plugin_output, *long_plugin_output, *perf_data;
+		lock_obj(state->name, NULL, &plugin_output,
+			&long_plugin_output, &perf_data);
+		payload_new_string(ret, "plugin_output", plugin_output);
+		payload_new_string(ret, "long_plugin_output", long_plugin_output);
+		payload_new_string(ret, "perf_data", perf_data);
+		unlock_obj(state->name, NULL, NULL, NULL, NULL);
+	}
 	payload_new_integer(ret, "current_attempt", state->current_attempt);
 	payload_new_integer(ret, "current_event_id", state->current_event_id);
 	payload_new_integer(ret, "last_event_id", state->last_event_id);
@@ -198,7 +203,6 @@ static void parse_host(host * state, struct payload * ret,
 	payload_new_double(ret, "percent_state_change", state->percent_state_change);
 	payload_new_integer(ret, "total_service_check_interval", state->total_service_check_interval);
 	payload_end_object(ret);
-	unlock_obj(state->name, NULL, NULL, NULL, NULL);
 
 	if(include_services) {
 		slck = state->services;
@@ -225,10 +229,7 @@ static void parse_host(host * state, struct payload * ret,
 
 static void parse_service(service * state, struct payload * ret,
 	int include_host, int include_contacts) {
-	char * plugin_output, *long_plugin_output, *perf_data;
 	int rc;
-	lock_obj(state->host_name, state->description,
-		&plugin_output, &long_plugin_output, &perf_data);
 	payload_start_object(ret, NULL);
 	payload_new_string(ret, "type", "service");
 	payload_new_string(ret, "host_name", state->host_name);
@@ -306,9 +307,16 @@ static void parse_service(service * state, struct payload * ret,
 	payload_new_integer(ret, "current_state", state->current_state);
 	payload_new_integer(ret, "last_state", state->last_state);
 	payload_new_integer(ret, "last_hard_state", state->last_hard_state);
-	payload_new_string(ret, "plugin_output", plugin_output);
-	payload_new_string(ret, "long_plugin_output", long_plugin_output);
-	payload_new_string(ret, "perf_data", perf_data);
+	if(payload_has_keys(ret, "plugin_output",
+		"long_plugin_output", "perf_data", NULL) > 0) {
+		char * plugin_output, *long_plugin_output, *perf_data;
+		lock_obj(state->name, NULL, &plugin_output,
+			&long_plugin_output, &perf_data);
+		payload_new_string(ret, "plugin_output", plugin_output);
+		payload_new_string(ret, "long_plugin_output", long_plugin_output);
+		payload_new_string(ret, "perf_data", perf_data);
+		unlock_obj(state->name, NULL, NULL, NULL, NULL);
+	}
 	payload_new_integer(ret, "next_check", state->next_check);
 	payload_new_boolean(ret, "should_be_scheduled", state->should_be_scheduled);
 	payload_new_integer(ret, "last_check", state->last_check);
@@ -350,7 +358,6 @@ static void parse_service(service * state, struct payload * ret,
 	payload_new_integer(ret, "flapping_comment_id", state->flapping_comment_id);
 	payload_new_double(ret, "percent_state_change", state->percent_state_change);
 	payload_end_object(ret);
-	unlock_obj(state->host_name, state->description, NULL, NULL, NULL);
 
 	if(include_host)
 		parse_host(state->host_ptr, ret, 0, 0);

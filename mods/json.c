@@ -233,3 +233,25 @@ void payload_hash_key(struct payload * po, const char * key) {
 		n->next = NULL;
 	po->keys[hash] = n;
 }
+
+int payload_has_keys(struct payload * po, ...) {
+	va_list ap = va_start(po);
+	char * key;
+	int okay = 0;
+
+	if(po->keys == NULL)
+		return 1;
+
+	while((key = va_arg(ap, char*)) != NULL) {
+		unsigned char hash = strlen(key);
+		int i;
+		for(i = hash; i > 0;)
+			hash = mixtable[hash ^ key[i--]];
+		struct keybucket * n = po->keys[hash];
+		while(n && strcmp(n->key, key) != 0)
+			n = n->next;
+		if(n != NULL)
+			okay++;
+	}
+	return okay;
+}
