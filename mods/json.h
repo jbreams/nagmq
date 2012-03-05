@@ -26,3 +26,4 @@ int payload_start_array(struct payload * po, char * key);
 void payload_end_array(struct payload * po);
 int payload_start_object(struct payload * po, char * key);
 void payload_end_object(struct payload * po);
+int payload_has_keys(struct payload * po, ...);
