@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <float.h>
 #include <ctype.h>
+#include <stdarg.h>
 #include "json.h"
 
 #define PAGE_SIZE 4096
@@ -235,13 +236,14 @@ void payload_hash_key(struct payload * po, const char * key) {
 }
 
 int payload_has_keys(struct payload * po, ...) {
-	va_list ap = va_start(po);
+	va_list ap;
 	char * key;
 	int okay = 0;
 
 	if(po->keys == NULL)
 		return 1;
 
+	va_start(ap, po);
 	while((key = va_arg(ap, char*)) != NULL) {
 		unsigned char hash = strlen(key);
 		int i;
