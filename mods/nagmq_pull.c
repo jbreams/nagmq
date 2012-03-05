@@ -55,7 +55,6 @@ static void process_status(json_t * payload, char * type, size_t typelen) {
 		process_passive_host_check(timestamp, host_name,
 			return_code, output);
 
-	process_passive_checks();
 	json_decref(payload);
 }
 
@@ -258,37 +257,43 @@ static void process_cmd(json_t * payload) {
 	json_decref(payload);
 }
 
-void process_pull_msg(void * sock) {
+int process_pull_msg(void * sock) {
 	zmq_msg_t payload_msg;
 	char * type = NULL;
 
 	zmq_msg_init(&payload_msg);
 	if(zmq_recv(sock, &payload_msg, 0) != 0) {
 		zmq_msg_close(&payload_msg);
-		return;
+		return 0;
 	}
 
 	json_t * payload = json_loadb(zmq_msg_data(&payload_msg),
 		zmq_msg_size(&payload_msg), 0, NULL);
 	zmq_msg_close(&payload_msg);
 	if(payload == NULL)
-		return;		
+		return 0;		
 	
 	if(json_unpack(payload, "{ s:s }", "type", &type) != 0) {
 		json_decref(payload);
-		return;
+		return 0;
 	}
 	size_t typelen = strlen(type);
+
 	if(strncmp(type, "command", typelen) == 0)
 		process_cmd(payload);
-	else if(strncmp(type, "host_check_processed", typelen) == 0)
+	else if(strncmp(type, "host_check_processed", typelen) == 0) {
 		process_status(payload, type, typelen);
-	else if(strncmp(type, "service_check_processed", typelen) == 0)
+		return 1;
+	}
+	else if(strncmp(type, "service_check_processed", typelen) == 0) {
 		process_status(payload, type, typelen);
+		return 1;
+	}
 	else if(strncmp(type, "acknowledgement", typelen) == 0)
 		process_acknowledgement(payload);
 	else if(strncmp(type, "comment_add", typelen) == 0)
 		process_comment(payload);
 	else if(strncmp(type, "downtime_add", typelen) == 0)
 		process_downtime(payload);
+	return 0;
 }
