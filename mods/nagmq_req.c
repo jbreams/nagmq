@@ -310,12 +310,12 @@ static void parse_service(service * state, struct payload * ret,
 	if(payload_has_keys(ret, "plugin_output",
 		"long_plugin_output", "perf_data", NULL) > 0) {
 		char * plugin_output, *long_plugin_output, *perf_data;
-		lock_obj(state->name, NULL, &plugin_output,
+		lock_obj(state->host_name, state->description, &plugin_output,
 			&long_plugin_output, &perf_data);
 		payload_new_string(ret, "plugin_output", plugin_output);
 		payload_new_string(ret, "long_plugin_output", long_plugin_output);
 		payload_new_string(ret, "perf_data", perf_data);
-		unlock_obj(state->name, NULL, NULL, NULL, NULL);
+		unlock_obj(state->host_name, state->description, NULL, NULL, NULL);
 	}
 	payload_new_integer(ret, "next_check", state->next_check);
 	payload_new_boolean(ret, "should_be_scheduled", state->should_be_scheduled);
@@ -519,6 +519,71 @@ void send_msg(void * sock, struct payload * po) {
 	free(po);
 }
 
+void do_list_hosts(struct payload * po, int expand_lists,
+	int include_services, int include_contacts) {
+	if(!expand_lists) {
+		payload_start_object(po, NULL);
+		payload_new_string(po, "type", "host_list");
+		payload_start_array(po, "hosts");
+	}
+	host * tmp_host = host_list;
+	while(tmp_host) {
+		if(expand_lists)
+			parse_host(tmp_host, po, include_services, include_contacts);
+		else
+			payload_new_string(po, NULL, tmp_host->name);
+		tmp_host = tmp_host->next;
+	}
+	if(!expand_lists) {
+		payload_end_array(po);
+		payload_end_object(po);
+	}
+}
+
+void do_list_services(struct payload * po, int expand_lists,
+	int include_hosts, int include_contacts, const char * tolist) {
+	if(!expand_lists) {
+		payload_start_object(po, NULL);
+		payload_new_string(po, "type", "service_list");
+		payload_start_array(po, "services");
+	}
+	service * tmp_svc = service_list;
+	while(tmp_svc) {
+		if(tolist && strcmp(tolist, tmp_svc->description) != 0) {
+			tmp_svc = tmp_svc->next;
+			continue;
+		}
+		if(expand_lists)
+			parse_service(tmp_svc, po, include_hosts, include_contacts);
+		else {
+			payload_start_object(po, NULL);
+			payload_new_string(po, "host_name", tmp_svc->host_ptr->name);
+			payload_new_string(po, "service_description", tmp_svc->description);
+			payload_end_object(po);
+		}
+		tmp_svc = tmp_svc->next;
+	}
+	if(!expand_lists) {
+		payload_end_array(po);
+		payload_end_object(po);
+	}
+}
+
+void err_msg(struct payload * po, char * msg, ...) {
+	payload_start_object(po, NULL);
+	payload_new_string(po, "type", "error");
+	payload_new_string(po, "msg", "No hostname specified for service");
+	va_list ap;
+	
+	char * key, *val;
+	va_start(ap, msg);
+	while((key = va_arg(ap, char*)) != NULL &&
+		(val = va_arg(ap, char*)) != NULL) {
+		payload_new_string(po, key, val);
+	}
+	payload_end_object(po);
+}
+
 void process_req_msg(void * sock) {
 	zmq_msg_t reqmsg;
 	json_t * req;
@@ -568,71 +633,19 @@ void process_req_msg(void * sock) {
 		}
 	}
 
-	if(list_hosts) {
-		if(!expand_lists) {
-			payload_start_object(po, NULL);
-			payload_new_string(po, "type", "host_list");
-			payload_start_array(po, "hosts");
-		}
-		host * tmp_host = host_list;
-		while(tmp_host) {
-			if(expand_lists)
-				parse_host(tmp_host, po, include_services, include_contacts);
-			else
-				payload_new_string(po, NULL, tmp_host->name);
-			tmp_host = tmp_host->next;
-		}
-		if(!expand_lists) {
-			payload_end_array(po);
-			payload_end_object(po);
-		}
-	}
+	if(list_hosts)
+		do_list_hosts(po, expand_lists, include_services, include_contacts);
 
-	if(list_services) {
-		int64_t count;
-		if(!expand_lists) {
-			payload_start_object(po, NULL);
-			payload_new_string(po, "type", "service_list");
-			payload_start_array(po, "services");
-		}
-		service * tmp_svc = service_list;
-		while(tmp_svc) {
-			if(!json_is_true(list_services) &&
-				!(json_is_string(list_services) &&
-				strcmp(json_string_value(list_services),
-					tmp_svc->description) == 0)) {
-				tmp_svc = tmp_svc->next;
-				continue;
-			}
-			if(expand_lists)
-				parse_service(tmp_svc, po, include_hosts, include_contacts);
-			else {
-				payload_start_object(po, NULL);
-				payload_new_string(po, "host_name", tmp_svc->host_ptr->name);
-				payload_new_string(po, "service_description", tmp_svc->description);
-				payload_end_object(po);
-			}
-			count++;
-			tmp_svc = tmp_svc->next;
-		}
-		if(!expand_lists) {
-			payload_end_array(po);
-			payload_end_object(po);
-		}
-		payload_start_object(po, NULL);
-		payload_new_string(po, "type", "service_count");
-		payload_new_integer(po, "count", count);
-		payload_end_object(po);
-	}
+	if(json_is_string(list_services) || json_is_true(list_services))
+		do_list_services(po, expand_lists, include_hosts, include_contacts,
+			json_is_string(list_services) ?
+			json_string_value(list_services) : NULL);
 
 	if(service_description) {
 		service * svctarget;
 		if(!host_name) {
-			payload_start_object(po, NULL);
-			payload_new_string(po, "type", "error");
-			payload_new_string(po, "msg", "No hostname specified for service");
-			payload_new_string(po, "service_description", service_description);
-			payload_end_object(po);
+			err_msg(po, "No host specified for service", "service_description",
+				service_description, NULL);
 			send_msg(sock, po);
 			json_decref(req);
 			return;
@@ -640,12 +653,8 @@ void process_req_msg(void * sock) {
 
 		svctarget = find_service(host_name, service_description);
 		if(!svctarget) {
-			payload_start_object(po, NULL);
-			payload_new_string(po, "type", "error");
-			payload_new_string(po, "msg", "Could not find service");
-			payload_new_string(po, "service_description", service_description);
-			payload_new_string(po, "host_name", host_name);
-			payload_end_object(po);
+			err_msg(po, "Could not find service", "service_description",
+				service_description, "host_name", host_name, NULL);
 			send_msg(sock, po);
 			json_decref(req);
 			return;
@@ -655,11 +664,7 @@ void process_req_msg(void * sock) {
 	} else if(host_name) {
 		host * hsttarget = find_host(host_name);
 		if(!hsttarget) {
-			payload_start_object(po, NULL);
-			payload_new_string(po, "type", "error");
-			payload_new_string(po, "msg", "Could not find host");
-			payload_new_string(po, "host_name", host_name);
-			payload_end_object(po);
+			err_msg(po, "Could not find host", "host_name", host_name, NULL);
 			send_msg(sock, po);
 			json_decref(req);
 			return;
@@ -669,11 +674,8 @@ void process_req_msg(void * sock) {
 	if(hostgroup_name) {
 		hostgroup * hsttarget = find_hostgroup(hostgroup_name);
 		if(hsttarget == NULL) {
-			payload_start_object(po, NULL);
-			payload_new_string(po, "type", "error");
-			payload_new_string(po, "msg", "Could not find hostgroup");
-			payload_new_string(po, "hostgroup_name", hostgroup_name);
-			payload_end_object(po);
+			err_msg(po, "Could not find hostgroup", "hostgroup_name",
+				hostgroup_name, NULL);
 			send_msg(sock, po);
 			json_decref(req);
 			return;
@@ -683,11 +685,8 @@ void process_req_msg(void * sock) {
 	if(servicegroup_name) {
 		servicegroup * svctarget = find_servicegroup(servicegroup_name);
 		if(svctarget == NULL) {
-			payload_start_object(po, NULL);
-			payload_new_string(po, "type", "error");
-			payload_new_string(po, "msg", "Could not find servicegroup");
-			payload_new_string(po, "servicegroup_name", servicegroup_name);
-			payload_end_object(po);
+			err_msg(po, "Could not find servicegroup", "servicegroup_name",
+				servicegroup_name, NULL);
 			send_msg(sock, po);
 			json_decref(req);
 			return;
@@ -697,11 +696,8 @@ void process_req_msg(void * sock) {
 	if(contactgroup_name) {
 		contactgroup * cntarget = find_contactgroup(contactgroup_name);
 		if(cntarget == NULL) {
-			payload_start_object(po, NULL);
-			payload_new_string(po, "type", "error");
-			payload_new_string(po, "msg", "Could not find contactgroup");
-			payload_new_string(po, "contactgroup_name", contactgroup_name);
-			payload_end_object(po);
+			err_msg(po, "Could not find contactgroup", "contactgroup_name",
+				contactgroup_name, NULL);
 			send_msg(sock, po);
 			json_decref(req);
 			return;
@@ -711,11 +707,8 @@ void process_req_msg(void * sock) {
 	if(contact_name) {
 		contact * cntarget = find_contact(contact_name);
 		if(cntarget == NULL) {
-			payload_start_object(po, NULL);
-			payload_new_string(po, "type", "error");
-			payload_new_string(po, "msg", "Could not find contact");
-			payload_new_string(po, "contact_name", contact_name);
-			payload_end_object(po);
+			err_msg(po, "Could not find contact", "contact_name",
+				contact_name, NULL);
 			send_msg(sock, po);
 			json_decref(req);
 			return;
