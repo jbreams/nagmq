@@ -218,7 +218,7 @@ void * getsock(char * forwhat, int type) {
 	return sock;
 }
 
-void process_pull_msg(void * sock);
+int process_pull_msg(void * sock);
 void process_req_msg(void * sock);
 
 void * recv_loop(void * parg) {
@@ -266,7 +266,7 @@ void * recv_loop(void * parg) {
 	while(1) {
 		int events;
 		size_t size = sizeof(events);
-		if((rc = zmq_poll(pollables, npollables, 20000)) < 0) {
+		if((rc = zmq_poll(pollables, npollables, -1)) < 0) {
 			rc = errno;
 			if(rc == ETERM)
 				break;
@@ -280,9 +280,14 @@ void * recv_loop(void * parg) {
 		}
 
 		if(enablepull) {
-			zmq_getsockopt(pullsock, ZMQ_EVENTS, &events, &size);
-			if(events == ZMQ_POLLIN)
-				process_pull_msg(pullsock);
+			rc = 0;
+			do {
+				zmq_getsockopt(pullsock, ZMQ_EVENTS, &events, &size);
+				if(events == ZMQ_POLLIN)
+					rc += process_pull_msg(pullsock);
+			} while(events == ZMQ_POLLIN && rc > 0 && rc < 512);
+			if(rc > 0)
+				process_passive_checks(); 
 		}
 		if(enablereq) {
 			zmq_getsockopt(reqsock, ZMQ_EVENTS, &events, &size);
