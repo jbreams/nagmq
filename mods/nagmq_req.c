@@ -32,6 +32,18 @@ static void parse_contact(contact * state, struct payload * ret);
 static void parse_contactgroup(contactgroup * state, struct payload * ret,
 	int include_contacts);
 
+static void parse_custom_variables(struct payload * ret,
+	customvariablesmember * cvl) {
+	if(cvl && payload_start_object(ret, "custom_variables")) {
+		while(cvl) {
+			payload_new_string(ret, cvl->variable_name, cvl->variable_value);
+			cvl = cvl->next;
+		}
+		payload_end_object(ret);
+	} else if(cvl)
+		payload_new_string(ret, "custom_variables", NULL);
+}
+
 static void parse_host(host * state, struct payload * ret,
 	int include_services, int include_contacts) {
 	int rc;
@@ -202,6 +214,7 @@ static void parse_host(host * state, struct payload * ret,
 	payload_new_integer(ret, "flapping_comment_id", state->flapping_comment_id);
 	payload_new_double(ret, "percent_state_change", state->percent_state_change);
 	payload_new_integer(ret, "total_service_check_interval", state->total_service_check_interval);
+	parse_custom_variables(ret, state->custom_variables);
 	payload_end_object(ret);
 
 	if(include_services) {
@@ -357,6 +370,7 @@ static void parse_service(service * state, struct payload * ret,
 	payload_new_boolean(ret, "is_flapping", state->is_flapping);
 	payload_new_integer(ret, "flapping_comment_id", state->flapping_comment_id);
 	payload_new_double(ret, "percent_state_change", state->percent_state_change);
+	parse_custom_variables(ret, state->custom_variables);
 	payload_end_object(ret);
 
 	if(include_host)
@@ -474,6 +488,7 @@ static void parse_contact(contact * state, struct payload * ret) {
 	payload_new_integer(ret, "modified_attributes", state->modified_attributes);
 	payload_new_integer(ret, "modified_host_attributes", state->modified_host_attributes);
 	payload_new_integer(ret, "modified_service_attributes", state->modified_service_attributes);
+	parse_custom_variables(ret, state->custom_variables);
 	payload_end_object(ret);
 }
 
