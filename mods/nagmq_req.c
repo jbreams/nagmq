@@ -172,6 +172,7 @@ static void parse_host(host * state, struct payload * ret,
 		payload_new_string(ret, "perf_data", perf_data);
 		unlock_obj(state->name, NULL, NULL, NULL, NULL);
 	}
+	payload_new_integer(ret, "state_type", state->state_type)
 	payload_new_integer(ret, "current_attempt", state->current_attempt);
 	payload_new_integer(ret, "current_event_id", state->current_event_id);
 	payload_new_integer(ret, "last_event_id", state->last_event_id);
@@ -330,6 +331,7 @@ static void parse_service(service * state, struct payload * ret,
 		payload_new_string(ret, "perf_data", perf_data);
 		unlock_obj(state->host_name, state->description, NULL, NULL, NULL);
 	}
+	payload_new_integer(ret, "state_type", state->state_type);
 	payload_new_integer(ret, "next_check", state->next_check);
 	payload_new_boolean(ret, "should_be_scheduled", state->should_be_scheduled);
 	payload_new_integer(ret, "last_check", state->last_check);
