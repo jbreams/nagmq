@@ -34,14 +34,149 @@ static void parse_contactgroup(contactgroup * state, struct payload * ret,
 
 static void parse_custom_variables(struct payload * ret,
 	customvariablesmember * cvl) {
-	if(cvl && payload_start_object(ret, "custom_variables")) {
-		while(cvl) {
-			payload_new_string(ret, cvl->variable_name, cvl->variable_value);
-			cvl = cvl->next;
+	while(cvl) {
+		payload_new_string(ret, cvl->variable_name, cvl->variable_value);
+		cvl = cvl->next;
+	}
+}
+
+// Timeperiod parsing routines adapted from xodtemplate_cache_objects in
+// xdata/xodtemplate.c in the nagios source
+static char *days[7]={"sunday","monday","tuesday","wednesday","thursday","friday","saturday"};
+
+static void parse_timerange(timerange * tr, struct payload * ret) {
+	char buf[16];
+	int hours, minutes;
+
+	hours = tr->range_start / 3600;
+	minutes = tr->range_start - (hours * 3600) / 60;
+	sprintf(buf, "%02d:%02d", hours, minutes);
+	payload_new_string(ret, "start_time", buf);
+	hours = tr->range_end / 3600;
+	minutes = tr->range_end - (hours * 3600) / 60;
+	sprintf(buf, "%02d:%02d", hours, minutes);
+	payload_new_string(ret, "end_time", buf);
+}
+
+static void parse_daterange(daterange * dr, struct payload * ret) {
+	char buf[1024];
+	const char *months[12]={"january","february","march","april","may","june","july","august","september","october","november","december"};
+
+	if(dr->times == NULL)
+		return;
+
+	payload_start_object(ret, NULL);
+	switch(dr->type) {
+		case DATERANGE_CALENDAR_DATE:
+			sprintf(buf, "%d-%02d-%02d",
+				dr->syear, dr->smon + 1, dr->smday );
+			payload_new_string(ret, "type", "calendar_date");
+			payload_new_string(ret, "start", buf);
+			if((dr->smday != dr->emday) ||
+				(dr->smon != dr->emon) ||
+				(dr->syear != dr->eyear)) {
+				sprintf(buf, "%d-%02d-%02d", dr->eyear, dr->emon + 1, dr->emday);
+				payload_new_string(ret, "end", buf);
+				if(dr->skip_interval > 1)
+					payload_new_integer(ret, "skip_interval", dr->skip_interval);
+			}
+			break;
+		case DATERANGE_MONTH_DATE:
+			payload_new_string(ret, "type", "month_date");
+			sprintf(buf, "%s %d", months[dr->smon], dr->smday);
+			payload_new_string(ret, "start", buf);
+			if(dr->smon != dr->emon ||
+				dr->smday != dr->emday) {
+				sprintf(buf, "%s %d", months[dr->emon], dr->emday);
+				payload_new_string(ret, "end", buf);
+				if(dr->skip_interval > 1)
+					payload_new_integer(ret, "skip_interval", dr->skip_interval);
+			}
+			break;
+		case DATERANGE_MONTH_DAY:
+			payload_new_string(ret, "type", "month_day");
+			payload_new_integer(ret, "start", dr->smday);
+			
+			if(dr->smday != dr->emday) {
+				payload_new_integer(ret, "end", dr->emday);
+				if(dr->skip_interval > 1)
+					payload_new_integer(ret, "skip_interval", dr->skip_interval);
+			}
+			break;
+		case DATERANGE_MONTH_WEEK_DAY:
+			payload_new_string(ret, "type", "month_week_day");
+			sprintf(buf, "%s %d %s", days[dr->swday],
+				dr->swday_offset, months[dr->smon]);
+			payload_new_string(ret, "start", buf);
+			if((dr->smon != dr->emon) ||
+				(dr->swday != dr->ewday) ||
+				(dr->swday_offset != dr->ewday_offset)) {
+				sprintf(buf, "%s %d %s", days[dr->ewday],
+					dr->ewday_offset, months[dr->emon]);
+				payload_new_string(ret, "end", buf);
+				if(dr->skip_interval > 1)
+					payload_new_integer(ret, "skip_interval", dr->skip_interval);
+			}
+			break;
+		case DATERANGE_WEEK_DAY:
+			payload_new_string(ret, "type", "week_day");
+			sprintf(buf, "%s %d", days[dr->swday], dr->swday_offset);
+			payload_new_string(ret, "start", buf);
+			if((dr->swday != dr->ewday) ||
+				(dr->swday_offset != dr->ewday_offset)) {
+				sprintf(buf, "%s %d", days[dr->ewday], dr->ewday_offset);
+				payload_new_string(ret, "end", buf);
+				if(dr->skip_interval > 1)
+					payload_new_integer(ret, "skip_interval", dr->skip_interval);
+			}
+			break;
+	}
+	parse_timerange(dr->times, ret);
+	payload_end_object(ret);
+}
+
+static void parse_timeperiod(timeperiod * state, struct payload * ret) {
+	int x;
+	time_t now;
+	payload_start_object(ret, NULL);
+	payload_new_string(ret, "timeperiod_name", state->name);
+	payload_new_string(ret, "alias", state->alias);
+	if(payload_start_array(ret, "exceptions")) {
+		for(x = 0; x < DATERANGE_TYPES; x++) {
+			daterange * drlck;
+			for(drlck = state->exceptions[x]; drlck != NULL;
+				drlck = drlck->next)
+				parse_daterange(drlck, ret);
 		}
-		payload_end_object(ret);
-	} else if(cvl)
-		payload_new_string(ret, "custom_variables", NULL);
+		payload_end_array(ret);
+	}
+
+	for(x = 0; x < 7; x++) {
+		if(state->days[x] == NULL)
+			continue;
+		if(payload_start_object(ret, days[x])) {
+			parse_timerange(state->days[x], ret);
+			payload_end_object(ret);
+		}
+	}
+
+	time(&now);
+	payload_new_boolean(ret, "in_timeperiod",
+		check_time_against_period(now, state));
+	get_next_valid_time(now, &now, state);
+	payload_new_integer(ret, "next_valid_time", now);
+	
+	timeperiodexclusion * tpelck = state->exclusions;
+	if(tpelck && payload_start_array(ret, "exclusions")) {
+		while(tpelck) {
+			payload_new_string(ret, NULL, tpelck->timeperiod_name);
+			tpelck = tpelck->next;
+		}
+		payload_end_array(ret);
+	} else if(!tpelck)
+		payload_new_string(ret, "exclusions", NULL);
+
+	payload_end_object(ret);
 }
 
 static void parse_host(host * state, struct payload * ret,
@@ -172,7 +307,7 @@ static void parse_host(host * state, struct payload * ret,
 		payload_new_string(ret, "perf_data", perf_data);
 		unlock_obj(state->name, NULL, NULL, NULL, NULL);
 	}
-	payload_new_integer(ret, "state_type", state->state_type)
+	payload_new_integer(ret, "state_type", state->state_type);
 	payload_new_integer(ret, "current_attempt", state->current_attempt);
 	payload_new_integer(ret, "current_event_id", state->current_event_id);
 	payload_new_integer(ret, "last_event_id", state->last_event_id);
@@ -609,6 +744,7 @@ void process_req_msg(void * sock) {
 	char * host_name = NULL, *service_description = NULL;
 	char * hostgroup_name = NULL, *servicegroup_name = NULL;
 	char * contact_name = NULL, *contactgroup_name = NULL;
+	char * timeperiod_name = NULL;
 	int include_services = 0, include_hosts = 0, include_contacts = 0;
 	int list_hosts = 0, expand_lists = 0;
 	json_t * list_services = NULL, *keys = NULL;
@@ -624,7 +760,7 @@ void process_req_msg(void * sock) {
 		return;
 
 	if(json_unpack(req, "{ s?:s s?:s s?:s s?:s s?:s s?:s s?:b s?:b"
-		" s?:b s?:b s?:o s?:b s?:o }",
+		" s?:b s?:b s?:o s?:b s?:o s?:s }",
 		"host_name", &host_name, "service_description",
 		&service_description, "hostgroup_name", &hostgroup_name,
 		"servicegroup_name", &servicegroup_name,
@@ -633,7 +769,8 @@ void process_req_msg(void * sock) {
 		"include_hosts", &include_hosts, "include_contacts",
 		&include_contacts, "list_hosts", &list_hosts, 
 		"list_services", &list_services,
-		"expand_lists", &expand_lists, "keys", &keys) != 0) {
+		"expand_lists", &expand_lists, "keys", &keys,
+		"timeperiod_name", &timeperiod_name) != 0) {
 		json_decref(req);
 		return;
 	}
@@ -674,9 +811,7 @@ void process_req_msg(void * sock) {
 		if(!svctarget) {
 			err_msg(po, "Could not find service", "service_description",
 				service_description, "host_name", host_name, NULL);
-			send_msg(sock, po);
-			json_decref(req);
-			return;
+			goto end;
 		}
 		
 		parse_service(svctarget, po, include_hosts, include_contacts);
@@ -684,9 +819,7 @@ void process_req_msg(void * sock) {
 		host * hsttarget = find_host(host_name);
 		if(!hsttarget) {
 			err_msg(po, "Could not find host", "host_name", host_name, NULL);
-			send_msg(sock, po);
-			json_decref(req);
-			return;
+			goto end;
 		}
 		parse_host(hsttarget, po, include_services, include_contacts);
 	}
@@ -695,9 +828,7 @@ void process_req_msg(void * sock) {
 		if(hsttarget == NULL) {
 			err_msg(po, "Could not find hostgroup", "hostgroup_name",
 				hostgroup_name, NULL);
-			send_msg(sock, po);
-			json_decref(req);
-			return;
+			goto end;
 		}
 		parse_hostgroup(hsttarget, po, include_hosts);
 	}
@@ -706,9 +837,7 @@ void process_req_msg(void * sock) {
 		if(svctarget == NULL) {
 			err_msg(po, "Could not find servicegroup", "servicegroup_name",
 				servicegroup_name, NULL);
-			send_msg(sock, po);
-			json_decref(req);
-			return;
+			goto end;
 		}
 		parse_servicegroup(svctarget, po, include_services);
 	}
@@ -717,9 +846,7 @@ void process_req_msg(void * sock) {
 		if(cntarget == NULL) {
 			err_msg(po, "Could not find contactgroup", "contactgroup_name",
 				contactgroup_name, NULL);
-			send_msg(sock, po);
-			json_decref(req);
-			return;
+			goto end;
 		}
 		parse_contactgroup(cntarget, po, include_contacts);
 	}
@@ -728,13 +855,22 @@ void process_req_msg(void * sock) {
 		if(cntarget == NULL) {
 			err_msg(po, "Could not find contact", "contact_name",
 				contact_name, NULL);
-			send_msg(sock, po);
-			json_decref(req);
-			return;
+			goto end;
 		}
 		parse_contact(cntarget, po);
 	}
 
+	if(timeperiod_name) {
+		timeperiod * tptarget = find_timeperiod(timeperiod_name);
+		if(tptarget == NULL) {
+			err_msg(po, "Could not find timeperiod", "timeperiod_name",
+				timeperiod_name, NULL);
+			goto end;
+		}
+		parse_timeperiod(tptarget, po);
+	}
+
+end:
 	json_decref(req);
 	send_msg(sock, po);
 }
