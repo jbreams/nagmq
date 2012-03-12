@@ -13,7 +13,6 @@ AC_ARG_WITH([zmq-headers],
 	[with_zmq_headers=default])
 
 AC_PROG_CC
-AC_PROG_CC_C99
 AC_PROG_LIBTOOL
 
 AC_CHECK_LIB([zmq], [zmq_socket], [],
