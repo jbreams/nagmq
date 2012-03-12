@@ -4,33 +4,34 @@ import json, time, zmq, re, os, pwd, smtplib
 from optparse import OptionParser
 from email.mime.text import MIMEText
 
-op = OptionParser(usage = '-c email -s state -h hostname [-d service] [-f failures] [-g hostgroup]  "msg"')
-op.add_option("-c", "--contact", type="string", action="store", dest="contact",
-	help="Email address to send alert to", required=True)
-op.add_option("-h", "--host", type="string", action="store", dest="host",
-	help="Host name of the host/service of this alert", required=True)
+op = OptionParser(usage = 'email state hostname [-d service] [-f failures] [-g hostgroup]  "msg"')
 op.add_option("-d", "--service", type="string", action="store", dest="service",
 	help="Service description of the service of this alert")
-op.add_option("-f", "--failures", type="integer", action="store", dest="failures",
+op.add_option("-f", "--failures", type="int", action="store", dest="failures",
 	help="Tolerate n number of failures before alerting", default=0)
 op.add_option("-g", "--hostgroup", type="string", action="store", dest="hostgroup",
 	help="Hostgroup to tolerate failures in")
-op.add_option("-s", "--state", type="integer", action="store", dest="state",
-	help="State ID of host/service", required=True)
 op.add_option("-t", "--duration", type="string", action="store", dest="duration",
 	help="Time the host/service has been in the current state")
-op.add_option("-i", "--notification-id", type="integer", action="store", dest="id",
+op.add_option("-i", "--notification-id", type="int", action="store", dest="id",
 	help="Notification ID; will be set as token in email")
+op.add_option("-a", "--alternate-schedule", type="string", action="store",
+	dest="schedule", help="Key-value list of timeperiods and intervals")
 
 (opts, args) = op.parse_args()
-if(len(args) < 1):
+if(len(args) < 4):
 	print "Did not supply any output to send!"
 	exit(-1)
 
-def check_failues(tolerate)
-	ctx = zmq.Context()
-	reqs = ctx.socket(zmq.REQ)
-	reqs.connect("ipc:///tmp/nagmqreq.sock")
+contact = args.pop()
+stateid = args.pop()
+host = args.pop()
+
+ctx = zmq.Context()
+reqs = ctx.socket(zmq.REQ)
+reqs.connect("ipc:///tmp/nagmqreq.sock")
+
+def check_failues(tolerate):
 	reqp = { }
 	states = { }
 	hgo = None
@@ -59,16 +60,39 @@ def check_failues(tolerate)
 			return False
 		for m in hgo['members']:
 			if(m in states and states[m] != 0):
-				nfailures++
+				nfailures += 1
 	else:
-		for s in states;
-			if(s != 0)
-				nfailures++			
+		for s in states:
+			if(s != 0):
+				nfailures += 1		
 
 	if(nfailures <= tolerate):
 		return True
 
-if(failures in opts and !check_failures(opts.failures)):
+def check_schedules(schedule):
+	tkvl = re.split(r'\s*,\s*', schedule)
+	keys = [ 'in_timeperiod', 'type', 'last_notification' ]
+	for tpkv in tkvl:
+		tperiod, interval = re.split(r'\s*=\s*', tpkv)[:2]
+		reqs.send_json({ 'timeperiod_name': schedule, 'keys': keys})
+		tpo = json.loads(reqs.recv())[0]
+		if(tpo == None):
+			continue
+		if(tpo['in_timeperiod'] == False):
+			continue
+
+		if(service in opts):
+			reqs.send_json({ 'host_name': opts.host,
+				'service_description': opts.service, 'keys': keys })
+		else:
+			reqs.send_json({ 'host_name': opts.host, 'keys': keys })
+		tpo = json.loads(reqs.recv())[0]
+		
+		if(tpo['last_notification'] + interval * 60 >= time.time()):
+			return True
+	return False
+
+if(failures in opts and not check_failures(opts.failures)):
 	exit(0)
 
 msgtxt = None

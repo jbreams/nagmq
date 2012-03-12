@@ -139,6 +139,7 @@ static void parse_timeperiod(timeperiod * state, struct payload * ret) {
 	int x;
 	time_t now;
 	payload_start_object(ret, NULL);
+	payload_new_string(ret, "type", "timeperiod");
 	payload_new_string(ret, "timeperiod_name", state->name);
 	payload_new_string(ret, "alias", state->alias);
 	if(payload_start_array(ret, "exceptions")) {
@@ -318,8 +319,8 @@ static void parse_host(host * state, struct payload * ret,
 	payload_new_boolean(ret, "is_executing", state->is_executing);
 	payload_new_integer(ret, "check_options", state->check_options);
 	payload_new_boolean(ret, "notifications_enabled", state->notifications_enabled);
-	payload_new_integer(ret, "last_host_notification", state->last_host_notification);
-	payload_new_integer(ret, "next_host_notification", state->next_host_notification);
+	payload_new_integer(ret, "last_notification", state->last_host_notification);
+	payload_new_integer(ret, "next_notification", state->next_host_notification);
 	payload_new_integer(ret, "next_check", state->next_check);
 	payload_new_boolean(ret, "should_be_scheduled", state->should_be_scheduled);
 	payload_new_integer(ret, "last_check", state->last_check);
