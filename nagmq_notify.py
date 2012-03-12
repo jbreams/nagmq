@@ -88,11 +88,14 @@ def check_schedules(schedule):
 			reqs.send_json({ 'host_name': opts.host, 'keys': keys })
 		tpo = json.loads(reqs.recv())[0]
 		
-		if(tpo['last_notification'] + interval * 60 >= time.time()):
+		if(tpo['last_notification'] + (interval * 60) >= time.time()):
 			return True
 	return False
 
 if(failures in opts and not check_failures(opts.failures)):
+	exit(0)
+
+if(schedule in opts and not check_schedules(opts.schedule)):
 	exit(0)
 
 msgtxt = None
