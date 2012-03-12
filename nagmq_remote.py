@@ -44,10 +44,6 @@ def refresh_checks():
 	last_refresh = time.time()
 
 def stupid_xml_for_check(s):
-	# The programmer is a jerk face and decided to use crazy horrible
-	# XML as the transport for sending check data around. This programmer's
-	# only consolation is that the programmer looks like a squirrel.
-
 	doc = xml.dom.minidom.Document()
 	scd = doc.createElement('SurvivorCheckData')
 	doc.appendChild(scd)
