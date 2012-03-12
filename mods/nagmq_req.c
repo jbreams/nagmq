@@ -48,12 +48,19 @@ static void parse_timerange(timerange * tr, struct payload * ret) {
 	char buf[16];
 	int hours, minutes;
 
+	if(tr->range_start == 0 && tr->range_end == 0)
+		return;
+
 	hours = tr->range_start / 3600;
-	minutes = tr->range_start - (hours * 3600) / 60;
+	minutes = tr->range_start - (hours * 3600);
+	if(minutes)
+		minutes /= 60;
 	sprintf(buf, "%02d:%02d", hours, minutes);
 	payload_new_string(ret, "start_time", buf);
 	hours = tr->range_end / 3600;
-	minutes = tr->range_end - (hours * 3600) / 60;
+	minutes = tr->range_end - (hours * 3600);
+	if(minutes)
+		minutes /= 60;
 	sprintf(buf, "%02d:%02d", hours, minutes);
 	payload_new_string(ret, "end_time", buf);
 }
@@ -163,7 +170,7 @@ static void parse_timeperiod(timeperiod * state, struct payload * ret) {
 
 	time(&now);
 	payload_new_boolean(ret, "in_timeperiod",
-		check_time_against_period(now, state));
+		(check_time_against_period(now, state) == 0));
 	get_next_valid_time(now, &now, state);
 	payload_new_integer(ret, "next_valid_time", now);
 	
