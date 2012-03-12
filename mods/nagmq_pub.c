@@ -197,6 +197,7 @@ static struct payload * parse_statechange(nebstruct_statechange_data * state) {
 	payload_new_string(ret, "host_name", state->host_name);
 	payload_new_string(ret, "service_description", state->service_description);
 	payload_new_integer(ret, "state", state->state);
+	payload_new_integer(ret, "state_type", state->state_type);
 	payload_new_integer(ret, "current_attempt", state->current_attempt);
 	payload_new_integer(ret, "max_attempts", state->max_attempts);
 	payload_new_string(ret, "output", state->output);
