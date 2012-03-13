@@ -394,7 +394,7 @@ int handle_nagdata(int which, void * obj) {
 	payload_new_timestamp(payload, "timestamp", &raw->timestamp);
 	payload_finalize(payload);
 	process_payload(payload);
-	return 0;
+	return rc;
 }
 
 void * getsock(char * what, int type);
@@ -415,10 +415,10 @@ int handle_pubstartup() {
 
 	json_t * override = NULL;
 
-	json_unpack(config, "s:{s?:o}",
+	json_unpack(config, "{s:{s?:o}}",
 		"publish", "override", &override);
 
-	memset(override, 0, sizeof(override));
+	memset(overrides, 0, sizeof(overrides));
 	if(override) {
 		if(json_is_string(override))
 			override_string(json_string_value(override));
