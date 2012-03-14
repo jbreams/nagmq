@@ -62,11 +62,11 @@ class ExecThread(threading.Thread):
 
 			if('output' not in tosend):
 				tosend['exited_ok'] = 1
-				tosend['return_code'] = proc.return_code
+				tosend['return_code'] = proc.returncode
 				tosend['output'] = sout
-			tosend['start'] = { 'tv_sec': int(start) }
-			tosend['finish'] = { 'tv_sec': int(finish) }
-		
+			tosend['start_time'] = { 'tv_sec': int(start) }
+			tosend['finish_time'] = { 'tv_sec': int(finish) }
+				
 			if('service_description' in cmd):
 				tosend['type'] = 'service_check_processed'
 				tosend['service_description'] = cmd['service_description']
