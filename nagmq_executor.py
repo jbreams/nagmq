@@ -17,6 +17,10 @@ extpush = zc.socket(zmq.PUSH)
 extpush.connect("ipc:///tmp/nagmqpull.sock")
 nthreads = 20
 
+keystocopy = [ 'host_name', 'service_description', 'check_options',
+	'scheduled_check', 'reschedule_check', 'latency', 'early_timeout',
+	'check_type' ]
+
 class ExecThread(threading.Thread):
 	def __init__(self):
 		threading.Thread.__init__(self)
@@ -44,7 +48,10 @@ class ExecThread(threading.Thread):
 				print e
 				continue
 			cmd = json.loads(pstr)
-			tosend = cmd
+			tosend = { }
+			for i in keystocopy:
+				if(i in cmd):
+					tosend[i] = cmd[i]
 			start = time.time()
 			finish = None
 			try:
