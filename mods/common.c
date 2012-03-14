@@ -218,7 +218,7 @@ void * getsock(char * forwhat, int type) {
 	return sock;
 }
 
-int process_pull_msg(void * sock);
+void process_pull_msg(void * sock);
 void process_req_msg(void * sock);
 
 void * recv_loop(void * parg) {
@@ -280,14 +280,9 @@ void * recv_loop(void * parg) {
 		}
 
 		if(enablepull) {
-			rc = 0;
-			do {
-				zmq_getsockopt(pullsock, ZMQ_EVENTS, &events, &size);
-				if(events == ZMQ_POLLIN)
-					rc += process_pull_msg(pullsock);
-			} while(events == ZMQ_POLLIN && rc > 0 && rc < 512);
-			if(rc > 0)
-				process_passive_checks(); 
+			zmq_getsockopt(pullsock, ZMQ_EVENTS, &events, &size);
+			if(events == ZMQ_POLLIN)
+				process_pull_msg(pullsock);
 		}
 		if(enablereq) {
 			zmq_getsockopt(reqsock, ZMQ_EVENTS, &events, &size);
@@ -365,6 +360,8 @@ int handle_startup(int which, void * obj) {
 	return 0;
 }
 
+int handle_timedevent(int which, void * data);
+
 int nebmodule_init(int flags, char * localargs, nebmodule * lhandle) {
 	json_error_t loaderr;
 	neb_set_module_info(handle, NEBMODULE_MODINFO_TITLE, "nagmq subscriber");
@@ -384,6 +381,8 @@ int nebmodule_init(int flags, char * localargs, nebmodule * lhandle) {
 	handle = lhandle;
 	neb_register_callback(NEBCALLBACK_PROCESS_DATA, lhandle,
 		0, handle_startup);
+	neb_register_callback(NEBCALLBACK_TIMED_EVENT_DATA, lhandle,
+		0, handle_timedevent);
 
 	return 0;
 }

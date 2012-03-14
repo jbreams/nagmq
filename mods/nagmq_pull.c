@@ -21,16 +21,47 @@
 extern int errno;
 int npassivechecks = 0;
 
+static check_result * crhead = NULL;
+pthread_mutex_t cr_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+int handle_timedevent(int which, void * obj) {
+	nebstruct_timed_event_data * data = obj;
+	if(which != NEBCALLBACK_TIMED_EVENT_DATA)
+		return ERROR;
+	if(data->type != NEBTYPE_TIMEDEVENT_EXECUTE &&
+		data->event_type != EVENT_CHECK_REAPER)
+		return 0;
+
+	pthread_mutex_lock(&cr_mutex);
+	while(crhead) {
+		check_result *tmp = crhead->next;
+		crhead->next = NULL;
+		add_check_result_to_list(crhead);
+		crhead = tmp;
+	}
+	pthread_mutex_unlock(&cr_mutex);
+	return 0;
+}
+
 static void process_status(json_t * payload, char * type, size_t typelen) {
-	char * host_name, *service_description = NULL, *output;
-	int return_code;
+	char * host_name, *service_description = NULL, *output = NULL;
+	check_result * newcr = NULL, t;
+	struct timeval start, finish;
 	time_t timestamp;
 
-	if(json_unpack(payload, "{s:s s:s s?:s s:i s:{s:i}}",
-		"host_name", &host_name, "output", &output,
-		"service_description", &service_description,
-		"return_code", &return_code, "end_time", "tv_sec",
-		&timestamp) != 0) {
+	init_check_result(&t);
+	memset(&start, 0, sizeof(struct timeval));
+	memset(&finish, 0, sizeof(struct timeval));
+	if(json_unpack(payload, "{s:s s:s s?:s s:i s?:{s:i s?:i} s:{s:i s?:i}"
+		"s:i s?:i s?:i s?:i, s?:d, s?:i s?:i }",
+		"host_name", &host_name, "output", &output, "service_description",
+		&service_description, "return_code", &t.return_code, "start_time",
+		"tv_sec", &start.tv_sec, "tv_usec", &start.tv_usec, "end_time", 
+		"tv_sec", &finish.tv_sec, "tv_usec", &finish.tv_usec, "check_type",
+		&t.check_type, "check_options", &t.check_options, "scheduled_check",
+		&t.scheduled_check, "reschedule_check", &t.reschedule_check,
+		"latency", &t.latency, "early_timeout", &t.early_timeout,
+		"exited_ok", &t.exited_ok) != 0) {
 		json_decref(payload);
 		return;
 	}
@@ -44,18 +75,22 @@ static void process_status(json_t * payload, char * type, size_t typelen) {
 		return;
 	}
 
-	if(strncmp(type, "service_check_processed", typelen) == 0) {
-		if(!service_description) {
-			json_decref(payload);
-			return;
-		}
-		process_passive_service_check(timestamp, host_name,
-			service_description, return_code, output);
-	} else
-		process_passive_host_check(timestamp, host_name,
-			return_code, output);
-
+	newcr = malloc(sizeof(check_result));
+	memcpy(newcr, &t, sizeof(check_result));
+	memcpy(&newcr->start_time, &start, sizeof(struct timeval));
+	memcpy(&newcr->finish_time, &finish, sizeof(struct timeval));
+	newcr->host_name = strdup(host_name);
+	if(service_target) {
+		newcr->service_description = strdup(service_description);
+		newcr->object_check_type = SERVICE_CHECK;
+	}
+	newcr->output = strdup(output);
 	json_decref(payload);
+
+	pthread_mutex_lock(&cr_mutex);
+	newcr->next = crhead;
+	crhead = newcr;
+	pthread_mutex_unlock(&cr_mutex);
 }
 
 static void process_acknowledgement(json_t * payload) {
@@ -257,43 +292,39 @@ static void process_cmd(json_t * payload) {
 	json_decref(payload);
 }
 
-int process_pull_msg(void * sock) {
+void process_pull_msg(void * sock) {
 	zmq_msg_t payload_msg;
 	char * type = NULL;
 
 	zmq_msg_init(&payload_msg);
 	if(zmq_recv(sock, &payload_msg, 0) != 0) {
 		zmq_msg_close(&payload_msg);
-		return 0;
+		return;
 	}
 
 	json_t * payload = json_loadb(zmq_msg_data(&payload_msg),
 		zmq_msg_size(&payload_msg), 0, NULL);
 	zmq_msg_close(&payload_msg);
 	if(payload == NULL)
-		return 0;		
+		return;		
 	
 	if(json_unpack(payload, "{ s:s }", "type", &type) != 0) {
 		json_decref(payload);
-		return 0;
+		return;
 	}
 	size_t typelen = strlen(type);
 
 	if(strncmp(type, "command", typelen) == 0)
 		process_cmd(payload);
-	else if(strncmp(type, "host_check_processed", typelen) == 0) {
+	else if(strncmp(type, "host_check_processed", typelen) == 0)
 		process_status(payload, type, typelen);
-		return 1;
-	}
-	else if(strncmp(type, "service_check_processed", typelen) == 0) {
+	else if(strncmp(type, "service_check_processed", typelen) == 0)
 		process_status(payload, type, typelen);
-		return 1;
-	}
 	else if(strncmp(type, "acknowledgement", typelen) == 0)
 		process_acknowledgement(payload);
 	else if(strncmp(type, "comment_add", typelen) == 0)
 		process_comment(payload);
 	else if(strncmp(type, "downtime_add", typelen) == 0)
 		process_downtime(payload);
-	return 0;
+	return;
 }
