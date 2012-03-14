@@ -20,11 +20,11 @@ extern int errno;
 extern nebmodule * handle;
 void * pubext;
 extern json_t *  config;
-#define CA_HOSTCHECK_INITIATE 0
-#define CA_SERVICECHECK_INITIATE 1
-#define CA_EVENTHANDLER_START 2
-#define CA_MAX 3
-static int cancels[CA_MAX];
+#define OR_HOSTCHECK_INITIATE 0
+#define OR_SERVICECHECK_INITIATE 1
+#define OR_EVENTHANDLER_START 2
+#define OR_MAX 3
+static int overrides[OR_MAX];
 
 void lock_obj(char * hostname, char * service, char ** plugin_output,
 	char ** long_plugin_output, char ** perf_data);
@@ -95,11 +95,18 @@ static struct payload * parse_event_handler(nebstruct_event_handler_data * state
 	return ret;
 }
 
+// Stupid Nagios 3.x global variable
+extern check_result check_result_info;
+
 static struct payload * parse_host_check(nebstruct_host_check_data * state) {
 	struct payload * ret = payload_new();
 	host * obj = find_host(state->host_name);
 
 	payload_new_string(ret, "host_name", state->host_name);
+	payload_new_integer(ret, "check_type", state->check_type);
+	payload_new_integer(ret, "check_options", check_result_info.check_options);
+	payload_new_integer(ret, "scheduled_check", check_result_info.scheduled_check);
+	payload_new_integer(ret, "reschedule_check", check_result_info.reschedule_check);
 	payload_new_integer(ret, "current_attempt", state->current_attempt);
 	payload_new_integer(ret, "max_attempts", state->max_attempts);
 	payload_new_integer(ret, "state", state->state);
@@ -107,6 +114,8 @@ static struct payload * parse_host_check(nebstruct_host_check_data * state) {
 	payload_new_integer(ret, "last_hard_state", obj->last_hard_state);
 	payload_new_integer(ret, "last_check", obj->last_check);
 	payload_new_integer(ret, "last_state_change", obj->last_state_change);
+	payload_new_double(ret, "latency", state->latency);
+	payload_new_integer(ret, "timeout", state->timeout);
 
 	if(state->type == NEBTYPE_HOSTCHECK_INITIATE) {
 		payload_new_string(ret, "type", "host_check_initiate");
@@ -120,12 +129,10 @@ static struct payload * parse_host_check(nebstruct_host_check_data * state) {
 	} else if(state->type == NEBTYPE_HOSTCHECK_PROCESSED) {
 		lock_obj(state->host_name, NULL, NULL, NULL, NULL);
 		payload_new_string(ret, "type", "host_check_processed");
-		payload_new_integer(ret, "timeout", state->timeout);
 		payload_new_timestamp(ret, "start_time", &state->start_time);
 		payload_new_timestamp(ret, "end_time", &state->end_time);
 		payload_new_integer(ret, "early_timeout", state->early_timeout);
 		payload_new_double(ret, "execution_time", state->execution_time);
-		payload_new_double(ret, "latency", state->latency);
 		payload_new_integer(ret, "return_code", state->return_code);
 		payload_new_string(ret, "output", state->output);
 		payload_new_string(ret, "long_output", state->long_output);
@@ -142,6 +149,10 @@ static struct payload * parse_service_check(nebstruct_service_check_data * state
 
 	payload_new_string(ret, "host_name", state->host_name);
 	payload_new_string(ret, "service_description", state->service_description);
+	payload_new_integer(ret, "check_type", state->check_type);
+	payload_new_integer(ret, "check_options", check_result_info.check_options);
+	payload_new_integer(ret, "scheduled_check", check_result_info.scheduled_check);
+	payload_new_integer(ret, "reschedule_check", check_result_info.reschedule_check);
 	payload_new_integer(ret, "current_attempt", state->current_attempt);
 	payload_new_integer(ret, "max_attempts", state->max_attempts);
 	payload_new_integer(ret, "state", state->state);
@@ -149,6 +160,8 @@ static struct payload * parse_service_check(nebstruct_service_check_data * state
 	payload_new_integer(ret, "last_hard_state", obj->last_hard_state);
 	payload_new_integer(ret, "last_check", obj->last_check);
 	payload_new_integer(ret, "last_state_change", obj->last_state_change);
+	payload_new_double(ret, "latency", state->latency);
+	payload_new_integer(ret, "timeout", state->timeout);
 
 	if(state->type == NEBTYPE_SERVICECHECK_INITIATE) {
 		payload_new_string(ret, "type", "service_check_initiate");
@@ -166,12 +179,10 @@ static struct payload * parse_service_check(nebstruct_service_check_data * state
 		payload_new_timestamp(ret, "end_time", &state->end_time);
 		payload_new_integer(ret, "early_timeout", state->early_timeout);
 		payload_new_double(ret, "execution_time", state->execution_time);
-		payload_new_double(ret, "latency", state->latency);
 		payload_new_integer(ret, "return_code", state->return_code);
 		payload_new_string(ret, "output", state->output);
 		payload_new_string(ret, "long_output", state->long_output);
 		payload_new_string(ret, "perf_data", state->perf_data);
-		payload_new_integer(ret, "timeout", state->timeout);
 		unlock_obj(state->host_name, state->service_description,
 			state->output, state->long_output, state->perf_data);
 	}
@@ -336,8 +347,8 @@ int handle_nagdata(int which, void * obj) {
 	case NEBCALLBACK_EVENT_HANDLER_DATA:
 		payload = parse_event_handler(obj);
 		if(raw->type == NEBTYPE_EVENTHANDLER_START &&
-			cancels[CA_EVENTHANDLER_START])
-			rc = NEBERROR_CALLBACKCANCEL;
+			overrides[OR_EVENTHANDLER_START])
+			rc = NEBERROR_CALLBACKOVERRIDE;
 		break;
 	case NEBCALLBACK_HOST_CHECK_DATA:
 		switch(raw->type) {
@@ -345,8 +356,8 @@ int handle_nagdata(int which, void * obj) {
 			case NEBTYPE_HOSTCHECK_PROCESSED:
 				payload = parse_host_check(obj);
 				if(raw->type == NEBTYPE_HOSTCHECK_INITIATE &&
-					cancels[CA_HOSTCHECK_INITIATE])
-					rc = NEBERROR_CALLBACKCANCEL;
+					overrides[OR_HOSTCHECK_INITIATE])
+					rc = NEBERROR_CALLBACKOVERRIDE;
 				break;
 			default:
 				return 0;
@@ -358,8 +369,8 @@ int handle_nagdata(int which, void * obj) {
 			case NEBTYPE_SERVICECHECK_PROCESSED:
 				payload = parse_service_check(obj);
 				if(raw->type == NEBTYPE_SERVICECHECK_INITIATE &&
-					cancels[CA_SERVICECHECK_INITIATE])
-					rc = NEBERROR_CALLBACKCANCEL;
+					overrides[OR_SERVICECHECK_INITIATE])
+					rc = NEBERROR_CALLBACKOVERRIDE;
 				break;
 			default:
 				return 0;
@@ -399,13 +410,13 @@ int handle_nagdata(int which, void * obj) {
 
 void * getsock(char * what, int type);
 
-static void cancel_string(const char * in) {
+static void override_string(const char * in) {
 	if(strcasecmp(in, "service_check_initiate") == 0)
-		cancels[CA_SERVICECHECK_INITIATE] = 1;
+		overrides[OR_SERVICECHECK_INITIATE] = 1;
 	else if(strcasecmp(in, "host_check_initiate") == 0)
-		cancels[CA_HOSTCHECK_INITIATE] = 1;
+		overrides[OR_HOSTCHECK_INITIATE] = 1;
 	else if(strcasecmp(in, "eventhandler_start") == 0)
-		cancels[CA_EVENTHANDLER_START] = 1;	
+		overrides[OR_EVENTHANDLER_START] = 1;	
 }
 
 int handle_pubstartup() {
@@ -413,21 +424,21 @@ int handle_pubstartup() {
 	if(pubext == NULL)
 		return -1;
 
-	json_t * cancel = NULL;
+	json_t * override = NULL;
 
 	json_unpack(config, "{s:{s?:o}}",
-		"publish", "cancel_events", &cancel);
+		"publish", "override", &override);
 
-	memset(cancels, 0, sizeof(cancel));
-	if(cancel) {
-		if(json_is_string(cancel))
-			cancel_string(json_string_value(cancel));
-		else if(json_is_array(cancel)) {
+	memset(overrides, 0, sizeof(overrides));
+	if(override) {
+		if(json_is_string(override))
+			override_string(json_string_value(override));
+		else if(json_is_array(override)) {
 			int i;
-			for(i = 0; i < json_array_size(cancel); i++) {
-				json_t * val = json_array_get(cancel, i);
+			for(i = 0; i < json_array_size(override); i++) {
+				json_t * val = json_array_get(override, i);
 				if(json_is_string(val))
-					cancel_string(json_string_value(val));
+					override_string(json_string_value(val));
 			}
 		}
 	}
