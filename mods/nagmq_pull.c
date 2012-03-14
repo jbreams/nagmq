@@ -50,13 +50,15 @@ static void process_status(json_t * payload, char * type, size_t typelen) {
 	time_t timestamp;
 
 	init_check_result(&t);
+	t.output_file = NULL;
+	t.output_file_fp = NULL;
 	memset(&start, 0, sizeof(struct timeval));
 	memset(&finish, 0, sizeof(struct timeval));
 	if(json_unpack(payload, "{s:s s:s s?:s s:i s?:{s:i s?:i} s:{s:i s?:i}"
-		"s:i s?:i s?:i s?:i, s?:d, s?:i s?:i }",
+		"s:i s?:i s?:i s?:i, s?:f, s?:i s?:i *}",
 		"host_name", &host_name, "output", &output, "service_description",
 		&service_description, "return_code", &t.return_code, "start_time",
-		"tv_sec", &start.tv_sec, "tv_usec", &start.tv_usec, "end_time", 
+		"tv_sec", &start.tv_sec, "tv_usec", &start.tv_usec, "finish_time", 
 		"tv_sec", &finish.tv_sec, "tv_usec", &finish.tv_usec, "check_type",
 		&t.check_type, "check_options", &t.check_options, "scheduled_check",
 		&t.scheduled_check, "reschedule_check", &t.reschedule_check,
