@@ -1,9 +1,11 @@
 #!/usr/bin/python26
 
-import json, time, zmq, re, subprocess, threading, signal
+import json, time, zmq, re, subprocess, threading, shlex
 
 zc = zmq.Context()
-intpub = zc.socket(zmq.PUB)
+intquit = zc.socket(zmq.PUB)
+intquit.bind("inproc://internalquit")
+intpub = zc.socket(zmq.PUSH)
 intpub.bind("inproc://internalwork")
 intpull = zc.socket(zmq.PULL)
 intpull.bind("inproc://internalresults")
@@ -20,37 +22,48 @@ class ExecThread(threading.Thread):
 		threading.Thread.__init__(self)
 
 	def run(self):
-		intsub = zc.socket(zmq.SUB)
+		intsub = zc.socket(zmq.PULL)
 		intsub.connect("inproc://internalwork")
-		intsub.setsockopt(zmq.SUBSCRIBE, '')
 		intpush = zc.socket(zmq.PUSH)
 		intpush.connect("inproc://internalresults")
-		keeprunning = True
+		localquit = zc.socket(zmq.SUB)
+		localquit.connect("inproc://internalquit")
+		localquit.setsockopt(zmq.SUBSCRIBE, 'stop_running')
 
+		poller = zmq.Poller()
+		poller.register(intsub, flags=zmq.POLLIN)
+		poller.register(localquit, flags=zmq.POLLIN)
 		while True:
 			try:
-				tmsg, pstr = intsub.recv_multipart()
+				poller.poll()
+				if(localquit.getsockopt(zmq.EVENTS) == zmq.POLLIN):
+					break
+				else:
+					pstr = intsub.recv()
 			except Exception, e:
 				print e
-				break
-			if(tmsg == 'stop_running'):
-				break
+				continue
 			cmd = json.loads(pstr)
-			proc = subprocess.Popen(cmd['command_line'],
-				stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-				sterr=subprocess.PIPE)
-			(sout, serr) = proc.communicate()
-			proc.wait()
-			output = sout.splitlines[0].partition('|')
+			try:
+				args = shlex.split(str(cmd['command_line']))
+				proc = subprocess.Popen(args,
+				stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+				(sout, serr) = proc.communicate()
+				proc.wait()
+			except Exception, e:
+				print e
+				continue
+			output = sout.splitlines()[0].split('|')[0]
 
 			tosend = { 'host_name': cmd['host_name'], 'output': output,
-				'return_code': returncode, 'end_time': { 'tv_sec' : end } }	
+				'return_code': proc.returncode, 'end_time': { 'tv_sec' : int(time.time()) } }	
 		
 			if('service_description' in cmd):
 				tosend['type'] = 'service_check_processed'
 				tosend['service_description'] = cmd['service_description']
 			else:
 				tosend['type'] = 'host_check_processed'
+			print tosend
 			intpush.send_json(tosend)
 
 for i in range(nthreads):
@@ -73,10 +86,10 @@ while True:
 
 	if(extsub.getsockopt(zmq.EVENTS) == zmq.POLLIN):
 		tmsg, pstr = extsub.recv_multipart()
-		intpub.send_multipart([tmsg, pstr])
+		intpub.send(pstr)
 	elif(intpull.getsockopt(zmq.EVENTS) == zmq.POLLIN):
 		pstr = intpull.recv()
 		extpush.send(pstr)
 
 print "End of loop!"
-intpub.send_multipart(['stop_running', '{ }'])
+intquit.send('stop_running')
