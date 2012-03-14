@@ -20,11 +20,11 @@ extern int errno;
 extern nebmodule * handle;
 void * pubext;
 extern json_t *  config;
-#define OR_HOSTCHECK_INITIATE 0
-#define OR_SERVICECHECK_INITIATE 1
-#define OR_EVENTHANDLER_START 2
-#define OR_MAX 3
-static int overrides[OR_MAX];
+#define CA_HOSTCHECK_INITIATE 0
+#define CA_SERVICECHECK_INITIATE 1
+#define CA_EVENTHANDLER_START 2
+#define CA_MAX 3
+static int cancels[CA_MAX];
 
 void lock_obj(char * hostname, char * service, char ** plugin_output,
 	char ** long_plugin_output, char ** perf_data);
@@ -336,8 +336,8 @@ int handle_nagdata(int which, void * obj) {
 	case NEBCALLBACK_EVENT_HANDLER_DATA:
 		payload = parse_event_handler(obj);
 		if(raw->type == NEBTYPE_EVENTHANDLER_START &&
-			overrides[OR_EVENTHANDLER_START])
-			rc = NEBERROR_CALLBACKOVERRIDE;
+			cancels[CA_EVENTHANDLER_START])
+			rc = NEBERROR_CALLBACKCANCEL;
 		break;
 	case NEBCALLBACK_HOST_CHECK_DATA:
 		switch(raw->type) {
@@ -345,8 +345,8 @@ int handle_nagdata(int which, void * obj) {
 			case NEBTYPE_HOSTCHECK_PROCESSED:
 				payload = parse_host_check(obj);
 				if(raw->type == NEBTYPE_HOSTCHECK_INITIATE &&
-					overrides[OR_HOSTCHECK_INITIATE])
-					rc = NEBERROR_CALLBACKOVERRIDE;
+					cancels[CA_HOSTCHECK_INITIATE])
+					rc = NEBERROR_CALLBACKCANCEL;
 				break;
 			default:
 				return 0;
@@ -358,8 +358,8 @@ int handle_nagdata(int which, void * obj) {
 			case NEBTYPE_SERVICECHECK_PROCESSED:
 				payload = parse_service_check(obj);
 				if(raw->type == NEBTYPE_SERVICECHECK_INITIATE &&
-					overrides[OR_SERVICECHECK_INITIATE])
-					rc = NEBERROR_CALLBACKOVERRIDE;
+					cancels[CA_SERVICECHECK_INITIATE])
+					rc = NEBERROR_CALLBACKCANCEL;
 				break;
 			default:
 				return 0;
@@ -399,13 +399,13 @@ int handle_nagdata(int which, void * obj) {
 
 void * getsock(char * what, int type);
 
-static void override_string(const char * in) {
+static void cancel_string(const char * in) {
 	if(strcasecmp(in, "service_check_initiate") == 0)
-		overrides[OR_SERVICECHECK_INITIATE] = 1;
+		cancels[CA_SERVICECHECK_INITIATE] = 1;
 	else if(strcasecmp(in, "host_check_initiate") == 0)
-		overrides[OR_HOSTCHECK_INITIATE] = 1;
+		cancels[CA_HOSTCHECK_INITIATE] = 1;
 	else if(strcasecmp(in, "eventhandler_start") == 0)
-		overrides[OR_EVENTHANDLER_START] = 1;	
+		cancels[CA_EVENTHANDLER_START] = 1;	
 }
 
 int handle_pubstartup() {
@@ -413,21 +413,21 @@ int handle_pubstartup() {
 	if(pubext == NULL)
 		return -1;
 
-	json_t * override = NULL;
+	json_t * cancel = NULL;
 
 	json_unpack(config, "{s:{s?:o}}",
-		"publish", "override", &override);
+		"publish", "cancel_events", &cancel);
 
-	memset(overrides, 0, sizeof(overrides));
-	if(override) {
-		if(json_is_string(override))
-			override_string(json_string_value(override));
-		else if(json_is_array(override)) {
+	memset(cancels, 0, sizeof(cancel));
+	if(cancel) {
+		if(json_is_string(cancel))
+			cancel_string(json_string_value(cancel));
+		else if(json_is_array(cancel)) {
 			int i;
-			for(i = 0; i < json_array_size(override); i++) {
-				json_t * val = json_array_get(override, i);
+			for(i = 0; i < json_array_size(cancel); i++) {
+				json_t * val = json_array_get(cancel, i);
 				if(json_is_string(val))
-					override_string(json_string_value(val));
+					cancel_string(json_string_value(val));
 			}
 		}
 	}
