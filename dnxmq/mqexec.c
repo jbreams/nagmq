@@ -126,6 +126,8 @@ void child_end_cb(struct ev_loop * loop, ev_child * c, int event) {
 
 	zmq_msg_init_data(&outmsg, output, strlen(output), free_cb, NULL);
 	zmq_send(pushsock, &outmsg, 0);
+	logit(DEBUG, "Child %d ended with %d. Sending \"%s\" upstream",
+		c->rpid, c->rstatus, output);
 	zmq_msg_close(&outmsg);
 	free(j);
 }
@@ -159,6 +161,8 @@ void kickoff_cb(struct ev_loop * loop, ev_io * i, int event) {
 		json_decref(input);
 		return;
 	}
+	logit(DEBUG, "Received job from uptstream: %s %s",
+		type, command_line);
 
 	memset(argv, 0, sizeof(argv));
 	char * lck = command_line, *save = lck;
@@ -204,6 +208,7 @@ void kickoff_cb(struct ev_loop * loop, ev_io * i, int event) {
 	gettimeofday(&j->start, NULL);
 	pid = fork();
 	if(pid == 0) {
+		fclose(stdin);
 		dup2(fds[1], fileno(stdout));
 		execv(command_line, argv);
 		rc = errno;
@@ -211,6 +216,7 @@ void kickoff_cb(struct ev_loop * loop, ev_io * i, int event) {
 		exit(errno);
 	}
 
+	logit(DEBUG, "Kicked off %d", pid);
 	ev_child_init(&j->child, child_end_cb, pid, 0);
 	j->child.data = j;
 	ev_child_start(loop, &j->child);
@@ -246,6 +252,7 @@ void recv_up_cb(struct ev_loop * loop, ev_io * io, int events) {
 
 	zmq_send(downpush, &inmsg, 0);
 	zmq_msg_close(&inmsg);
+	logit(DEBUG, "Pushed message downstream");
 }
 
 void recv_down_cb(struct ev_loop * loop, ev_io * io, int events) {
@@ -263,11 +270,14 @@ void recv_down_cb(struct ev_loop * loop, ev_io * io, int events) {
 		return;
 	}
 
-	if(uppush)
+	if(uppush) {
 		zmq_send(uppush, &inmsg, 0);
+		logit(DEBUG, "Pushed message upstream");
+	}
 	if(uppub) {
 		zmq_msg_copy(&pubmsg, &inmsg);
 		zmq_send(uppub, &pubmsg, 0);
+		logit(DEBUG, "Published message upstream");
 		zmq_msg_close(&pubmsg);
 	}
 	zmq_msg_close(&inmsg);
@@ -293,6 +303,8 @@ void parse_sock_directive(void * socket, json_t * arg, int bind) {
 			zmq_bind(socket, addr);
 		else
 			zmq_connect(socket, addr);
+		logit(DEBUG, "Socket object def %s (bind: %d)",
+			addr, bind);
 
 		if(subscribe) {
 			int type;
@@ -303,6 +315,7 @@ void parse_sock_directive(void * socket, json_t * arg, int bind) {
 			if(json_is_string(subscribe)) {
 				const char * opt = json_string_value(subscribe);
 				zmq_setsockopt(socket, ZMQ_SUBSCRIBE, opt, strlen(opt));
+				logit(DEBUG, "Subscribing to %s", opt);
 			}
 			else if(json_is_array(subscribe)) {
 				for(i = 0; i < json_array_size(subscribe); i++) {
@@ -310,6 +323,7 @@ void parse_sock_directive(void * socket, json_t * arg, int bind) {
 					const char * opt = json_string_value(tmp);
 					zmq_setsockopt(socket, ZMQ_SUBSCRIBE,
 						opt, strlen(opt));
+					logit(DEBUG, "Subscribing to %s", opt);
 				}
 			}
 		}
@@ -351,10 +365,12 @@ int start_broker(struct ev_loop * loop, json_t * config) {
 
 	downpush = zmq_socket(zmqctx, ZMQ_PUSH);
 	parse_sock_directive(downpush, downpushc, 1);
+	logit(DEBUG, "Setup downstream pusher");
 	downpull = zmq_socket(zmqctx, ZMQ_PULL);
 	parse_sock_directive(downpull, downpullc, 1);
 	ev_io_init(&edpull, recv_down_cb, getfd(downpull), EV_READ);
 	ev_io_start(loop, &edpull);
+	logit(DEBUG, "Setup downstream puller");
 	
 	if(uppullc) {
 		uppull = zmq_socket(zmqctx, ZMQ_PULL);
@@ -362,6 +378,7 @@ int start_broker(struct ev_loop * loop, json_t * config) {
 		ev_io_init(&eupull, recv_up_cb, getfd(uppull), EV_READ);
 		eupull.data = uppull;
 		ev_io_start(loop, &eupull);
+		logit(DEBUG, "Setup upstream puller");
 	}
 	if(upsubc) {
 		upsub = zmq_socket(zmqctx, ZMQ_SUB);
@@ -369,15 +386,18 @@ int start_broker(struct ev_loop * loop, json_t * config) {
 		ev_io_init(&eusub, recv_up_cb, getfd(upsub), EV_READ);
 		eusub.data = upsub;
 		ev_io_start(loop, &eusub);
+		logit(DEBUG, "Setup upstream subscriber");
 	}
 
 	if(uppushc) {
 		uppush = zmq_socket(zmqctx, ZMQ_PUSH);
 		parse_sock_directive(uppush, uppushc, 0);
+		logit(DEBUG, "Setup upstream pusher");
 	}
 	if(uppubc) {
 		uppub = zmq_socket(zmqctx, ZMQ_PUB);
 		parse_sock_directive(uppub, uppubc, 1);
+		logit(DEBUG, "Setup upstream publisher");
 	}
 	return 0;
 }
@@ -443,7 +463,9 @@ int main(int argc, char ** argv) {
 	ev_io_start(loop, &pullio);
 
 	json_decref(config);
+	logit(INFO, "Starting DNXMQ event loop");
 	ev_run(loop, 0);
+	logit(INFO, "DNXMQ event loop terminated");
 
 	zmq_close(pullsock);
 	zmq_close(pushsock);
