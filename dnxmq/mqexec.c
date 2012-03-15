@@ -37,7 +37,7 @@ json_t * obj_for_ending(struct child_job * j, const char * output,
 	int i;
 
 	gettimeofday(&finish, NULL);
-	json_t * ret = json_pack(output,
+	json_t * ret = json_pack(
 		"{ s:s s:i s:i s:{ s:i s:i } s:{ s:i s:i } s:s }",
 		"output", output, "return_code", return_code,
 		"exited_ok", exited_ok, "start_time", "tv_sec", j->start.tv_sec,
@@ -55,6 +55,20 @@ json_t * obj_for_ending(struct child_job * j, const char * output,
 
 void free_cb(void * data, void * hint) {
 	free(data);
+}
+
+void child_io_cb(struct ev_loop * loop, ev_io * i, int event) {
+	struct child_job * j = (struct child_job*)i->data;
+	size_t r;
+
+	do {
+		r = read(i->fd, j->buffer + j->bufused,
+			sizeof(j->buffer) - j->bufused);
+		if(r > 0)
+			j->bufused += r;
+	} while(r > 0 && j->bufused < sizeof(j->buffer));
+	if(j->bufused == sizeof(j->buffer))
+		ev_io_stop(loop, i);
 }
 
 void child_end_cb(struct ev_loop * loop, ev_child * c, int event) {
@@ -77,20 +91,6 @@ void child_end_cb(struct ev_loop * loop, ev_child * c, int event) {
 	zmq_send(pushsock, &outmsg, 0);
 	zmq_msg_close(&outmsg);
 	free(j);
-}
-
-void child_io_cb(struct ev_loop * loop, ev_io * i, int event) {
-	struct child_job * j = (struct child_job*)i->data;
-	size_t r;
-
-	do {
-		r = read(i->fd, j->buffer + j->bufused,
-			sizeof(j->buffer) - j->bufused);
-		if(r > 0)
-			j->bufused += r;
-	} while(r > 0 && j->bufused < sizeof(j->buffer));
-	if(j->bufused == sizeof(j->buffer))
-		ev_io_stop(loop, i);
 }
 
 void pull_cb(struct ev_loop * loop, ev_io * i, int event) {
