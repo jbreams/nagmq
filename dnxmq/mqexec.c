@@ -60,7 +60,14 @@ void free_cb(void * data, void * hint) {
 void child_end_cb(struct ev_loop * loop, ev_child * c, int event) {
 	struct child_job * j = (struct child_job*)c->data;
 	zmq_msg_t outmsg;
-	j->buffer[j->bufused] = '\0';
+
+	child_io_cb(loop, &j->io, EV_READ);
+	ev_io_stop(loop, &j->io);
+
+	if(j->bufused)
+		j->buffer[j->bufused] = '\0';
+	else
+		strcpy(j->buffer, "");
 	json_t * jout = obj_for_ending(j, j->buffer, c->rstatus, 1);
 	json_decref(j->input);
 	char * output = json_dumps(jout, JSON_COMPACT);
@@ -94,6 +101,7 @@ void pull_cb(struct ev_loop * loop, ev_io * i, int event) {
 	char * type, *command_line;
 	zmq_msg_t inmsg;
 	int fds[2];
+	char * argv[1024];
 	pid_t pid;
 	int rc;
 
@@ -115,6 +123,29 @@ void pull_cb(struct ev_loop * loop, ev_io * i, int event) {
 		return;
 	}
 
+	memset(argv, 0, sizeof(argv));
+	char * lck = command_line, *save = lck;
+	int argc = 0;
+	while(*lck) {
+		if(*lck == ' ') {
+			if(*(lck + 1) == ' ')
+				continue;
+			argv[argc++] = save;
+			*(lck++) = '\0';
+			save = lck;
+		}
+		else if(*lck == '\"') {
+			save = ++lck;
+			while(*lck && *lck != '\"' && *(lck - 1) != '\\')
+				lck++;
+			argv[argc++] = save;
+			*(lck++) = '\0';
+			save = lck;
+		}
+		else
+			lck++;
+	}
+
 	pipe(fds);
 	fcntl(fds[0], F_SETFL, O_NONBLOCK);
 
@@ -124,17 +155,18 @@ void pull_cb(struct ev_loop * loop, ev_io * i, int event) {
 	else
 		j->service = 0;
 	j->bufused = 0;
+	j->input = input;
 	
 	ev_io_init(&j->io, child_io_cb, fds[0], EV_READ);
 	j->io.data = j;
 	ev_io_start(loop, &j->io);
 
+	
 	gettimeofday(&j->start, NULL);
 	pid = fork();
 	if(pid == 0) {
-		close(fds[0]);
 		dup2(fds[1], fileno(stdout));
-		execl("/bin/sh", command_line, NULL);
+		execv(command_line, argv);
 		rc = errno;
 		printf("Error executing %s: %m", command_line);
 		exit(errno);
