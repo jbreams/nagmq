@@ -28,7 +28,7 @@ void * upsub = NULL;
 void * downpush = NULL;
 void * downpull = NULL;
 ev_io eupull, eusub, edpull;
-int usesyslog = 0, verbose = 1;
+int usesyslog = 0, verbose = 0;
 
 struct child_job {
 	json_t * input;
@@ -439,9 +439,10 @@ int main(int argc, char ** argv) {
 		exit(-1);
 	}
 
-	if(json_unpack(config, "{s:{s:os:os?:os?i}}",
+	if(json_unpack(config, "{s:{s:os:os?:os?is?bs?b}}",
 		"executor", "jobs", &jobs, "results", &results,
-		"broker", &broker, "iothreads", &iothreads) != 0) {
+		"broker", &broker, "iothreads", &iothreads,
+		"verbose", &verbose, "syslog", &usesyslog) != 0) {
 		logit(ERR, "Error getting config");
 		exit(-1);
 	}
