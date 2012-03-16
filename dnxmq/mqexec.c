@@ -169,7 +169,7 @@ void kickoff_cb(struct ev_loop * loop, ev_io * i, int event) {
 		json_decref(input);
 		return;
 	}
-	logit(DEBUG, "Received job from uptstream: %s %s",
+	logit(DEBUG, "Received job from upstream: %s %s",
 		type, command_line);
 
 	memset(argv, 0, sizeof(argv));
@@ -197,7 +197,12 @@ void kickoff_cb(struct ev_loop * loop, ev_io * i, int event) {
 	if(*save)
 		argv[argc++] = save;
 
-	pipe(fds);
+	if(pipe(fds) < 0) {
+		logit(ERR, "Error creating pipe for %s: %m",
+			command_line);
+		json_decref(input);
+		return;		
+	};
 	fcntl(fds[0], F_SETFL, O_NONBLOCK);
 
 	j = malloc(sizeof(struct child_job));
@@ -217,12 +222,21 @@ void kickoff_cb(struct ev_loop * loop, ev_io * i, int event) {
 	gettimeofday(&j->start, NULL);
 	pid = fork();
 	if(pid == 0) {
-		fclose(stdin);
 		dup2(fds[1], fileno(stdout));
 		execv(command_line, argv);
 		rc = errno;
 		printf("Error executing %s: %m", command_line);
 		exit(errno);
+	}
+	else if(pid < 0) {
+		logit(ERR, "Error forking for %s: %m",
+			command_line);
+		json_decref(input);
+		ev_io_stop(loop, &j->io);
+		close(fds[1]);
+		close(fds[0]);
+		free(j);
+		return;
 	}
 	close(fds[1]);
 	
