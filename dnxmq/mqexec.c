@@ -3,10 +3,11 @@
 #include <unistd.h>
 #include <string.h>
 #include <sys/time.h>
+#include <sys/wait.h>
 #include <stdint.h>
 #include <fcntl.h>
 #include <pwd.h>
-#include <ev.h>
+#include <libev/ev.h>
 #include <zmq.h>
 #include <jansson.h>
 #include <syslog.h>
@@ -112,22 +113,27 @@ void child_end_cb(struct ev_loop * loop, ev_child * c, int event) {
 	struct child_job * j = (struct child_job*)c->data;
 	zmq_msg_t outmsg;
 
-	child_io_cb(loop, &j->io, EV_READ);
-	ev_io_stop(loop, &j->io);
+	if(ev_is_active(&j->io)) {
+		child_io_cb(loop, &j->io, EV_READ);
+		if(ev_is_active(&j->io))
+			ev_io_stop(loop, &j->io);
+	}
+	close(j->io.fd);
+	ev_child_stop(loop, c);
 
 	if(j->bufused)
 		j->buffer[j->bufused] = '\0';
 	else
 		strcpy(j->buffer, "");
-	json_t * jout = obj_for_ending(j, j->buffer, c->rstatus, 1);
+	json_t * jout = obj_for_ending(j, j->buffer, WEXITSTATUS(c->rstatus), 1);
 	json_decref(j->input);
 	char * output = json_dumps(jout, JSON_COMPACT);
 	json_decref(jout);
 
 	zmq_msg_init_data(&outmsg, output, strlen(output), free_cb, NULL);
-	zmq_send(pushsock, &outmsg, 0);
 	logit(DEBUG, "Child %d ended with %d. Sending \"%s\" upstream",
 		c->rpid, c->rstatus, output);
+	zmq_send(pushsock, &outmsg, 0);
 	zmq_msg_close(&outmsg);
 	free(j);
 }
@@ -145,12 +151,14 @@ void kickoff_cb(struct ev_loop * loop, ev_io * i, int event) {
 	int rc;
 
 	zmq_getsockopt(pullsock, ZMQ_EVENTS, &events, &evs);
-	if(events != ZMQ_POLLIN)
+	if(!(events & ZMQ_POLLIN))
 		return;
 
 	zmq_msg_init(&inmsg);
-	if(zmq_recv(pullsock, &inmsg, 0) != 0)
+	if(zmq_recv(pullsock, &inmsg, 0) != 0) {
+		logit(ERR, "Error receiving message from broker %d", errno);
 		return;
+	}
 
 	input = json_loadb(zmq_msg_data(&inmsg),
 		zmq_msg_size(&inmsg), 0, NULL);
@@ -169,10 +177,10 @@ void kickoff_cb(struct ev_loop * loop, ev_io * i, int event) {
 	int argc = 0;
 	while(*lck) {
 		if(*lck == ' ') {
-			if(*(lck + 1) == ' ')
-				continue;
 			argv[argc++] = save;
 			*(lck++) = '\0';
+			while(*lck && *lck == ' ')
+				lck++;
 			save = lck;
 		}
 		else if(*lck == '\"') {
@@ -197,6 +205,7 @@ void kickoff_cb(struct ev_loop * loop, ev_io * i, int event) {
 		j->service = 1;
 	else
 		j->service = 0;
+	memset(j->buffer, 0, sizeof(j->buffer));
 	j->bufused = 0;
 	j->input = input;
 	
@@ -215,11 +224,13 @@ void kickoff_cb(struct ev_loop * loop, ev_io * i, int event) {
 		printf("Error executing %s: %m", command_line);
 		exit(errno);
 	}
-
+	close(fds[1]);
+	
 	logit(DEBUG, "Kicked off %d", pid);
 	ev_child_init(&j->child, child_end_cb, pid, 0);
 	j->child.data = j;
 	ev_child_start(loop, &j->child);
+	kickoff_cb(loop, i, event);
 }
 
 void recv_up_cb(struct ev_loop * loop, ev_io * io, int events) {
@@ -230,7 +241,7 @@ void recv_up_cb(struct ev_loop * loop, ev_io * io, int events) {
 	zmq_msg_t inmsg;
 
 	zmq_getsockopt(extsock, ZMQ_EVENTS, &sockevents, &evs);
-	if(sockevents != ZMQ_POLLIN)
+	if(!(sockevents & ZMQ_POLLIN))
 		return;
 
 	zmq_msg_init(&inmsg);
@@ -253,6 +264,7 @@ void recv_up_cb(struct ev_loop * loop, ev_io * io, int events) {
 	zmq_send(downpush, &inmsg, 0);
 	zmq_msg_close(&inmsg);
 	logit(DEBUG, "Pushed message downstream");
+	recv_up_cb(loop, io, events);
 }
 
 void recv_down_cb(struct ev_loop * loop, ev_io * io, int events) {
@@ -261,7 +273,7 @@ void recv_down_cb(struct ev_loop * loop, ev_io * io, int events) {
 	zmq_msg_t inmsg, pubmsg;
 
 	zmq_getsockopt(downpull, ZMQ_EVENTS, &sockevents, &evs);
-	if(sockevents != ZMQ_POLLIN)
+	if(!(sockevents & ZMQ_POLLIN))
 		return;
 
 	zmq_msg_init(&inmsg);
@@ -281,6 +293,7 @@ void recv_down_cb(struct ev_loop * loop, ev_io * io, int events) {
 		zmq_msg_close(&pubmsg);
 	}
 	zmq_msg_close(&inmsg);
+	recv_down_cb(loop, io, events);
 }
 
 void parse_sock_directive(void * socket, json_t * arg, int bind) {
@@ -293,10 +306,10 @@ void parse_sock_directive(void * socket, json_t * arg, int bind) {
 		else
 			zmq_connect(socket, json_string_value(arg));
 	} else if(json_is_object(arg)) {
-		char * addr;
+		char * addr = NULL;
 		json_t * subscribe = NULL;
-		if(json_unpack(arg, "{s:ss?:bs?:o}", 
-			"address", addr, "bind", &bind, "subscribe",
+		if(json_unpack(arg, "{s:s s?:b s?:o}", 
+			"address", &addr, "bind", &bind, "subscribe",
 			&subscribe) != 0)
 			return;
 		if(bind)
@@ -345,11 +358,13 @@ int getfd(void * socket) {
 int start_broker(struct ev_loop * loop, json_t * config) {
 	json_t * uppushc = NULL, *uppubc = NULL, *upsubc = NULL,
 	*downpushc, *downpullc, *uppullc = NULL;
-	if(!json_unpack(config, "{s{s:os:o}s{s:o?s?os?os?o}}",
+	json_error_t err;
+	if(json_unpack_ex(config, &err, 0, "{s{s:os:o}s{s?:o s?:o s?:o s?:o *}}",
 		"downstream", "push", &downpushc, "pull", &downpullc,
-		"upstream", "subscribe", &uppullc, "publish", &uppubc,
+		"upstream", "subscribe", &upsubc, "publish", &uppubc,
 		"push", &uppushc, "pull", &uppullc) != 0) {
-		logit(ERR, "Error parsing broker configuration");
+		logit(ERR, "Error parsing broker configuration %s (line %d col %d)",
+			err.text, err.line, err.column);
 		return -1;
 	}
 
@@ -412,8 +427,8 @@ int main(int argc, char ** argv) {
 	json_t * config, *broker = NULL;
 	json_error_t config_err;
 
-	if(argc == 1) {
-		logit(ERR, "Must supply path to nagmq config.");
+	if(argc == 2) {
+		logit(ERR, "Must supply path to nagmq config and process type.");
 		exit(-1);
 	}
 
@@ -435,32 +450,38 @@ int main(int argc, char ** argv) {
 	if(zmqctx == NULL)
 		exit(-1);
 
-	pushsock = zmq_socket(zmqctx, ZMQ_PUSH);
-	if(pushsock == NULL) {
-		logit(ERR, "Error creating results socket %d", errno);
-		exit(-1);
-	}
-	parse_sock_directive(pushsock, results, 0);
-
-	pullsock = zmq_socket(zmqctx, ZMQ_PULL);
-	if(pullsock == NULL) {
-		logit(ERR, "Error creating jobs socket %d", errno);
-		exit(-1);
-	}
-	parse_sock_directive(pullsock, jobs, 0);
-
-	zmq_getsockopt(pullsock, ZMQ_FD, &pullfd, &pullfds);
-	if(pullfd == -1) {
-		logit(ERR, "Error getting fd for pullsock");
-		exit(-1);
-	}
-
 	loop = ev_default_loop(0);
-	if(broker && !start_broker(loop, broker))
-		exit(-1);
+	if(strcmp(argv[2], "worker") == 0) {
+		pushsock = zmq_socket(zmqctx, ZMQ_PUSH);
+		if(pushsock == NULL) {
+			logit(ERR, "Error creating results socket %d", errno);
+			exit(-1);
+		}
+		parse_sock_directive(pushsock, results, 0);
+		logit(DEBUG, "Setup worker push socket");
 
-	ev_io_init(&pullio, kickoff_cb, pullfd, EV_READ);
-	ev_io_start(loop, &pullio);
+		pullsock = zmq_socket(zmqctx, ZMQ_PULL);
+		if(pullsock == NULL) {
+			logit(ERR, "Error creating jobs socket %d", errno);
+			exit(-1);
+		}
+		parse_sock_directive(pullsock, jobs, 0);
+		logit(DEBUG, "Setup worker pull sock");
+
+		zmq_getsockopt(pullsock, ZMQ_FD, &pullfd, &pullfds);
+		if(pullfd == -1) {
+			logit(ERR, "Error getting fd for pullsock");
+			exit(-1);
+		}
+		ev_io_init(&pullio, kickoff_cb, pullfd, EV_READ);
+		ev_io_start(loop, &pullio);
+	} else if(strcmp(argv[2], "broker") == 0) {
+		if(broker && start_broker(loop, broker) < 0)
+			exit(-1);
+	} else {
+		logit(ERR, "Must specify type as either a broker or a worker");
+		exit(-1);
+	}
 
 	json_decref(config);
 	logit(INFO, "Starting DNXMQ event loop");
