@@ -33,13 +33,16 @@ int handle_timedevent(int which, void * obj) {
 		return 0;
 
 	pthread_mutex_lock(&cr_mutex);
-	while(crhead) {
-		check_result *tmp = crhead->next;
-		crhead->next = NULL;
-		add_check_result_to_list(crhead);
-		crhead = tmp;
-	}
+	check_result *crsave = crhead;
+	crhead = NULL;
 	pthread_mutex_unlock(&cr_mutex);
+	while(crsave) {
+		check_result *tmp = crsave->next;
+		crsave->next = NULL;
+		add_check_result_to_list(crsave);
+		crsave = tmp;
+	}
+
 	return 0;
 }
 
