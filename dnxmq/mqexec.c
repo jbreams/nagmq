@@ -138,31 +138,22 @@ void child_end_cb(struct ev_loop * loop, ev_child * c, int event) {
 	free(j);
 }
 
-void kickoff_cb(struct ev_loop * loop, ev_io * i, int event) {
-	uint32_t events = 0;
-	size_t evs = sizeof(events);
+void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 	json_t * input;
 	struct child_job * j;
 	char * type, *command_line;
-	zmq_msg_t inmsg;
+	json_error_t err;
 	int fds[2];
-	char * argv[1024];
 	pid_t pid;
 	int rc;
 
-	zmq_getsockopt(pullsock, ZMQ_EVENTS, &events, &evs);
-	if(!(events & ZMQ_POLLIN))
-		return;
-
-	zmq_msg_init(&inmsg);
-	if(zmq_recv(pullsock, &inmsg, 0) != 0) {
-		logit(ERR, "Error receiving message from broker %d", errno);
+	input = json_loadb(zmq_msg_data(inmsg), zmq_msg_size(inmsg), 0, &err);
+	zmq_msg_close(inmsg);
+	if(input == NULL) {
+		logit(ERR, "Error loading request from broker: %s (line %d col %d)",
+			err.text, err.line, err.column);
 		return;
 	}
-
-	input = json_loadb(zmq_msg_data(&inmsg),
-		zmq_msg_size(&inmsg), 0, NULL);
-	zmq_msg_close(&inmsg);
 
 	if(json_unpack(input, "{ s:s s:s }",
 		"type", &type, "command_line", &command_line) != 0) {
@@ -172,65 +163,68 @@ void kickoff_cb(struct ev_loop * loop, ev_io * i, int event) {
 	logit(DEBUG, "Received job from upstream: %s %s",
 		type, command_line);
 
-	memset(argv, 0, sizeof(argv));
-	char * lck = command_line, *save = lck;
-	int argc = 0;
-	while(*lck) {
-		if(*lck == ' ') {
-			argv[argc++] = save;
-			*(lck++) = '\0';
-			while(*lck && *lck == ' ')
-				lck++;
-			save = lck;
-		}
-		else if(*lck == '\"') {
-			save = ++lck;
-			while(*lck && *lck != '\"' && *(lck - 1) != '\\')
-				lck++;
-			argv[argc++] = save;
-			*(lck++) = '\0';
-			save = lck;
-		}
-		else
-			lck++;
-	}
-	if(*save)
-		argv[argc++] = save;
-
 	if(pipe(fds) < 0) {
-		logit(ERR, "Error creating pipe for %s: %m",
-			command_line);
+		logit(ERR, "Error creating pipe for %s: %s",
+			command_line, strerror(errno));
 		json_decref(input);
 		return;		
 	};
 	fcntl(fds[0], F_SETFL, O_NONBLOCK);
 
 	j = malloc(sizeof(struct child_job));
+	memset(j, 0, sizeof(struct child_job));
 	if(strcmp(type, "service_check_initiate") == 0)
 		j->service = 1;
 	else
 		j->service = 0;
-	memset(j->buffer, 0, sizeof(j->buffer));
-	j->bufused = 0;
 	j->input = input;
 	
 	ev_io_init(&j->io, child_io_cb, fds[0], EV_READ);
 	j->io.data = j;
 	ev_io_start(loop, &j->io);
-
 	
 	gettimeofday(&j->start, NULL);
 	pid = fork();
 	if(pid == 0) {
+		char * argv[1024];
+		int argc = 0;
+		memset(argv, 0, sizeof(argv));
+		char * lck = command_line, *save = lck;
+		while(*lck) {
+			if(*lck == ' ') {
+				argv[argc++] = save;
+				*(lck++) = '\0';
+				while(*lck && *lck == ' ')
+					lck++;
+				save = lck;
+			}
+			else if(*lck == '\"') {
+				save = ++lck;
+				while(*lck && *lck != '\"' && *(lck - 1) != '\\')
+					lck++;
+				argv[argc++] = save;
+				*(lck++) = '\0';
+				save = lck;
+			}
+			else
+				lck++;
+		}
+		if(*save)
+		argv[argc++] = save;
 		dup2(fds[1], fileno(stdout));
+#ifdef TEST
+		printf("Testing testing testing!\n");
+		exit(0);
+#else
 		execv(command_line, argv);
 		rc = errno;
 		printf("Error executing %s: %m", command_line);
-		exit(errno);
+		exit(rc);
+#endif
 	}
 	else if(pid < 0) {
-		logit(ERR, "Error forking for %s: %m",
-			command_line);
+		logit(ERR, "Error forking for %s: %s",
+			command_line, strerror(errno));
 		json_decref(input);
 		ev_io_stop(loop, &j->io);
 		close(fds[1]);
@@ -244,41 +238,57 @@ void kickoff_cb(struct ev_loop * loop, ev_io * i, int event) {
 	ev_child_init(&j->child, child_end_cb, pid, 0);
 	j->child.data = j;
 	ev_child_start(loop, &j->child);
-	kickoff_cb(loop, i, event);
+}
+
+void kickoff_cb(struct ev_loop * loop, ev_io * i, int event) {
+	uint32_t events = ZMQ_POLLIN;
+	size_t evs = sizeof(events);
+	zmq_msg_t inmsg;
+
+	while(zmq_getsockopt(pullsock, ZMQ_EVENTS, &events,
+		&evs) == 0 && (events & ZMQ_POLLIN)) {
+		zmq_msg_init(&inmsg);
+		if(zmq_recv(pullsock, &inmsg, 0) != 0) {
+			logit(ERR, "Error receiving message from broker %d", errno);
+			continue;
+		}
+
+		do_kickoff(loop, &inmsg);
+	}
 }
 
 void recv_up_cb(struct ev_loop * loop, ev_io * io, int events) {
 	uint32_t sockevents = 0;
 	int64_t rcvmore = 0;
-	size_t evs = sizeof(sockevents);
+	size_t evs = sizeof(sockevents), rms = sizeof(rcvmore);
 	void * extsock = io->data;
 	zmq_msg_t inmsg;
 
-	zmq_getsockopt(extsock, ZMQ_EVENTS, &sockevents, &evs);
-	if(!(sockevents & ZMQ_POLLIN))
-		return;
+	while(zmq_getsockopt(extsock, ZMQ_EVENTS,
+		&sockevents, &evs) == 0 && sockevents & ZMQ_POLLIN) {
 
-	zmq_msg_init(&inmsg);
-	if(zmq_recv(extsock, &inmsg, 0) != 0) {
-		zmq_msg_close(&inmsg);
-		return;
-	}
-
-	evs = sizeof(rcvmore);
-	zmq_getsockopt(extsock, ZMQ_RCVMORE, &rcvmore, &evs);
-	if(rcvmore) {
-		zmq_msg_close(&inmsg);
+		int64_t rcvmore;
 		zmq_msg_init(&inmsg);
 		if(zmq_recv(extsock, &inmsg, 0) != 0) {
 			zmq_msg_close(&inmsg);
 			return;
 		}
-	}
 
-	zmq_send(downpush, &inmsg, 0);
-	zmq_msg_close(&inmsg);
-	logit(DEBUG, "Pushed message downstream");
-	recv_up_cb(loop, io, events);
+		evs = sizeof(rcvmore);
+		zmq_getsockopt(extsock, ZMQ_RCVMORE, &rcvmore, &rms);
+		if(rcvmore) {
+			zmq_msg_close(&inmsg);
+			zmq_msg_init(&inmsg);
+			if(zmq_recv(extsock, &inmsg, 0) != 0) {
+				zmq_msg_close(&inmsg);
+				return;
+			}
+		}
+
+		zmq_send(downpush, &inmsg, 0);
+		zmq_msg_close(&inmsg);
+		logit(DEBUG, "Pushed message downstream");
+	}
 }
 
 void recv_down_cb(struct ev_loop * loop, ev_io * io, int events) {
@@ -286,28 +296,27 @@ void recv_down_cb(struct ev_loop * loop, ev_io * io, int events) {
 	size_t evs = sizeof(sockevents);
 	zmq_msg_t inmsg, pubmsg;
 
-	zmq_getsockopt(downpull, ZMQ_EVENTS, &sockevents, &evs);
-	if(!(sockevents & ZMQ_POLLIN))
-		return;
+	while(zmq_getsockopt(downpull, ZMQ_EVENTS,
+		&sockevents, &evs) == 0 && sockevents & ZMQ_POLLIN) {
 
-	zmq_msg_init(&inmsg);
-	if(zmq_recv(downpull, &inmsg, 0) != 0) {
+		zmq_msg_init(&inmsg);
+		if(zmq_recv(downpull, &inmsg, 0) != 0) {
+			zmq_msg_close(&inmsg);
+			continue;
+		}
+
+		if(uppush) {
+			zmq_send(uppush, &inmsg, 0);
+			logit(DEBUG, "Pushed message upstream");
+		}
+		if(uppub) {
+			zmq_msg_copy(&pubmsg, &inmsg);
+			zmq_send(uppub, &pubmsg, 0);
+			logit(DEBUG, "Published message upstream");
+			zmq_msg_close(&pubmsg);
+		}
 		zmq_msg_close(&inmsg);
-		return;
 	}
-
-	if(uppush) {
-		zmq_send(uppush, &inmsg, 0);
-		logit(DEBUG, "Pushed message upstream");
-	}
-	if(uppub) {
-		zmq_msg_copy(&pubmsg, &inmsg);
-		zmq_send(uppub, &pubmsg, 0);
-		logit(DEBUG, "Published message upstream");
-		zmq_msg_close(&pubmsg);
-	}
-	zmq_msg_close(&inmsg);
-	recv_down_cb(loop, io, events);
 }
 
 void parse_sock_directive(void * socket, json_t * arg, int bind) {
