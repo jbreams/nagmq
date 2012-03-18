@@ -36,8 +36,10 @@ struct child_job {
 	size_t bufused;
 	struct timeval start;
 	int service;
+	int timeout;
 	ev_io io;
 	ev_child child;
+	ev_timer timer;
 };
 
 #define ERR 2
@@ -66,8 +68,13 @@ void logit(int level, char * fmt, ...) {
 	va_end(ap);
 }
 
-json_t * obj_for_ending(struct child_job * j, const char * output,
+void free_cb(void * data, void * hint) {
+	free(data);
+}
+
+void obj_for_ending(struct child_job * j, const char * output,
 	int return_code, int exited_ok) {
+	zmq_msg_t outmsg;
 	const char * keys[] = { "host_name", "service_description",
 		"check_options", "scheduled_check", "reschedule_check",
 		"latency", "early_timeout", "check_type", NULL };
@@ -75,7 +82,7 @@ json_t * obj_for_ending(struct child_job * j, const char * output,
 	int i;
 
 	gettimeofday(&finish, NULL);
-	json_t * ret = json_pack(
+	json_t * jout = json_pack(
 		"{ s:s s:i s:i s:{ s:i s:i } s:{ s:i s:i } s:s }",
 		"output", output, "return_code", return_code,
 		"exited_ok", exited_ok, "start_time", "tv_sec", j->start.tv_sec,
@@ -86,13 +93,15 @@ json_t * obj_for_ending(struct child_job * j, const char * output,
 	for(i = 0; keys[i] != NULL; i++) {
 		json_t * val = json_object_get(j->input, keys[i]);
 		if(val)
-			json_object_set(ret, keys[i], val);
+			json_object_set(jout, keys[i], val);
 	}
-	return ret;
-}
 
-void free_cb(void * data, void * hint) {
-	free(data);
+	char * strout= json_dumps(jout, JSON_COMPACT);
+	json_decref(jout);
+
+	zmq_msg_init_data(&outmsg, strout, strlen(strout), free_cb, NULL);
+	zmq_send(pushsock, &outmsg, 0);
+	zmq_msg_close(&outmsg);
 }
 
 void child_io_cb(struct ev_loop * loop, ev_io * i, int event) {
@@ -109,9 +118,36 @@ void child_io_cb(struct ev_loop * loop, ev_io * i, int event) {
 		ev_io_stop(loop, i);
 }
 
+void child_timeout_cb(struct ev_loop * loop, ev_timer * t, int event) {
+	struct child_job * j = (struct child_job*)t->data;
+	ev_tstamp timeout = j->start.tv_sec + j->timeout;
+
+	if(timeout > ev_now(loop)) {
+		t->repeat = timeout - ev_now(loop);
+		ev_timer_again(loop, t);
+		return;
+	}
+
+	if(ev_is_active(&j->io)) {
+		ev_io_stop(loop, &j->io);
+	}
+	close(j->io.fd);
+
+	if(ev_is_active(&j->child)) {
+		kill(j->child.pid, SIGKILL);
+		ev_child_stop(loop, &j->child);
+	}
+
+	ev_timer_stop(loop, t);
+	obj_for_ending(j, "Check timed out", 4, 0);
+	logit(DEBUG, "Child %d timed out. Sending timeout message upstream",
+		j->child.pid);
+	json_decref(j->input);
+	free(j);
+}
+
 void child_end_cb(struct ev_loop * loop, ev_child * c, int event) {
 	struct child_job * j = (struct child_job*)c->data;
-	zmq_msg_t outmsg;
 
 	if(ev_is_active(&j->io)) {
 		child_io_cb(loop, &j->io, EV_READ);
@@ -121,20 +157,18 @@ void child_end_cb(struct ev_loop * loop, ev_child * c, int event) {
 	close(j->io.fd);
 	ev_child_stop(loop, c);
 
+	if(ev_is_active(&j->timer))
+		ev_timer_stop(loop, &j->timer);
+
 	if(j->bufused)
 		j->buffer[j->bufused] = '\0';
 	else
 		strcpy(j->buffer, "");
-	json_t * jout = obj_for_ending(j, j->buffer, WEXITSTATUS(c->rstatus), 1);
+	obj_for_ending(j, j->buffer, WEXITSTATUS(c->rstatus), 1);
 	json_decref(j->input);
-	char * output = json_dumps(jout, JSON_COMPACT);
-	json_decref(jout);
 
-	zmq_msg_init_data(&outmsg, output, strlen(output), free_cb, NULL);
 	logit(DEBUG, "Child %d ended with %d. Sending \"%s\" upstream",
-		c->rpid, c->rstatus, output);
-	zmq_send(pushsock, &outmsg, 0);
-	zmq_msg_close(&outmsg);
+		c->rpid, c->rstatus, j->buffer);
 	free(j);
 }
 
@@ -145,7 +179,7 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 	json_error_t err;
 	int fds[2];
 	pid_t pid;
-	int rc;
+	int rc, timeout = 0;
 
 	input = json_loadb(zmq_msg_data(inmsg), zmq_msg_size(inmsg), 0, &err);
 	zmq_msg_close(inmsg);
@@ -155,21 +189,14 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 		return;
 	}
 
-	if(json_unpack(input, "{ s:s s:s }",
-		"type", &type, "command_line", &command_line) != 0) {
+	if(json_unpack(input, "{ s:s s:s s?:i }",
+		"type", &type, "command_line", &command_line,
+		"timeout", &timeout) != 0) {
 		json_decref(input);
 		return;
 	}
 	logit(DEBUG, "Received job from upstream: %s %s",
 		type, command_line);
-
-	if(pipe(fds) < 0) {
-		logit(ERR, "Error creating pipe for %s: %s",
-			command_line, strerror(errno));
-		json_decref(input);
-		return;		
-	};
-	fcntl(fds[0], F_SETFL, O_NONBLOCK);
 
 	j = malloc(sizeof(struct child_job));
 	memset(j, 0, sizeof(struct child_job));
@@ -178,7 +205,17 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 	else
 		j->service = 0;
 	j->input = input;
-	
+
+	if(pipe(fds) < 0) {
+		logit(ERR, "Error creating pipe for %s: %s",
+			command_line, strerror(errno));
+		obj_for_ending(j, "Error creating pipe", 4, 0);
+		free(j);
+		json_decref(input);
+		return;		
+	};
+	fcntl(fds[0], F_SETFL, O_NONBLOCK);
+
 	ev_io_init(&j->io, child_io_cb, fds[0], EV_READ);
 	j->io.data = j;
 	ev_io_start(loop, &j->io);
@@ -219,12 +256,13 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 		execv(command_line, argv);
 		rc = errno;
 		printf("Error executing %s: %m", command_line);
-		exit(rc);
+		exit(4);
 #endif
 	}
 	else if(pid < 0) {
 		logit(ERR, "Error forking for %s: %s",
 			command_line, strerror(errno));
+		obj_for_ending(j, "Error forking", 4, 0);
 		json_decref(input);
 		ev_io_stop(loop, &j->io);
 		close(fds[1]);
@@ -233,6 +271,13 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 		return;
 	}
 	close(fds[1]);
+
+	if(timeout > 0) {
+		ev_timer_init(&j->timer, child_timeout_cb, timeout, 0);
+		j->timer.data = j;
+		ev_timer_start(loop, &j->timer);
+		j->timeout = timeout;
+	}
 	
 	logit(DEBUG, "Kicked off %d", pid);
 	ev_child_init(&j->child, child_end_cb, pid, 0);
