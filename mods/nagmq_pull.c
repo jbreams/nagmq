@@ -19,10 +19,10 @@
 #include "jansson.h"
 
 extern int errno;
-int npassivechecks = 0;
 
 static check_result * crhead = NULL;
 pthread_mutex_t cr_mutex = PTHREAD_MUTEX_INITIALIZER;
+void * crpullsock = NULL;
 
 int handle_timedevent(int which, void * obj) {
 	nebstruct_timed_event_data * data = obj;
@@ -32,21 +32,37 @@ int handle_timedevent(int which, void * obj) {
 		data->event_type != EVENT_CHECK_REAPER)
 		return 0;
 
-	pthread_mutex_lock(&cr_mutex);
-	check_result *crsave = crhead;
-	crhead = NULL;
-	pthread_mutex_unlock(&cr_mutex);
-	while(crsave) {
-		check_result *tmp = crsave->next;
-		crsave->next = NULL;
-		add_check_result_to_list(crsave);
-		crsave = tmp;
+	int rc;
+	if(crpullsock) {
+		while(1) {
+			zmq_msg_t crm;
+			zmq_msg_init(&crm);
+			if(zmq_recv(crpullsock, &crm, ZMQ_NOBLOCK) != 0) {
+				if(errno != EINTR)
+					break;
+			}
+
+			check_result * cr = zmq_msg_data(&crm);
+			zmq_msg_close(&crm);
+			add_check_result_to_list(cr);
+		}
+	} else {
+		pthread_mutex_lock(&cr_mutex);
+		check_result *crsave = crhead;
+		crhead = NULL;
+		pthread_mutex_unlock(&cr_mutex);
+		while(crsave) {
+			check_result *tmp = crsave->next;
+			crsave->next = NULL;
+			add_check_result_to_list(crsave);
+			crsave = tmp;
+		}
 	}
 
 	return 0;
 }
 
-static void process_status(json_t * payload, char * type, size_t typelen) {
+static void process_status(json_t * payload, void * ressock) {
 	char * host_name, *service_description = NULL, *output = NULL;
 	check_result * newcr = NULL, t;
 	struct timeval start, finish;
@@ -92,10 +108,17 @@ static void process_status(json_t * payload, char * type, size_t typelen) {
 	newcr->output = strdup(output);
 	json_decref(payload);
 
-	pthread_mutex_lock(&cr_mutex);
-	newcr->next = crhead;
-	crhead = newcr;
-	pthread_mutex_unlock(&cr_mutex);
+	if(ressock) {
+		zmq_msg_t rmsg;
+		zmq_msg_init_data(&rmsg, newcr, sizeof(check_result), NULL, NULL);
+		zmq_send(ressock, &rmsg, 0);
+		zmq_msg_close(&rmsg);
+	} else {
+		pthread_mutex_lock(&cr_mutex);
+		newcr->next = crhead;
+		crhead = newcr;
+		pthread_mutex_unlock(&cr_mutex);
+	}
 }
 
 static void process_acknowledgement(json_t * payload) {
@@ -297,7 +320,7 @@ static void process_cmd(json_t * payload) {
 	json_decref(payload);
 }
 
-void process_pull_msg(void * sock) {
+void process_pull_msg(void * sock, void * outsock) {
 	zmq_msg_t payload_msg;
 	char * type = NULL;
 
@@ -321,10 +344,9 @@ void process_pull_msg(void * sock) {
 
 	if(strncmp(type, "command", typelen) == 0)
 		process_cmd(payload);
-	else if(strncmp(type, "host_check_processed", typelen) == 0)
-		process_status(payload, type, typelen);
-	else if(strncmp(type, "service_check_processed", typelen) == 0)
-		process_status(payload, type, typelen);
+	else if(strncmp(type, "host_check_processed", typelen) == 0 ||
+		strncmp(type, "service_check_processed", typelen) == 0)
+		process_status(payload, outsock);
 	else if(strncmp(type, "acknowledgement", typelen) == 0)
 		process_acknowledgement(payload);
 	else if(strncmp(type, "comment_add", typelen) == 0)
@@ -332,4 +354,41 @@ void process_pull_msg(void * sock) {
 	else if(strncmp(type, "downtime_add", typelen) == 0)
 		process_downtime(payload);
 	return;
+}
+
+extern void * zmq_ctx;
+void * pull_thread(void * arg) {
+	int rc;
+	sigset_t signal_set;
+	sigfillset(&signal_set);
+	pthread_sigmask(SIG_BLOCK, &signal_set, NULL);
+	void * intsock = zmq_socket(zmq_ctx, ZMQ_PULL);
+	if(intsock == NULL)
+		return NULL;
+
+	zmq_connect(intsock, "inproc://nagmq_pull_bus");
+	zmq_pollitem_t pollitem;
+	pollitem.socket = intsock;
+	pollitem.events = ZMQ_POLLIN;
+
+	void * intresult = zmq_socket(zmq_ctx, ZMQ_PUSH);
+	if(intresult == NULL)
+		return NULL;
+	zmq_connect(intresult, "inproc://nagmq_cr_bus");
+
+	while(1) {
+		if((rc == zmq_poll(&pollitem, 1, -1)) < 0) {
+			if(rc == ETERM)
+				break;
+			else if(rc == EINTR)
+				continue;
+			else
+				syslog(LOG_ERR, "Error polling for pull events!");
+				break;
+		}
+
+		process_pull_msg(intsock, intresult);
+	}
+
+	zmq_close(intresult);
 }
