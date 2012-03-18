@@ -240,17 +240,29 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 	ev_child_start(loop, &j->child);
 }
 
-void kickoff_cb(struct ev_loop * loop, ev_io * i, int event) {
+void recv_job_cb(struct ev_loop * loop, ev_io * i, int event) {
 	uint32_t events = ZMQ_POLLIN;
 	size_t evs = sizeof(events);
-	zmq_msg_t inmsg;
 
 	while(zmq_getsockopt(pullsock, ZMQ_EVENTS, &events,
 		&evs) == 0 && (events & ZMQ_POLLIN)) {
+		zmq_msg_t inmsg;
+		int64_t rcvmore = 0;
+		size_t rms = sizeof(rcvmore);
+
 		zmq_msg_init(&inmsg);
-		if(zmq_recv(pullsock, &inmsg, 0) != 0) {
+		if(zmq_recv(i->data, &inmsg, 0) != 0) {
 			logit(ERR, "Error receiving message from broker %d", errno);
 			continue;
+		}
+
+		zmq_getsockopt(i->data, ZMQ_RCVMORE, &rcvmore, &rms);
+		if(rcvmore) {
+			zmq_msg_close(&inmsg);
+			if(zmq_recv(i->data, &inmsg, 0) != 0) {
+				logit(ERR, "Error receiving message from broker %d", errno);
+				continue;
+			}
 		}
 
 		do_kickoff(loop, &inmsg);
@@ -266,8 +278,7 @@ void recv_up_cb(struct ev_loop * loop, ev_io * io, int events) {
 
 	while(zmq_getsockopt(extsock, ZMQ_EVENTS,
 		&sockevents, &evs) == 0 && sockevents & ZMQ_POLLIN) {
-
-		int64_t rcvmore;
+		int64_t rcvmore = 0;
 		zmq_msg_init(&inmsg);
 		if(zmq_recv(extsock, &inmsg, 0) != 0) {
 			zmq_msg_close(&inmsg);
@@ -497,7 +508,8 @@ int main(int argc, char ** argv) {
 			logit(ERR, "Error getting fd for pullsock");
 			exit(-1);
 		}
-		ev_io_init(&pullio, kickoff_cb, pullfd, EV_READ);
+		ev_io_init(&pullio, recv_job_cb, pullfd, EV_READ);
+		pullio.data = pullsock;
 		ev_io_start(loop, &pullio);
 	} else if(strcmp(argv[2], "broker") == 0) {
 		if(broker && start_broker(loop, broker) < 0)

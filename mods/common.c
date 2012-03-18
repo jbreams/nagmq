@@ -25,7 +25,6 @@ static pthread_mutex_t recv_loop_mutex = PTHREAD_MUTEX_INITIALIZER;
 void * zmq_ctx;
 nebmodule * handle;
 json_t * config;
-extern int npassivechecks;
 
 struct lock_skip_obj {
 	char * host_name;
@@ -142,6 +141,7 @@ int nebmodule_deinit(int flags, int reason) {
 }
 
 int handle_pubstartup();
+int handle_pullstartup();
 void process_payload(struct payload * payload);
 
 void * getsock(char * forwhat, int type) {
@@ -218,14 +218,16 @@ void * getsock(char * forwhat, int type) {
 	return sock;
 }
 
-void process_pull_msg(void * sock);
 void process_req_msg(void * sock);
+void process_pull_msg(void * sock, void * ressock);
+extern void * crpullsock;
+void * pull_thread(void * arg);
 
 void * recv_loop(void * parg) {
-	void * pullsock, * reqsock;
+	void * pullsock, * reqsock, *intpullbus = NULL;
 	int enablepull = 0, enablereq = 0;
 	zmq_pollitem_t pollables[2];
-	int npollables = 0, rc;
+	int npollables = 0, rc, npullthreads = 0;
 
 	sigset_t signal_set;
 	sigfillset(&signal_set);
@@ -234,7 +236,7 @@ void * recv_loop(void * parg) {
 	pthread_mutex_lock(&recv_loop_mutex);
 
 	if(json_unpack(config, "{ s?:{ s:b } s?:{ s:b } }",
-		"pull", "enable", &enablepull,
+		"pull", "enable", &enablepull, "threads", &npullthreads,
 		"reply", "enable", &enablereq) != 0) {
 		syslog(LOG_ERR, "Parameter error while starting NagMQ");
 		return NULL;
@@ -246,6 +248,31 @@ void * recv_loop(void * parg) {
 			return NULL;
 		pollables[npollables].socket = pullsock;
 		pollables[npollables++].events = ZMQ_POLLIN;
+
+		if(npullthreads > 0) {
+			int i;
+			intpullbus = zmq_socket(zmq_ctx, ZMQ_PUSH);
+			if(intpullbus == NULL) {
+				syslog(LOG_ERR, "Error creating internal pull bus");
+				return NULL;
+			}
+			zmq_bind(intpullbus, "inproc://nagmq_pull_bus");
+
+			crpullsock = zmq_socket(zmq_ctx, ZMQ_PULL);
+			if(crpullsock == NULL) {
+				syslog(LOG_ERR, "Error creating internal check result bus");
+				return NULL;
+			}
+			zmq_bind(crpullsock, "inproc://nagmq_cr_bus");
+
+			for(i = 0; i < npullthreads; i++) {
+				pthread_t curthread;
+				if(pthread_create(&curthread, NULL, pull_thread, NULL) != 0) {
+					syslog(LOG_ERR, "Error creating pull thread #%d %m", i);
+					return NULL;
+				}
+			}
+		}
 	}
 
 	if(enablereq) {
@@ -281,8 +308,17 @@ void * recv_loop(void * parg) {
 
 		if(enablepull) {
 			zmq_getsockopt(pullsock, ZMQ_EVENTS, &events, &size);
-			if(events == ZMQ_POLLIN)
-				process_pull_msg(pullsock);
+			if(events == ZMQ_POLLIN) {
+				if(npullthreads == 0)
+					process_pull_msg(pullsock, NULL);
+				else {
+					zmq_msg_t tmpmsg;
+					zmq_msg_init(&tmpmsg);
+					if(zmq_recv(pullsock, &tmpmsg, 0) == 0)
+						zmq_send(intpullbus, &tmpmsg, 0);
+					zmq_msg_close(&tmpmsg);
+				}
+			}
 		}
 		if(enablereq) {
 			zmq_getsockopt(reqsock, ZMQ_EVENTS, &events, &size);
