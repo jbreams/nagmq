@@ -81,6 +81,8 @@ void obj_for_ending(struct child_job * j, const char * output,
 	struct timeval finish;
 	int i;
 
+	if(j->start.tv_sec == 0)
+		gettimeofday(&j->start.tv_sec, NULL);
 	gettimeofday(&finish, NULL);
 	json_t * jout = json_pack(
 		"{ s:s s:i s:i s:{ s:i s:i } s:{ s:i s:i } s:s }",
@@ -120,28 +122,23 @@ void child_io_cb(struct ev_loop * loop, ev_io * i, int event) {
 
 void child_timeout_cb(struct ev_loop * loop, ev_timer * t, int event) {
 	struct child_job * j = (struct child_job*)t->data;
-
-	ev_timer_stop(loop, t);
-	if(!j)
-		return;
-
-	ev_tstamp timeout = j->start.tv_sec + j->timeout;
-	if(timeout > ev_now(loop)) {
-		t->repeat = timeout - ev_now(loop);
-		ev_timer_again(loop, t);
+	ev_tstamp after = j->start.tv_sec - ev_now(loop) + j->timeout;
+	if(after > 0) {
+		ev_timer_set(t, after, 0);
+		ev_timer_start(loop, t);
 		return;
 	}
 
+	ev_timer_stop(loop, t);
 	if(ev_is_active(&j->io)) {
 		ev_io_stop(loop, &j->io);
 		close(j->io.fd);
-		j->io.data = NULL;
 	}
 
 	if(ev_is_active(&j->child)) {
-		kill(j->child.pid, SIGKILL);
 		ev_child_stop(loop, &j->child);
-		j->child.data = NULL;
+		if(j->child.pid)
+			kill(j->child.pid, SIGKILL);
 	}
 
 	obj_for_ending(j, "Check timed out", 4, 0);
@@ -155,9 +152,6 @@ void child_end_cb(struct ev_loop * loop, ev_child * c, int event) {
 	struct child_job * j = (struct child_job*)c->data;
 
 	ev_child_stop(loop, c);
-	if(!j)
-		return;
-
 	if(ev_is_active(&j->io)) {
 		child_io_cb(loop, &j->io, EV_READ);
 		if(ev_is_active(&j->io))
@@ -168,9 +162,7 @@ void child_end_cb(struct ev_loop * loop, ev_child * c, int event) {
 	if(ev_is_active(&j->timer))
 		ev_timer_stop(loop, &j->timer);
 
-	if(j->bufused)
-		j->buffer[j->bufused] = '\0';
-	else
+	if(!j->bufused)
 		strcpy(j->buffer, "");
 
 	obj_for_ending(j, j->buffer, WEXITSTATUS(c->rstatus), 1);
