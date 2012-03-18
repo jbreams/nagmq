@@ -82,7 +82,7 @@ void obj_for_ending(struct child_job * j, const char * output,
 	int i;
 
 	if(j->start.tv_sec == 0)
-		gettimeofday(&j->start.tv_sec, NULL);
+		gettimeofday(&j->start, NULL);
 	gettimeofday(&finish, NULL);
 	json_t * jout = json_pack(
 		"{ s:s s:i s:i s:{ s:i s:i } s:{ s:i s:i } s:s }",
