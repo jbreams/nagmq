@@ -235,7 +235,7 @@ void * recv_loop(void * parg) {
 
 	pthread_mutex_lock(&recv_loop_mutex);
 
-	if(json_unpack(config, "{ s?:{ s:b } s?:{ s:b } }",
+	if(json_unpack(config, "{ s?:{ s:b s?:i } s?:{ s:b } }",
 		"pull", "enable", &enablepull, "threads", &npullthreads,
 		"reply", "enable", &enablereq) != 0) {
 		syslog(LOG_ERR, "Parameter error while starting NagMQ");

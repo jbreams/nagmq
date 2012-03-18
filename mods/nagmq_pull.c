@@ -110,8 +110,8 @@ static void process_status(json_t * payload, void * ressock) {
 
 	if(ressock) {
 		zmq_msg_t rmsg;
-		zmq_msg_init_data(&rmsg, &newcr, sizeof(check_result*), NULL, NULL);
-		zma_send(ressock, &rmsg);
+		zmq_msg_init_data(&rmsg, newcr, sizeof(check_result), NULL, NULL);
+		zmq_send(ressock, &rmsg, 0);
 		zmq_msg_close(&rmsg);
 	} else {
 		pthread_mutex_lock(&cr_mutex);
