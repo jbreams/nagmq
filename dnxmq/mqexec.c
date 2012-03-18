@@ -120,8 +120,12 @@ void child_io_cb(struct ev_loop * loop, ev_io * i, int event) {
 
 void child_timeout_cb(struct ev_loop * loop, ev_timer * t, int event) {
 	struct child_job * j = (struct child_job*)t->data;
-	ev_tstamp timeout = j->start.tv_sec + j->timeout;
 
+	ev_timer_stop(loop, t);
+	if(!j)
+		return;
+
+	ev_tstamp timeout = j->start.tv_sec + j->timeout;
 	if(timeout > ev_now(loop)) {
 		t->repeat = timeout - ev_now(loop);
 		ev_timer_again(loop, t);
@@ -130,15 +134,16 @@ void child_timeout_cb(struct ev_loop * loop, ev_timer * t, int event) {
 
 	if(ev_is_active(&j->io)) {
 		ev_io_stop(loop, &j->io);
+		close(j->io.fd);
+		j->io.data = NULL;
 	}
-	close(j->io.fd);
 
 	if(ev_is_active(&j->child)) {
 		kill(j->child.pid, SIGKILL);
 		ev_child_stop(loop, &j->child);
+		j->child.data = NULL;
 	}
 
-	ev_timer_stop(loop, t);
 	obj_for_ending(j, "Check timed out", 4, 0);
 	logit(DEBUG, "Child %d timed out. Sending timeout message upstream",
 		j->child.pid);
@@ -149,13 +154,16 @@ void child_timeout_cb(struct ev_loop * loop, ev_timer * t, int event) {
 void child_end_cb(struct ev_loop * loop, ev_child * c, int event) {
 	struct child_job * j = (struct child_job*)c->data;
 
+	ev_child_stop(loop, c);
+	if(!j)
+		return;
+
 	if(ev_is_active(&j->io)) {
 		child_io_cb(loop, &j->io, EV_READ);
 		if(ev_is_active(&j->io))
 			ev_io_stop(loop, &j->io);
+		close(j->io.fd);
 	}
-	close(j->io.fd);
-	ev_child_stop(loop, c);
 
 	if(ev_is_active(&j->timer))
 		ev_timer_stop(loop, &j->timer);
@@ -164,11 +172,11 @@ void child_end_cb(struct ev_loop * loop, ev_child * c, int event) {
 		j->buffer[j->bufused] = '\0';
 	else
 		strcpy(j->buffer, "");
-	obj_for_ending(j, j->buffer, WEXITSTATUS(c->rstatus), 1);
-	json_decref(j->input);
 
+	obj_for_ending(j, j->buffer, WEXITSTATUS(c->rstatus), 1);
 	logit(DEBUG, "Child %d ended with %d. Sending \"%s\" upstream",
 		c->rpid, c->rstatus, j->buffer);
+	json_decref(j->input);
 	free(j);
 }
 
