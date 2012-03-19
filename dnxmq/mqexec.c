@@ -112,11 +112,11 @@ void child_io_cb(struct ev_loop * loop, ev_io * i, int event) {
 
 	do {
 		r = read(i->fd, j->buffer + j->bufused,
-			sizeof(j->buffer) - j->bufused);
+			sizeof(j->buffer) - j->bufused - 1);
 		if(r > 0)
 			j->bufused += r;
-	} while(r > 0 && j->bufused < sizeof(j->buffer));
-	if(j->bufused == sizeof(j->buffer))
+	} while(r > 0 && j->bufused < sizeof(j->buffer) - 1);
+	if(j->bufused == sizeof(j->buffer) - 1)
 		ev_io_stop(loop, i);
 }
 
@@ -148,7 +148,7 @@ void child_end_cb(struct ev_loop * loop, ev_child * c, int event) {
 	struct child_job * j = (struct child_job*)c->data;
 
 	ev_child_stop(loop, c);
-	ev_timer_stop(loop, &j->io);
+	ev_timer_stop(loop, &j->timer);
 	if(ev_is_active(&j->io)) {
 		child_io_cb(loop, &j->io, EV_READ);
 		close(j->io.fd);
@@ -216,40 +216,16 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 	gettimeofday(&j->start, NULL);
 	pid = fork();
 	if(pid == 0) {
-		char * argv[1024];
-		int argc = 0;
-		memset(argv, 0, sizeof(argv));
-		char * lck = command_line, *save = lck;
-		while(*lck) {
-			if(*lck == ' ') {
-				argv[argc++] = save;
-				*(lck++) = '\0';
-				while(*lck && *lck == ' ')
-					lck++;
-				save = lck;
-			}
-			else if(*lck == '\"') {
-				save = ++lck;
-				while(*lck && *lck != '\"' && *(lck - 1) != '\\')
-					lck++;
-				argv[argc++] = save;
-				*(lck++) = '\0';
-				save = lck;
-			}
-			else
-				lck++;
-		}
-		if(*save)
-		argv[argc++] = save;
 		dup2(fds[1], fileno(stdout));
+		dup2(fds[1], fileno(stderr));
 #ifdef TEST
 		printf("Testing testing testing!\n");
 		exit(0);
 #else
-		execv(command_line, argv);
+		execl("/bin/sh", "sh", "-c", command_line, NULL);
 		rc = errno;
 		printf("Error executing %s: %m", command_line);
-		exit(4);
+		exit(127);
 #endif
 	}
 	else if(pid < 0) {
@@ -282,8 +258,22 @@ void recv_job_cb(struct ev_loop * loop, ev_io * i, int event) {
 	uint32_t events = ZMQ_POLLIN;
 	size_t evs = sizeof(events);
 
-	while(zmq_getsockopt(pullsock, ZMQ_EVENTS, &events,
-		&evs) == 0 && (events & ZMQ_POLLIN)) {
+	while(1) {
+		int rc = zmq_getsockopt(pullsock, ZMQ_EVENTS, &events, &evs);
+		if(rc < 0) {
+			if(errno == EINTR)
+				continue;
+			else if(errno == ETERM)
+				break;
+			else {
+				logit(ERR, "Error getting events from message bus: %s",
+					zmq_strerror(errno));
+				break;
+			}
+		}
+		if(!(events & ZMQ_POLLIN))
+			break;
+
 		zmq_msg_t inmsg;
 		int64_t rcvmore = 0;
 		size_t rms = sizeof(rcvmore);
