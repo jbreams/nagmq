@@ -108,7 +108,7 @@ void obj_for_ending(struct child_job * j, const char * output,
 
 void child_io_cb(struct ev_loop * loop, ev_io * i, int event) {
 	struct child_job * j = (struct child_job*)i->data;
-	size_t r;
+	ssize_t r;
 
 	do {
 		r = read(i->fd, j->buffer + j->bufused,
@@ -122,9 +122,9 @@ void child_io_cb(struct ev_loop * loop, ev_io * i, int event) {
 
 void child_timeout_cb(struct ev_loop * loop, ev_timer * t, int event) {
 	struct child_job * j = (struct child_job*)t->data;
-	ev_tstamp after = (ev_now(loop) - j->start.tv_sec) - j->timeout;
-	if(after > 0) {
-		ev_timer_set(t, after, 0);
+	ev_tstamp after = (ev_now(loop) - j->start.tv_sec);
+	if(after < j->timeout) {
+		ev_timer_set(t, j->timeout - after, 0);
 		ev_timer_start(loop, t);
 		return;
 	} else
