@@ -11,6 +11,11 @@
 #include <zmq.h>
 #include <jansson.h>
 #include <syslog.h>
+#ifdef HAVE_PCRE
+#include <pcre.h>
+#else
+#include <regex.h>
+#endif
 
 #ifndef MAX_PLUGIN_OUTPUT_LENGTH
 #define MAX_PLUGIN_OUTPUT_LENGTH 8192
@@ -42,6 +47,18 @@ struct child_job {
 	ev_timer timer;
 };
 
+#define MAX_FILTERS 10
+struct filter {
+#ifdef HAVE_PCRE
+	pcre * regex;
+	pcre_extra * extra;
+#else
+	regex_t regex;
+#endif
+	char field[64];
+	char or;
+} filters[MAX_FILTERS];
+
 #define ERR 2
 #define DEBUG 1
 #define INFO 0
@@ -66,6 +83,90 @@ void logit(int level, char * fmt, ...) {
 		fprintf(stderr, "\n");
 	}
 	va_end(ap);
+}
+
+int parse_filter(json_t * in, int i, int or) {
+	if(i > MAX_FILTERS) {
+		return -1;
+	}
+	memset(&filters[i], 0, sizeof(struct filter));
+	if(json_is_object(in)) {
+		char * field = NULL;
+		char * match = NULL;
+		json_t * orobj = NULL;
+		if(json_unpack(in, "{ s:s s:s s?:o }",
+			"match", &match, "field", &field, "or", &orobj) < 0) {
+			logit(ERR, "Error parsing filter definition.");
+			return -1;
+		}
+
+		strncpy(filters[i].field, field, sizeof(filters[i].field) - 1);
+#ifdef HAVE_PCRE
+		char * errptr = NULL;
+		int errofft = 0;
+		filters[i].regex = pcre_compile(match, PCRE_NO_AUTO_CAPTURE,
+			&errptr, &errofft, NULL);
+		if(filters[i].regex == NULL) {
+			logit(ERR, "Error compiling regex for %s at position %d: %s",
+				field, errptr, errofft);
+			return -1;
+		}
+		
+		filters[i].extra = pcre_study(filters[i].regex, 0, &errptr);
+		if(filters[i].extra == NULL) {
+			logit(ERR, "Error studying regex: %s", errptr);
+			return -1;
+		}
+#else
+		int rc = regcomp(&filters[i].regex, match, REG_EXTENDED|REG_NOSUB);
+		if(rc != 0) {
+			logit(ERR, "Error compiling regex for %s: %s",
+				field, strerror(rc));
+			return -1;
+		}
+#endif
+
+		if(json_is_true(orobj))
+			filters[i].or = 1;	
+		else if(orobj)
+			parse_filter(orobj, ++i, 1);
+	} else if(json_is_array(in)) {
+		int x;
+		for(x = 0; x < json_array_size(in); x++) {
+			json_t * t = json_array_get(in, x);
+			if(parse_filter(t, i++, or) < 0)
+				return -1;
+		}
+	}
+}
+
+int match_filter(char * description, char * name, char * command) {
+	int i;
+	for(i = 0; filters[i].field[0] != 0; i++) {
+		int res;
+		char * tomatch;
+		if(strcmp(filters[i].field, "host_name") == 0)
+			tomatch = name;
+		else if(strcmp(filters[i].field, "service_description") == 0)
+			tomatch = description;
+		else if(strcmp(filters[i].field, "command_name") == 0)
+			tomatch = command;
+		if(tomatch == NULL)
+			continue;
+#ifdef HAVE_PCRE
+		int ovec[33];
+		res = pcre_exec(filters[i].regex, filters[i].extra,
+			tomatch, strlen(tomatch), 0, ovec, 33);
+#else
+		regmatch_t ovec[33];
+		res = regexec(&filters[i].regex, tomatch, 33, ovec, 0);
+#endif
+		if(filters[i].or == 1 && res == 0)
+			return 1;
+		else if(filters[i].or == 0 && res != 0)
+			return 0;
+	}
+	return 1;
 }
 
 void free_cb(void * data, void * hint) {
@@ -182,12 +283,28 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 		return;
 	}
 
-	if(json_unpack(input, "{ s:s s:s s?:i }",
+	if(filters[0].field[0] != 0) {
+		char * name = NULL, *description = NULL, *command_name = NULL;
+		if(json_unpack(input, "{ s:s s:s s?:i s:?s s:?s s?:s }",
+			"type", &type, "command_line", &command_line,
+			"timeout", &timeout, "host_name", &name,
+			"service_description", &description, "command_name",
+			&command_name) != 0) {
+			json_decref(input);
+			return;
+		}
+
+		if(match_filter(name, description, command_name) != 1) {
+			json_decref(input);
+			return;
+		}
+	} else if(json_unpack(input, "{ s:s s:s s?:i }",
 		"type", &type, "command_line", &command_line,
 		"timeout", &timeout) != 0) {
 		json_decref(input);
 		return;
 	}
+
 	logit(DEBUG, "Received job from upstream: %s %s",
 		type, command_line);
 
@@ -486,7 +603,7 @@ int main(int argc, char ** argv) {
 	int iothreads = 1;
 	int pullfd = -1;
 	size_t pullfds = sizeof(pullfd);
-	json_t * config, *broker = NULL;
+	json_t * config, *broker = NULL, *filter = NULL;
 	json_error_t config_err;
 
 	if(argc == 2) {
@@ -504,7 +621,8 @@ int main(int argc, char ** argv) {
 	if(json_unpack(config, "{s:{s:os:os?:os?is?bs?b}}",
 		"executor", "jobs", &jobs, "results", &results,
 		"broker", &broker, "iothreads", &iothreads,
-		"verbose", &verbose, "syslog", &usesyslog) != 0) {
+		"verbose", &verbose, "syslog", &usesyslog,
+		"filter", &filter) != 0) {
 		logit(ERR, "Error getting config");
 		exit(-1);
 	}
