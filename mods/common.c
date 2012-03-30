@@ -264,6 +264,7 @@ void * recv_loop(void * parg) {
 				return NULL;
 			}
 			zmq_bind(crpullsock, "inproc://nagmq_cr_bus");
+			i = 0;
 
 			for(i = 0; i < npullthreads; i++) {
 				pthread_t curthread;
@@ -309,15 +310,21 @@ void * recv_loop(void * parg) {
 		if(enablepull) {
 			zmq_getsockopt(pullsock, ZMQ_EVENTS, &events, &size);
 			if(events == ZMQ_POLLIN) {
-				if(npullthreads == 0)
-					process_pull_msg(pullsock, NULL);
-				else {
-					zmq_msg_t tmpmsg;
-					zmq_msg_init(&tmpmsg);
-					if(zmq_recv(pullsock, &tmpmsg, 0) == 0)
-						zmq_send(intpullbus, &tmpmsg, 0);
+				zmq_msg_t tmpmsg;
+				zmq_msg_init(&tmpmsg);
+				if((rc = zmq_recv(pullsock, &tmpmsg, 0)) != 0) {
 					zmq_msg_close(&tmpmsg);
+					continue;
 				}
+				if(npullthreads == 0)
+					process_pull_msg(&tmpmsg, NULL);
+				else {
+					zmq_msg_t threadmsg;
+					zmq_msg_copy(&threadmsg, &tmpmsg);
+					zmq_send(intpullbus, &threadmsg, 0);
+					zmq_msg_close(&threadmsg);
+				}
+				zmq_msg_close(&tmpmsg);
 			}
 		}
 		if(enablereq) {
@@ -331,6 +338,11 @@ void * recv_loop(void * parg) {
 		zmq_close(reqsock);
 	if(enablepull)
 		zmq_close(pullsock);
+	if(intpullbus)
+		zmq_close(intpullbus);
+	if(crpullsock)
+		zmq_close(crpullsock);
+
 	return NULL;
 }
 

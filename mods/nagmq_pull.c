@@ -320,19 +320,11 @@ static void process_cmd(json_t * payload) {
 	json_decref(payload);
 }
 
-void process_pull_msg(void * sock, void * outsock) {
-	zmq_msg_t payload_msg;
+void process_pull_msg(zmq_msg_t * payload_msg, void * outsock) {
 	char * type = NULL;
 
-	zmq_msg_init(&payload_msg);
-	if(zmq_recv(sock, &payload_msg, 0) != 0) {
-		zmq_msg_close(&payload_msg);
-		return;
-	}
-
-	json_t * payload = json_loadb(zmq_msg_data(&payload_msg),
-		zmq_msg_size(&payload_msg), 0, NULL);
-	zmq_msg_close(&payload_msg);
+	json_t * payload = json_loadb(zmq_msg_data(payload_msg),
+		zmq_msg_size(payload_msg), 0, NULL);
 	if(payload == NULL)
 		return;		
 	
@@ -365,11 +357,7 @@ void * pull_thread(void * arg) {
 	void * intsock = zmq_socket(zmq_ctx, ZMQ_PULL);
 	if(intsock == NULL)
 		return NULL;
-
 	zmq_connect(intsock, "inproc://nagmq_pull_bus");
-	zmq_pollitem_t pollitem;
-	pollitem.socket = intsock;
-	pollitem.events = ZMQ_POLLIN;
 
 	void * intresult = zmq_socket(zmq_ctx, ZMQ_PUSH);
 	if(intresult == NULL)
@@ -377,18 +365,24 @@ void * pull_thread(void * arg) {
 	zmq_connect(intresult, "inproc://nagmq_cr_bus");
 
 	while(1) {
-		if((rc == zmq_poll(&pollitem, 1, -1)) < 0) {
+		zmq_msg_t payload;
+		zmq_msg_init(&payload);
+		
+		if((rc = zmq_recv(intsock, &payload, 0)) != 0) {
+			rc = errno;
 			if(rc == ETERM)
 				break;
 			else if(rc == EINTR)
 				continue;
 			else
-				syslog(LOG_ERR, "Error polling for pull events!");
+				syslog(LOG_ERR, "Error receiving for pull events! %s", zmq_strerror(rc));
 				break;
 		}
 
-		process_pull_msg(intsock, intresult);
+		process_pull_msg(&payload, intresult);
+		zmq_msg_close(&payload);
 	}
 
 	zmq_close(intresult);
+	zmq_close(intsock);
 }
