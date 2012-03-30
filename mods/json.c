@@ -208,6 +208,7 @@ void payload_finalize(struct payload * po) {
 			t = po->keys[i];
 			while(t) {
 				struct keybucket * p = t->next;
+				free(t->key);
 				free(t);
 				t = p;
 			}
@@ -217,45 +218,21 @@ void payload_finalize(struct payload * po) {
 }
 
 void payload_hash_key(struct payload * po, const char * key) {
-	size_t kl = strlen(key);
+	unsigned char hash = strlen(key);
+	int i;
 	if(!po->keys) {
-		po->keys = malloc(kl + 1);
-		if(po->keys)
-			strcpy(po->keys, key);
-		return;
+		po->keys = malloc(sizeof(struct keybucket*) * 256);
+		memset(po->keys, 0, sizeof(struct keybucket*) * 256);
 	}
-
-	uint8_t * p = po->keys;
-	while(1 & p) {
-		struct keybucket * q = (void*)(p - 1);
-		uint8_t c = 0;
-		if(q->byte < kl)
-			c = key[q->byte];
-		const int direction = (1 + (q->otherbits|c)) >> 8;
-		p = q->child[direction];
-	}
-
-	uint8_t newbyte, newotherbits;
-	for(newbytes = 0; newbyte < kl; ++newbyte) {
-		if(p[newbyte] != key[newbyte]) {
-			newotherbites = p[newbyte] ^ key[newbyte];
-			goto different_byte_found;
-		}
-	}
-
-	if(p[newbyte] != 0) {
-		newotherbytes = p[newbyte];
-		goto different_byte_found;
-	}
-
-	return;
-
-different_byte_found:
-	while(newotherbites & (newotherbits - 1))
-		newotherbites &= newotherbits - 1;
-	newotherbits ^= 255;
-	uint8_t c = p[newbyte];
-	int newdirection = (1 + (newotherbits|c)) >> 8;
+	for(i = hash; i > 0;)
+		hash = mixtable[hash ^ key[i--]];
+	struct keybucket * n = malloc(sizeof(struct keybucket));
+	n->key = strdup(key);
+	if(po->keys[hash])
+		n->next = po->keys[hash];
+	else
+		n->next = NULL;
+	po->keys[hash] = n;
 }
 
 int payload_has_keys(struct payload * po, ...) {
