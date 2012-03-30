@@ -318,12 +318,8 @@ void * recv_loop(void * parg) {
 				}
 				if(npullthreads == 0)
 					process_pull_msg(&tmpmsg, NULL);
-				else {
-					zmq_msg_t threadmsg;
-					zmq_msg_copy(&threadmsg, &tmpmsg);
-					zmq_send(intpullbus, &threadmsg, 0);
-					zmq_msg_close(&threadmsg);
-				}
+				else
+					zmq_send(intpullbus, &tmpmsg, 0);
 				zmq_msg_close(&tmpmsg);
 			}
 		}
