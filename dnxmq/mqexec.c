@@ -32,6 +32,7 @@ void * uppull = NULL;
 void * upsub = NULL;
 void * downpush = NULL;
 void * downpull = NULL;
+void * downpub = NULL;
 ev_io eupull, eusub, edpull;
 int usesyslog = 0, verbose = 0;
 
@@ -425,7 +426,7 @@ void recv_up_cb(struct ev_loop * loop, ev_io * io, int events) {
 	int64_t rcvmore = 0;
 	size_t evs = sizeof(sockevents), rms = sizeof(rcvmore);
 	void * extsock = io->data;
-	zmq_msg_t inmsg;
+	zmq_msg_t inmsg, typemsg;
 
 	while(zmq_getsockopt(extsock, ZMQ_EVENTS,
 		&sockevents, &evs) == 0 && sockevents & ZMQ_POLLIN) {
@@ -436,19 +437,28 @@ void recv_up_cb(struct ev_loop * loop, ev_io * io, int events) {
 			return;
 		}
 
+		zmq_msg_init(&typemsg);
 		evs = sizeof(rcvmore);
 		zmq_getsockopt(extsock, ZMQ_RCVMORE, &rcvmore, &rms);
 		if(rcvmore) {
-			zmq_msg_close(&inmsg);
-			zmq_msg_init(&inmsg);
+			zmq_msg_move(&typemsg, &inmsg);
 			if(zmq_recv(extsock, &inmsg, 0) != 0) {
 				zmq_msg_close(&inmsg);
+				zmq_msg_close(&typemsg);
 				return;
 			}
 		}
 
-		zmq_send(downpush, &inmsg, 0);
+		if(downpush) 
+			zmq_send(downpush, &inmsg, 0);
+		if(downpub && rcvmore != 0) {
+			zmq_send(downpub, &typemsg, ZMQ_SNDMORE);
+			zmq_send(downpub, &inmsg, 0);
+		} else if(rcvmore == 0)
+			logit(ERR, "Configured to publish downstream, but no"
+				" type message was received");
 		zmq_msg_close(&inmsg);
+		zmq_msg_close(&typemsg);
 		logit(DEBUG, "Pushed message downstream");
 	}
 }
@@ -542,10 +552,10 @@ int getfd(void * socket) {
 
 int start_broker(struct ev_loop * loop, json_t * config) {
 	json_t * uppushc = NULL, *uppubc = NULL, *upsubc = NULL,
-	*downpushc, *downpullc, *uppullc = NULL;
+	*downpushc = NULL, *downpubc, *downpullc, *uppullc = NULL;
 	json_error_t err;
-	if(json_unpack_ex(config, &err, 0, "{s{s:os:o}s{s?:o s?:o s?:o s?:o *}}",
-		"downstream", "push", &downpushc, "pull", &downpullc,
+	if(json_unpack_ex(config, &err, 0, "{s{s?:os?:os:o}s{s?:o s?:o s?:o s?:o *}}",
+		"downstream", "push", &downpushc, "publish", &downpubc"pull", &downpullc,
 		"upstream", "subscribe", &upsubc, "publish", &uppubc,
 		"push", &uppushc, "pull", &uppullc) != 0) {
 		logit(ERR, "Error parsing broker configuration %s (line %d col %d)",
@@ -562,10 +572,22 @@ int start_broker(struct ev_loop * loop, json_t * config) {
 		logit(ERR, "Must supply an upstream subscriber or pipeline");
 		return -1;
 	}
+	if(!downpushc && !downpubc) {
+		logit(ERR, "Must supply a downstream pipeline or publisher");
+		return -1;
+	}
 
-	downpush = zmq_socket(zmqctx, ZMQ_PUSH);
-	parse_sock_directive(downpush, downpushc, 1);
-	logit(DEBUG, "Setup downstream pusher");
+	if(downpushc) {
+		downpush = zmq_socket(zmqctx, ZMQ_PUSH);
+		parse_sock_directive(downpush, downpushc, 1);
+		logit(DEBUG, "Setup downstream pusher");
+	}
+	if(downpubc) {
+		downpub = zmq_socket(zmqctx, ZMQ_PUB);
+		parse_sock_directive(downpub, downpubc, 1);
+		logit(DEBUG, "Setup downstream publisher");
+	}
+
 	downpull = zmq_socket(zmqctx, ZMQ_PULL);
 	parse_sock_directive(downpull, downpullc, 1);
 	ev_io_init(&edpull, recv_down_cb, getfd(downpull), EV_READ);
