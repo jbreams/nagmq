@@ -218,16 +218,17 @@ void * getsock(char * forwhat, int type) {
 	return sock;
 }
 
-void process_req_msg(void * sock);
-void process_pull_msg(void * sock, void * ressock);
+void process_req_msg(zmq_msg_t * payload, void * sock);
+void process_pull_msg(zmq_msg_t * payload, void * ressock);
 extern void * crpullsock;
 void * pull_thread(void * arg);
+void * req_thread(void * arg);
 
 void * recv_loop(void * parg) {
-	void * pullsock, * reqsock, *intpullbus = NULL;
+	void * pullsock, * reqsock, *intpullbus = NULL, *intreqbus = NULL;
 	int enablepull = 0, enablereq = 0;
 	zmq_pollitem_t pollables[2];
-	int npollables = 0, rc, npullthreads = 0;
+	int npollables = 0, rc, npullthreads = 0, nreqthreads = 0;
 
 	sigset_t signal_set;
 	sigfillset(&signal_set);
@@ -235,9 +236,9 @@ void * recv_loop(void * parg) {
 
 	pthread_mutex_lock(&recv_loop_mutex);
 
-	if(json_unpack(config, "{ s?:{ s:b s?:i } s?:{ s:b } }",
+	if(json_unpack(config, "{ s?:{ s:b s?:i } s?:{ s:b s?:i } }",
 		"pull", "enable", &enablepull, "threads", &npullthreads,
-		"reply", "enable", &enablereq) != 0) {
+		"reply", "enable", &enablereq, "threads", &nreqthreads) != 0) {
 		syslog(LOG_ERR, "Parameter error while starting NagMQ");
 		return NULL;
 	}
@@ -277,12 +278,38 @@ void * recv_loop(void * parg) {
 	}
 
 	if(enablereq) {
-		reqsock = getsock("reply", ZMQ_REP);
-		if(!reqsock) {
-			if(pullsock)
-				zmq_close(pullsock);
-			return NULL;
+		if(nreqthreads > 0) {
+			int i;
+			reqsock = getsock("reply", ZMQ_ROUTER);
+			if(!reqsock)
+				return NULL;
+			
+			intreqbus = zmq_socket(zmq_ctx, ZMQ_DEALER);
+			if(!intreqbus) {
+				syslog(LOG_ERR, "Error creating internal req bus");
+				return NULL;
+			}
+
+			zmq_bind(intreqbus, "inproc://nagmq_req_bus");
+			for(i = 0; i < nreqthreads; i++) {
+				pthread_t curthread;
+				if(pthread_create(&curthread, NULL, req_thread, NULL) != 0) {
+					syslog(LOG_ERR, "Error creating req thread #%d %m", i);
+					return NULL;
+				}
+			}
+
+			pollables[npollables].socket = intreqbus;
+			pollables[npollables++].events = ZMQ_POLLIN;
+		} else {
+			reqsock = getsock("reply", ZMQ_REP);
+			if(!reqsock) {
+				if(pullsock)
+					zmq_close(pullsock);
+				return NULL;
+			}
 		}
+
 		pollables[npollables].socket = reqsock;
 		pollables[npollables++].events = ZMQ_POLLIN;
 	}
@@ -294,6 +321,7 @@ void * recv_loop(void * parg) {
 	while(1) {
 		int events;
 		size_t size = sizeof(events);
+
 		if((rc = zmq_poll(pollables, npollables, -1)) < 0) {
 			rc = errno;
 			if(rc == ETERM)
@@ -325,8 +353,32 @@ void * recv_loop(void * parg) {
 		}
 		if(enablereq) {
 			zmq_getsockopt(reqsock, ZMQ_EVENTS, &events, &size);
-			if(events == ZMQ_POLLIN)
-				process_req_msg(reqsock);
+			if(events == ZMQ_POLLIN) {
+				zmq_msg_t tmpmsg;
+				zmq_msg_init(&tmpmsg);
+				if((rc = zmq_recv(reqsock, &tmpmsg, 0)) != 0) {
+					zmq_msg_close(&tmpmsg);
+					continue;
+				}
+				if(nreqthreads == 0)
+					process_req_msg(&tmpmsg, reqsock);
+				else
+					zmq_send(intreqbus, &tmpmsg, 0);
+				zmq_msg_close(&tmpmsg);
+			}
+		}
+		if(nreqthreads > 0) {
+			zmq_getsockopt(intreqbus, ZMQ_EVENTS, &events, &size);
+			if(events == ZMQ_POLLIN) {
+				zmq_msg_t tmpmsg;
+				zmq_msg_init(&tmpmsg);
+				if((rc = zmq_recv(reqsock, &tmpmsg, 0)) != 0) {
+					zmq_msg_close(&tmpmsg);
+					continue;
+				}
+				zmq_send(reqsock, &tmpmsg, 0);
+				zmq_msg_close(&tmpmsg);
+			}
 		}
 	}
 
@@ -336,6 +388,8 @@ void * recv_loop(void * parg) {
 		zmq_close(pullsock);
 	if(intpullbus)
 		zmq_close(intpullbus);
+	if(intreqbus)
+		zmq_close(intreqbus);
 	if(crpullsock)
 		zmq_close(crpullsock);
 

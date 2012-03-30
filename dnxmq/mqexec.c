@@ -555,9 +555,9 @@ int start_broker(struct ev_loop * loop, json_t * config) {
 	*downpushc = NULL, *downpubc, *downpullc, *uppullc = NULL;
 	json_error_t err;
 	if(json_unpack_ex(config, &err, 0, "{s{s?:os?:os:o}s{s?:o s?:o s?:o s?:o *}}",
-		"downstream", "push", &downpushc, "publish", &downpubc"pull", &downpullc,
-		"upstream", "subscribe", &upsubc, "publish", &uppubc,
-		"push", &uppushc, "pull", &uppullc) != 0) {
+		"downstream", "push", &downpushc, "publish", &downpubc, 
+		"pull", &downpullc, "upstream", "subscribe", &upsubc,
+		"publish", &uppubc, "push", &uppushc, "pull", &uppullc) != 0) {
 		logit(ERR, "Error parsing broker configuration %s (line %d col %d)",
 			err.text, err.line, err.column);
 		return -1;
