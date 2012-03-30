@@ -1,13 +1,31 @@
 
+/*
+	The numbers for key buckets are generated with this little
+	Perl script.
+		BEGIN { $o = $m = $n = 0 } 
+		if(/payload_start_object\(ret, NULL/) { $i = 0; }
+		elsif(/payload_(start|new)_\w+\(ret, \"([^\"]+)\",/) { 
+			if(length $2 > $m) { $m = length $2; } 
+			if($1 eq 'start') { $o = 1; }
+			$i++; 
+		}
+		elsif(/payload_end_object/) {
+			if($o == 1) { $o = 0; next; } 
+			elsif($i > $n) { $n = $i; }
+		} 
+		END { print "$m $n\n"; }
+ */
+#define KEYLEN 37
 struct keybucket {
-	char * key;
-	struct keybucket * next;
+	uint8_t off;
+	uint8_t mark;
+	struct keybucket * ch[2];
 };
 
 struct payload {
 	char * type;
 	char * json_buf;
-	struct keybucket ** keys;
+	struct keybucket * keys;
 	size_t buflen, bufused;
 };
 

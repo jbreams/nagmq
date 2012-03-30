@@ -47,7 +47,6 @@ struct child_job {
 	ev_timer timer;
 };
 
-#define MAX_FILTERS 10
 struct filter {
 #ifdef HAVE_PCRE
 	pcre * regex;
@@ -57,7 +56,8 @@ struct filter {
 #endif
 	char field[64];
 	char or;
-} filters[MAX_FILTERS];
+	struct filter * next;
+} *filterhead = NULL, *filtertail = NULL;
 
 #define ERR 2
 #define DEBUG 1
@@ -85,11 +85,9 @@ void logit(int level, char * fmt, ...) {
 	va_end(ap);
 }
 
-int parse_filter(json_t * in, int i, int or) {
-	if(i > MAX_FILTERS) {
-		return -1;
-	}
-	memset(&filters[i], 0, sizeof(struct filter));
+int parse_filter(json_t * in, int or) {
+	struct filter * newfilt = malloc(sizeof(struct filter));
+	memset(newfilt, 0, sizeof(struct filter));
 	if(json_is_object(in)) {
 		char * field = NULL;
 		char * match = NULL;
@@ -100,70 +98,78 @@ int parse_filter(json_t * in, int i, int or) {
 			return -1;
 		}
 
-		strncpy(filters[i].field, field, sizeof(filters[i].field) - 1);
+		strncpy(newfilt->field, field, sizeof(newfilt->field) - 1);
 #ifdef HAVE_PCRE
 		char * errptr = NULL;
 		int errofft = 0;
-		filters[i].regex = pcre_compile(match, PCRE_NO_AUTO_CAPTURE,
+		newfilt->regex = pcre_compile(match, PCRE_NO_AUTO_CAPTURE,
 			&errptr, &errofft, NULL);
-		if(filters[i].regex == NULL) {
+		if(newfilt->regex == NULL) {
 			logit(ERR, "Error compiling regex for %s at position %d: %s",
 				field, errptr, errofft);
+			free(newfilt);
 			return -1;
 		}
 		
-		filters[i].extra = pcre_study(filters[i].regex, 0, &errptr);
-		if(filters[i].extra == NULL) {
+		newfilt->extra = pcre_study(newfilt->regex, 0, &errptr);
+		if(newfilt->extra == NULL) {
 			logit(ERR, "Error studying regex: %s", errptr);
+			free(newfilt);
 			return -1;
 		}
 #else
-		int rc = regcomp(&filters[i].regex, match, REG_EXTENDED|REG_NOSUB);
+		int rc = regcomp(&newfilt->regex, match, REG_EXTENDED|REG_NOSUB);
 		if(rc != 0) {
 			logit(ERR, "Error compiling regex for %s: %s",
 				field, strerror(rc));
+			free(newfilt);
 			return -1;
 		}
 #endif
+		if(!filterhead) {
+			filterhead = newfilt;
+			filtertail = newfilt;
+		} else
+			filtertail->next = newfilt;
 
 		if(json_is_true(orobj))
-			filters[i].or = 1;	
+			newfilt->or = 1;	
 		else if(orobj)
-			parse_filter(orobj, ++i, 1);
+			parse_filter(orobj, 1);
 	} else if(json_is_array(in)) {
 		int x;
 		for(x = 0; x < json_array_size(in); x++) {
 			json_t * t = json_array_get(in, x);
-			if(parse_filter(t, i++, or) < 0)
+			if(parse_filter(t, or) < 0)
 				return -1;
 		}
 	}
 }
 
 int match_filter(char * description, char * name, char * command) {
-	int i;
-	for(i = 0; filters[i].field[0] != 0; i++) {
+	struct filter *cur;
+	for(cur = filterhead; cur != NULL; cur = cur->next) {
 		int res;
 		char * tomatch;
-		if(strcmp(filters[i].field, "host_name") == 0)
+		if(strcmp(cur->field, "host_name") == 0)
 			tomatch = name;
-		else if(strcmp(filters[i].field, "service_description") == 0)
+		else if(strcmp(cur->field, "service_description") == 0)
 			tomatch = description;
-		else if(strcmp(filters[i].field, "command_name") == 0)
+		else if(strcmp(cur->field, "command_name") == 0)
 			tomatch = command;
 		if(tomatch == NULL)
 			continue;
 #ifdef HAVE_PCRE
 		int ovec[33];
-		res = pcre_exec(filters[i].regex, filters[i].extra,
+		res = pcre_exec(cur->regex, cur->extra,
 			tomatch, strlen(tomatch), 0, ovec, 33);
 #else
 		regmatch_t ovec[33];
-		res = regexec(&filters[i].regex, tomatch, 33, ovec, 0);
+		res = regexec(&cur->regex, tomatch, 33, ovec, 0);
 #endif
-		if(filters[i].or == 1 && res == 0)
+		if(cur->or == 1 && res == 0)
 			return 1;
-		else if(filters[i].or == 0 && res != 0)
+		else if(cur->or == 0 && res != 0)
 			return 0;
 	}
 	return 1;
@@ -283,7 +289,7 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 		return;
 	}
 
-	if(filters[0].field[0] != 0) {
+	if(filterhead != NULL) {
 		char * name = NULL, *description = NULL, *command_name = NULL;
 		if(json_unpack(input, "{ s:s s:s s?:i s:?s s:?s s?:s }",
 			"type", &type, "command_line", &command_line,
@@ -599,7 +605,7 @@ int start_broker(struct ev_loop * loop, json_t * config) {
 int main(int argc, char ** argv) {
 	ev_io pullio;
 	struct ev_loop  * loop;
-	json_t * jobs, * results;
+	json_t * jobs = NULL, * results, *publisher = NULL;
 	int iothreads = 1;
 	int pullfd = -1;
 	size_t pullfds = sizeof(pullfd);
@@ -618,11 +624,11 @@ int main(int argc, char ** argv) {
 		exit(-1);
 	}
 
-	if(json_unpack(config, "{s:{s:os:os?:os?is?bs?b}}",
+	if(json_unpack(config, "{s:{s?:os:os?:os?is?bs?bs?:o}}",
 		"executor", "jobs", &jobs, "results", &results,
 		"broker", &broker, "iothreads", &iothreads,
 		"verbose", &verbose, "syslog", &usesyslog,
-		"filter", &filter) != 0) {
+		"filter", &filter, "publisher", &publisher) != 0) {
 		logit(ERR, "Error getting config");
 		exit(-1);
 	}
@@ -641,13 +647,26 @@ int main(int argc, char ** argv) {
 		parse_sock_directive(pushsock, results, 0);
 		logit(DEBUG, "Setup worker push socket");
 
-		pullsock = zmq_socket(zmqctx, ZMQ_PULL);
-		if(pullsock == NULL) {
-			logit(ERR, "Error creating jobs socket %d", errno);
+		if(jobs) {
+			pullsock = zmq_socket(zmqctx, ZMQ_PULL);
+			if(pullsock == NULL) {
+				logit(ERR, "Error creating jobs socket %d", errno);
+				exit(-1);
+			}
+			parse_sock_directive(pullsock, jobs, 0);
+			logit(DEBUG, "Setup worker pull sock");
+		} else if(publisher) {
+			pullsock = zmq_socket(zmqctx, ZMQ_SUB);
+			if(pullsock == NULL) {
+				logit(ERR, "Error creating publisher socket %d", errno);
+				exit(-1);
+			}
+			parse_sock_directive(pullsock, publisher, 0);
+			logit(DEBUG, "Setup worker pull sock");
+		} else {
+			logit(ERR, "Must supply either a jobs or publisher socket for worker");
 			exit(-1);
 		}
-		parse_sock_directive(pullsock, jobs, 0);
-		logit(DEBUG, "Setup worker pull sock");
 
 		zmq_getsockopt(pullsock, ZMQ_FD, &pullfd, &pullfds);
 		if(pullfd == -1) {
