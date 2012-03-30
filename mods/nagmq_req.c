@@ -746,8 +746,7 @@ void err_msg(struct payload * po, char * msg, ...) {
 	payload_end_object(po);
 }
 
-void process_req_msg(void * sock) {
-	zmq_msg_t reqmsg;
+void process_req_msg(zmq_msg_t * reqmsg, void * sock) {
 	json_t * req;
 	char * host_name = NULL, *service_description = NULL;
 	char * hostgroup_name = NULL, *servicegroup_name = NULL;
@@ -758,12 +757,7 @@ void process_req_msg(void * sock) {
 	json_t * list_services = NULL, *keys = NULL;
 	struct payload * po;
 
-	zmq_msg_init(&reqmsg);
-	if(zmq_recv(sock, &reqmsg, 0) != 0)
-		return;
-
-	req = json_loadb(zmq_msg_data(&reqmsg), zmq_msg_size(&reqmsg), 0, NULL);
-	zmq_msg_close(&reqmsg);
+	req = json_loadb(zmq_msg_data(reqmsg), zmq_msg_size(reqmsg), 0, NULL);
 	if(req == NULL)
 		return;
 
@@ -881,4 +875,37 @@ void process_req_msg(void * sock) {
 end:
 	json_decref(req);
 	send_msg(sock, po);
+}
+
+extern void * zmq_ctx;
+void * req_thread(void * arg) {
+	int rc;
+	sigset_t signal_set;
+	sigfillset(&signal_set);
+	pthread_sigmask(SIG_BLOCK, &signal_set, NULL);
+	void * intsock = zmq_socket(zmq_ctx, ZMQ_REQ);
+	if(intsock == NULL)
+		return NULL;
+	zmq_connect(intsock, "inproc://nagmq_req_bus");
+
+	while(1) {
+		zmq_msg_t payload;
+		zmq_msg_init(&payload);
+		
+		if((rc = zmq_recv(intsock, &payload, 0)) != 0) {
+			rc = errno;
+			if(rc == ETERM)
+				break;
+			else if(rc == EINTR)
+				continue;
+			else
+				syslog(LOG_ERR, "Error receiving for pull events! %s", zmq_strerror(rc));
+				break;
+		}
+
+		process_req_msg(&payload, intsock);
+		zmq_msg_close(&payload);
+	}
+
+	zmq_close(intsock);
 }
