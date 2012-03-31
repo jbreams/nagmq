@@ -53,7 +53,7 @@ int lock_obj_compare(void * ar, void * br) {
 
 void lock_obj(char * hostname, char * service, char ** plugin_output,
 	char ** long_plugin_output, char ** perf_data) {
-	static pthread_mutex_lock listlock = PTHREAD_MUTEX_INITIALIZER;
+	static pthread_mutex_t listlock = PTHREAD_MUTEX_INITIALIZER;
 	if(!lock_skiplist)
 		return;
 	struct lock_skip_obj test = { hostname, service, NULL, NULL, NULL,
@@ -247,8 +247,11 @@ void * recv_loop(void * parg) {
 		return NULL;
 	}
 	
-	if(npullthreads > 0 || nreqthreads > 0)
-		childthreads = malloc(sizeof(pthread_t) * (npullthreads + nreqthreads));
+	if(npullthreads > 0 || nreqthreads > 0) {
+		int nthreads = npullthreads + nreqthreads;
+		threads = malloc(sizeof(pthread_t) * nthreads);
+		memset(threads, 0, sizeof(pthread_t) * nthreads);
+	}
 
 	if(enablepull) {
 		pullsock = getsock("pull", ZMQ_PULL);
@@ -379,8 +382,8 @@ void * recv_loop(void * parg) {
 		}
 	}
 
-	for(;n > 0; --n)
-		pthread_join(threads[n], NULL);
+	while(n > 0)
+		pthread_join(threads[--n], NULL);
 
 	if(enablereq)
 		zmq_close(reqsock);
