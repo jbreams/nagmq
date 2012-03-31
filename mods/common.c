@@ -230,7 +230,7 @@ void * req_thread(void * arg);
 void * recv_loop(void * parg) {
 	void * pullsock, * reqsock, *intpullbus = NULL, *intreqbus = NULL;
 	int enablepull = 0, enablereq = 0, n = 0;
-	zmq_pollitem_t pollables[2];
+	zmq_pollitem_t pollables[3];
 	int npollables = 0, rc, npullthreads = 0, nreqthreads = 0;
 	pthread_t * threads = NULL;
 
@@ -373,7 +373,7 @@ void * recv_loop(void * parg) {
 		if(nreqthreads > 0 && zmq_getsockopt(intreqbus, ZMQ_EVENTS,
 			&events, &size) == 0 && events == ZMQ_POLLIN) {
 			zmq_msg_init(&tmpmsg);
-			if((rc = zmq_recv(reqsock, &tmpmsg, 0)) != 0) {
+			if((rc = zmq_recv(intreqbus, &tmpmsg, 0)) != 0) {
 				zmq_msg_close(&tmpmsg);
 				continue;
 			}
