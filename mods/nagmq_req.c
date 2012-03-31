@@ -883,7 +883,7 @@ void * req_thread(void * arg) {
 	sigset_t signal_set;
 	sigfillset(&signal_set);
 	pthread_sigmask(SIG_BLOCK, &signal_set, NULL);
-	void * intsock = zmq_socket(zmq_ctx, ZMQ_REQ);
+	void * intsock = zmq_socket(zmq_ctx, ZMQ_REP);
 	if(intsock == NULL)
 		return NULL;
 	zmq_connect(intsock, "inproc://nagmq_req_bus");
@@ -899,7 +899,7 @@ void * req_thread(void * arg) {
 			else if(rc == EINTR)
 				continue;
 			else
-				syslog(LOG_ERR, "Error receiving for pull events! %s",
+				syslog(LOG_ERR, "Error receiving for req events! %s",
 					zmq_strerror(rc));
 				break;
 		}
