@@ -899,7 +899,8 @@ void * req_thread(void * arg) {
 			else if(rc == EINTR)
 				continue;
 			else
-				syslog(LOG_ERR, "Error receiving for pull events! %s", zmq_strerror(rc));
+				syslog(LOG_ERR, "Error receiving for pull events! %s",
+					zmq_strerror(rc));
 				break;
 		}
 
