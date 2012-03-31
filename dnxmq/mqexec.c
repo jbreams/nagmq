@@ -340,15 +340,19 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 	gettimeofday(&j->start, NULL);
 	pid = fork();
 	if(pid == 0) {
+		int dn = open("/dev/null", O_RDONLY);
 		dup2(fds[1], fileno(stdout));
 		dup2(fds[1], fileno(stderr));
+		dup2(dn, fileno(stdin));
+		close(dn);
+		close(fds[1]);
 #ifdef TEST
 		printf("Testing testing testing!\n");
 		exit(0);
 #else
 		execl("/bin/sh", "sh", "-c", command_line, NULL);
 		rc = errno;
-		printf("Error executing %s: %m", command_line);
+		printf("Error executing shell for %s: %m", command_line);
 		exit(127);
 #endif
 	}

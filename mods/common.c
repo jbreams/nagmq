@@ -53,10 +53,12 @@ int lock_obj_compare(void * ar, void * br) {
 
 void lock_obj(char * hostname, char * service, char ** plugin_output,
 	char ** long_plugin_output, char ** perf_data) {
+	static pthread_mutex_lock listlock = PTHREAD_MUTEX_INITIALIZER;
 	if(!lock_skiplist)
 		return;
 	struct lock_skip_obj test = { hostname, service, NULL, NULL, NULL,
 		PTHREAD_MUTEX_INITIALIZER };
+	pthread_mutex_lock(&listlock);
 	struct lock_skip_obj * lock = skiplist_find_first(lock_skiplist, &test, NULL);
 	if(lock == NULL) {
 		lock = malloc(sizeof(struct lock_skip_obj));
@@ -69,6 +71,7 @@ void lock_obj(char * hostname, char * service, char ** plugin_output,
 		pthread_mutex_init(&lock->lock, NULL);
 		skiplist_insert(lock_skiplist, lock);
 	}
+	pthread_mutex_unlock(&listlock);
 
 	if(plugin_output)
 		*plugin_output = lock->plugin_output;
@@ -226,9 +229,10 @@ void * req_thread(void * arg);
 
 void * recv_loop(void * parg) {
 	void * pullsock, * reqsock, *intpullbus = NULL, *intreqbus = NULL;
-	int enablepull = 0, enablereq = 0;
+	int enablepull = 0, enablereq = 0, n = 0;
 	zmq_pollitem_t pollables[2];
 	int npollables = 0, rc, npullthreads = 0, nreqthreads = 0;
+	pthread_t * threads = NULL;
 
 	sigset_t signal_set;
 	sigfillset(&signal_set);
@@ -243,6 +247,9 @@ void * recv_loop(void * parg) {
 		return NULL;
 	}
 	
+	if(npullthreads > 0 || nreqthreads > 0)
+		childthreads = malloc(sizeof(pthread_t) * (npullthreads + nreqthreads));
+
 	if(enablepull) {
 		pullsock = getsock("pull", ZMQ_PULL);
 		if(!pullsock)
@@ -268,8 +275,7 @@ void * recv_loop(void * parg) {
 			i = 0;
 
 			for(i = 0; i < npullthreads; i++) {
-				pthread_t curthread;
-				if(pthread_create(&curthread, NULL, pull_thread, NULL) != 0) {
+				if(pthread_create(&threads[n++], NULL, pull_thread, NULL) != 0) {
 					syslog(LOG_ERR, "Error creating pull thread #%d %m", i);
 					return NULL;
 				}
@@ -292,8 +298,7 @@ void * recv_loop(void * parg) {
 
 			zmq_bind(intreqbus, "inproc://nagmq_req_bus");
 			for(i = 0; i < nreqthreads; i++) {
-				pthread_t curthread;
-				if(pthread_create(&curthread, NULL, req_thread, NULL) != 0) {
+				if(pthread_create(&threads[n++], NULL, req_thread, NULL) != 0) {
 					syslog(LOG_ERR, "Error creating req thread #%d %m", i);
 					return NULL;
 				}
@@ -321,6 +326,7 @@ void * recv_loop(void * parg) {
 	while(1) {
 		int events;
 		size_t size = sizeof(events);
+		zmq_msg_t tmpmsg;
 
 		if((rc = zmq_poll(pollables, npollables, -1)) < 0) {
 			rc = errno;
@@ -335,52 +341,46 @@ void * recv_loop(void * parg) {
 			}
 		}
 
-		if(enablepull) {
-			zmq_getsockopt(pullsock, ZMQ_EVENTS, &events, &size);
-			if(events == ZMQ_POLLIN) {
-				zmq_msg_t tmpmsg;
-				zmq_msg_init(&tmpmsg);
-				if((rc = zmq_recv(pullsock, &tmpmsg, 0)) != 0) {
-					zmq_msg_close(&tmpmsg);
-					continue;
-				}
-				if(npullthreads == 0)
-					process_pull_msg(&tmpmsg, NULL);
-				else
-					zmq_send(intpullbus, &tmpmsg, 0);
+		if(enablepull && zmq_getsockopt(pullsock, ZMQ_EVENTS,
+			&events, &size) == 0 && events == ZMQ_POLLIN) {
+			zmq_msg_init(&tmpmsg);
+			if((rc = zmq_recv(pullsock, &tmpmsg, 0)) != 0) {
 				zmq_msg_close(&tmpmsg);
+				continue;
 			}
+			if(npullthreads == 0)
+				process_pull_msg(&tmpmsg, NULL);
+			else
+				zmq_send(intpullbus, &tmpmsg, 0);
+			zmq_msg_close(&tmpmsg);
 		}
-		if(enablereq) {
-			zmq_getsockopt(reqsock, ZMQ_EVENTS, &events, &size);
-			if(events == ZMQ_POLLIN) {
-				zmq_msg_t tmpmsg;
-				zmq_msg_init(&tmpmsg);
-				if((rc = zmq_recv(reqsock, &tmpmsg, 0)) != 0) {
-					zmq_msg_close(&tmpmsg);
-					continue;
-				}
-				if(nreqthreads == 0)
-					process_req_msg(&tmpmsg, reqsock);
-				else
-					zmq_send(intreqbus, &tmpmsg, 0);
+		if(enablereq && zmq_getsockopt(reqsock, ZMQ_EVENTS,
+			&events, &size) == 0 && events == ZMQ_POLLIN) {
+			zmq_msg_init(&tmpmsg);
+			if((rc = zmq_recv(reqsock, &tmpmsg, 0)) != 0) {
 				zmq_msg_close(&tmpmsg);
+				continue;
 			}
+			if(nreqthreads == 0)
+				process_req_msg(&tmpmsg, reqsock);
+			else
+				zmq_send(intreqbus, &tmpmsg, 0);
+			zmq_msg_close(&tmpmsg);
 		}
-		if(nreqthreads > 0) {
-			zmq_getsockopt(intreqbus, ZMQ_EVENTS, &events, &size);
-			if(events == ZMQ_POLLIN) {
-				zmq_msg_t tmpmsg;
-				zmq_msg_init(&tmpmsg);
-				if((rc = zmq_recv(reqsock, &tmpmsg, 0)) != 0) {
-					zmq_msg_close(&tmpmsg);
-					continue;
-				}
-				zmq_send(reqsock, &tmpmsg, 0);
+		if(nreqthreads > 0 && zmq_getsockopt(intreqbus, ZMQ_EVENTS,
+			&events, &size) == 0 && events == ZMQ_POLLIN) {
+			zmq_msg_init(&tmpmsg);
+			if((rc = zmq_recv(reqsock, &tmpmsg, 0)) != 0) {
 				zmq_msg_close(&tmpmsg);
+				continue;
 			}
+			zmq_send(reqsock, &tmpmsg, 0);
+			zmq_msg_close(&tmpmsg);
 		}
 	}
+
+	for(;n > 0; --n)
+		pthread_join(threads[n], NULL);
 
 	if(enablereq)
 		zmq_close(reqsock);
