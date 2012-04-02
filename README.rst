@@ -51,15 +51,33 @@ one address, list them as an array.::
 	{
 		"publish": {
 			"enable": true,
-			"bind": [ "ipc:///tmp/nagmqpub.sock" ]
+			"bind": [ "ipc:///tmp/nagmqpub.sock" ],
+			"override": [ "service_check_initiate", "host_check_initiate" ]
 		},
 		"pull": {
 			"enable": true,
-			"bind": "ipc:///tmp/nagmqpull.sock"
+			"bind": "ipc:///tmp/nagmqpull.sock",
+			"threads": 2
 		},
 		"reply": {
 			"enable": true,
-			"bind": "ipc:///tmp/nagmqreply.sock"
+			"bind": "ipc:///tmp/nagmqreply.sock",
+			"threads": 2
+		},
+		"executor": {
+			"jobs": { "address":"ipc:///tmp/dnxmqjobs.sock", "bind":false },
+			"results": { "address":"ipc:///tmp/dnxmqresults.sock", "bind":false },
+			"verbose": true,
+			"broker": {
+				"downstream": {
+					"push": { "address": "ipc:///tmp/dnxmqjobs.sock", "bind": true },
+					"pull": { "address": "ipc:///tmp/dnxmqresults.sock", "bind": true }
+				},
+				"upstream": {
+					"subscribe": { "address": "ipc:///tmp/nagmqpub.sock", "subscribe": [ "host_check_initiate", "service_check_initiate" ] },
+					"push": { "address": "ipc:///tmp/nagmqpull.sock" }
+				}
+			}
 		}
 	}
 
