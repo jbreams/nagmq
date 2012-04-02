@@ -35,6 +35,8 @@ void * downpull = NULL;
 void * downpub = NULL;
 ev_io eupull, eusub, edpull;
 int usesyslog = 0, verbose = 0;
+char myfqdn[255];
+char mynodename[255];
 
 struct child_job {
 	json_t * input;
@@ -57,6 +59,8 @@ struct filter {
 #endif
 	char field[64];
 	char or;
+	int fqdn;
+	int nodename;
 	struct filter * next;
 } *filterhead = NULL, *filtertail = NULL;
 
@@ -92,41 +96,54 @@ int parse_filter(json_t * in, int or) {
 	if(json_is_object(in)) {
 		char * field = NULL;
 		char * match = NULL;
+		int icase = 0, newline = 0, dotall = 0;
 		json_t * orobj = NULL;
-		if(json_unpack(in, "{ s:s s:s s?:o }",
-			"match", &match, "field", &field, "or", &orobj) < 0) {
+		if(json_unpack(in, "{ s?:s s:s s?:o s?:b s?:b s?:b s?:b }",
+			"match", &match, "field", &field, "or", &orobj,
+			"caseless", &icase, "dotall", &dotall,
+			"fqdn", &newfilt->fqdn, "nodename", &newfilt->nodename) < 0) {
 			logit(ERR, "Error parsing filter definition.");
+			free(newfilt);
 			return -1;
 		}
 
 		strncpy(newfilt->field, field, sizeof(newfilt->field) - 1);
+		if(match) {
 #ifdef HAVE_PCRE
-		char * errptr = NULL;
-		int errofft = 0;
-		newfilt->regex = pcre_compile(match, PCRE_NO_AUTO_CAPTURE,
-			&errptr, &errofft, NULL);
-		if(newfilt->regex == NULL) {
-			logit(ERR, "Error compiling regex for %s at position %d: %s",
-				field, errptr, errofft);
-			free(newfilt);
-			return -1;
-		}
-		
-		newfilt->extra = pcre_study(newfilt->regex, 0, &errptr);
-		if(newfilt->extra == NULL) {
-			logit(ERR, "Error studying regex: %s", errptr);
-			free(newfilt);
-			return -1;
-		}
+			char * errptr = NULL;
+			int errofft = 0, options = PCRE_NO_AUTO_CAPTURE;
+			if(icase)
+				options |= PCRE_CASELESS;
+			if(dotall)
+				options |= PCRE_DOTALL;
+			newfilt->regex = pcre_compile(match, options, &errptr,
+				&errofft, NULL);
+			if(newfilt->regex == NULL) {
+				logit(ERR, "Error compiling regex for %s at position %d: %s",
+					field, errptr, errofft);
+				free(newfilt);
+				return -1;
+			}
+			
+			newfilt->extra = pcre_study(newfilt->regex, 0, &errptr);
+			if(newfilt->extra == NULL) {
+				logit(ERR, "Error studying regex: %s", errptr);
+				free(newfilt);
+				return -1;
+			}
 #else
-		int rc = regcomp(&newfilt->regex, match, REG_EXTENDED|REG_NOSUB);
-		if(rc != 0) {
-			logit(ERR, "Error compiling regex for %s: %s",
-				field, strerror(rc));
-			free(newfilt);
-			return -1;
-		}
+			int options = REG_EXTENDED | REG_NOSUB;
+			if(icase)
+				options |= REG_ICASE;
+			int rc = regcomp(&newfilt->regex, match, options);
+			if(rc != 0) {
+				logit(ERR, "Error compiling regex for %s: %s",
+					field, strerror(rc));
+				free(newfilt);
+				return -1;
+			}
 #endif
+		}
 		if(!filterhead) {
 			filterhead = newfilt;
 			filtertail = newfilt;
@@ -147,31 +164,37 @@ int parse_filter(json_t * in, int or) {
 	}
 }
 
-int match_filter(char * description, char * name, char * command) {
+int match_filter(json_t * input) {
 	struct filter *cur;
 	for(cur = filterhead; cur != NULL; cur = cur->next) {
-		int res;
-		char * tomatch;
-		if(strcmp(cur->field, "host_name") == 0)
-			tomatch = name;
-		else if(strcmp(cur->field, "service_description") == 0)
-			tomatch = description;
-		else if(strcmp(cur->field, "command_name") == 0)
-			tomatch = command;
-		if(tomatch == NULL)
+		int res = 1;
+		const char * tomatch;
+		json_t * field;
+		if((field = json_object_get(input, cur->field)) == NULL)
 			continue;
+		if(!json_is_string(field))
+			continue;
+		tomatch = json_string_value(field);
+		if(cur->fqdn)
+			res = strcasecmp(tomatch, myfqdn);
+		else if(cur->nodename)
+			res = strcasecmp(tomatch, mynodename);
+		else {
 #ifdef HAVE_PCRE
-		int ovec[33];
-		res = pcre_exec(cur->regex, cur->extra,
-			tomatch, strlen(tomatch), 0, ovec, 33);
+			int ovec[33];
+			res = pcre_exec(cur->regex, cur->extra,
+				tomatch, strlen(tomatch), 0, ovec, 33);
 #else
-		regmatch_t ovec[33];
-		res = regexec(&cur->regex, tomatch, 33, ovec, 0);
+			regmatch_t ovec[33];
+			res = regexec(&cur->regex, tomatch, 33, ovec, 0);
 #endif
+		}
 		if(cur->or == 1 && res == 0)
 			return 1;
 		else if(cur->or == 0 && res != 0)
 			return 0;
+		else
+			break;
 	}
 	return 1;
 }
@@ -290,24 +313,14 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 		return;
 	}
 
-	if(filterhead != NULL) {
-		char * name = NULL, *description = NULL, *command_name = NULL;
-		if(json_unpack(input, "{ s:s s:s s?:i s:?s s:?s s?:s }",
-			"type", &type, "command_line", &command_line,
-			"timeout", &timeout, "host_name", &name,
-			"service_description", &description, "command_name",
-			&command_name) != 0) {
-			json_decref(input);
-			return;
-		}
-
-		if(match_filter(name, description, command_name) != 1) {
-			json_decref(input);
-			return;
-		}
-	} else if(json_unpack(input, "{ s:s s:s s?:i }",
+	if(json_unpack(input, "{ s:s s:s s?:i }",
 		"type", &type, "command_line", &command_line,
 		"timeout", &timeout) != 0) {
+		json_decref(input);
+		return;
+	}
+
+	if(filterhead != NULL && match_filter(input) != 1) {
 		json_decref(input);
 		return;
 	}
@@ -633,7 +646,7 @@ int main(int argc, char ** argv) {
 	struct ev_loop  * loop;
 	json_t * jobs = NULL, * results, *publisher = NULL;
 	int iothreads = 1;
-	int pullfd = -1;
+	int pullfd = -1, i;
 	size_t pullfds = sizeof(pullfd);
 	json_t * config, *broker = NULL, *filter = NULL;
 	json_error_t config_err;
@@ -657,6 +670,15 @@ int main(int argc, char ** argv) {
 		"filter", &filter, "publisher", &publisher) != 0) {
 		logit(ERR, "Error getting config");
 		exit(-1);
+	}
+
+	gethostname(myfqdn, sizeof(myfqdn));
+	gethostname(mynodename, sizeof(mynodename));
+	for(i = 0; i < sizeof(mynodename); i++) {
+		if(mynodename[i] == '.') {
+			mynodename[i] = '\0';
+			break;
+		}
 	}
 
 	zmqctx = zmq_init(iothreads);

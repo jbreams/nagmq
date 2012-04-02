@@ -13,6 +13,12 @@ sockets, all of which are optional:
 
 - Request - Sends state data on demand to clients
 
+There is a distributed DNX-style executor (mqexec) designed to have as many
+workers (possibly at the edge as an NRPE-replacement) and job brokers as you
+want. It can also submit its results to more than one Nagios instance. Each
+worker can filter what checks it runs based on any field in the service/host
+check and event handler initiate messages from the publisher.
+
 It also comes with sample scripts written in Python to provide replacements
 for nsca, nrpe, and a handy CLI which talk to the bus instead of status.dat.
 
