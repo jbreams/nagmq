@@ -1,0 +1,2 @@
+/* Define to 1 if you have the PCRE libraries installed */
+#undef HAVE_PCRE

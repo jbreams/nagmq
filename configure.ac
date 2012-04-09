@@ -1,5 +1,5 @@
 AC_PREREQ([2.58])
-AC_INIT([nagmq], [1.0], [jbreams@gmail.com])
+AC_INIT([nagmq], [1.2], [jbreams@gmail.com])
 AC_CONFIG_AUX_DIR([.])
 AM_INIT_AUTOMAKE([-Wall -Werror foreign])
 AC_CONFIG_SRCDIR([mods/nagmq_pub.c])
@@ -11,6 +11,12 @@ AC_ARG_WITH([zmq-headers],
 		[Override default path to ZMQ headers])],
 	[]
 	[with_zmq_headers=default])
+
+AC_ARG_WITH([pcre-config],
+	[AC_HELP_STRING([--with-pcre-config],
+		[Path to PCRE configuration for mqexec filtering])],
+	[pcre_config_prog=$withval])
+AC_PATH_PROG(PCRE_CONFIG, [pcre-config], $pcre_config_prog)
 
 AC_PROG_CC
 AC_PROG_LIBTOOL
@@ -33,6 +39,21 @@ AC_FUNC_REALLOC
 AC_FUNC_STRTOD
 
 m4_include([libev/libev.m4])
+if test "x$PCRE_CONFIG" != "x"; then
+	CFLAGS_SAVE=$CFLAGS
+	LIBS_SAVE=$LIBS
+	CFLAGS="$CFLAGS $($PCRE_CONFIG --cflags)"
+	LIBS="$LIBS $($PCRE_CONFIG --libs)"
+	AC_CHECK_HEADER([pcre.h], [],
+		AC_MSG_FAILURE([PCRE was enabled but headers weren't found]), [])
+	AC_CHECK_LIB([pcre], [pcre_compile], [],
+		AC_MSG_FAILURE([PCRE was enabled but libraries weren't found]), [])
+	CFLAGS=$CFLAGS_SAVE
+	LIBS=$LIBS_SAVE
+	AC_SUBST([PCRE_HEADERS], $($PCRE_CONFIG --cflags))
+	AC_SUBST([PCRE_LIBS], $($PCRE_CONFIG --libs))
+	AC_DEFINE([HAVE_PCRE], [], [PCRE Libraries are installed])
+fi
 
 AC_CONFIG_FILES([Makefile mods/Makefile dnxmq/Makefile])
 AC_CONFIG_SUBDIRS([jansson])
