@@ -17,7 +17,7 @@
 #include "jansson.h"
 
 NEB_API_VERSION(CURRENT_NEB_API_VERSION)
-static skiplist * lock_skiplist;
+static skiplist * lock_skiplist = NULL;
 static void * nagmq_handle = NULL;
 static pthread_t threadid;
 static pthread_cond_t init_cond = PTHREAD_COND_INITIALIZER;
@@ -125,6 +125,8 @@ int nebmodule_deinit(int flags, int reason) {
 	neb_deregister_module_callbacks(nagmq_handle);
 	if(config)
 		json_decref(config);
+	if(lock_skiplist == NULL)
+		return 0;
 	struct lock_skip_obj * lock;
 	while((lock = skiplist_pop(lock_skiplist)) != NULL) {
 		if(lock->service_description)
