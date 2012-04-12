@@ -233,7 +233,7 @@ void * recv_loop(void * parg) {
 	void * pullsock, * reqsock, *intpullbus = NULL, *intreqbus = NULL;
 	int enablepull = 0, enablereq = 0, n = 0;
 	zmq_pollitem_t pollables[3];
-	int npollables = 0, rc, npullthreads = 0, nreqthreads = 0;
+	int rc, npullthreads = 0, nreqthreads = 0;
 	pthread_t * threads = NULL;
 
 	sigset_t signal_set;
@@ -255,12 +255,14 @@ void * recv_loop(void * parg) {
 		memset(threads, 0, sizeof(pthread_t) * nthreads);
 	}
 
+	memset(pollables, 0, sizeof(pollables));
+
 	if(enablepull) {
 		pullsock = getsock("pull", ZMQ_PULL);
 		if(!pullsock)
 			return NULL;
-		pollables[npollables].socket = pullsock;
-		pollables[npollables++].events = ZMQ_POLLIN;
+		pollables[0].socket = pullsock;
+		pollables[0].events = ZMQ_POLLIN;
 
 		if(npullthreads > 0) {
 			int i;
@@ -309,8 +311,8 @@ void * recv_loop(void * parg) {
 				}
 			}
 
-			pollables[npollables].socket = intreqbus;
-			pollables[npollables++].events = ZMQ_POLLIN;
+			pollables[2].socket = intreqbus;
+			pollables[2].events = ZMQ_POLLIN;
 		} else {
 			reqsock = getsock("reply", ZMQ_REP);
 			if(!reqsock) {
@@ -320,8 +322,8 @@ void * recv_loop(void * parg) {
 			}
 		}
 
-		pollables[npollables].socket = reqsock;
-		pollables[npollables++].events = ZMQ_POLLIN;
+		pollables[1].socket = reqsock;
+		pollables[1].events = ZMQ_POLLIN;
 	}
 
 	lock_skiplist = skiplist_new(15, 0.5, 0, 0, lock_obj_compare);
@@ -329,11 +331,11 @@ void * recv_loop(void * parg) {
 	pthread_mutex_unlock(&recv_loop_mutex);
 
 	while(1) {
-		int events;
-		size_t size = sizeof(events);
+		int64_t more;
+		size_t moresize = sizeof(more);
 		zmq_msg_t tmpmsg;
 
-		if((rc = zmq_poll(pollables, npollables, -1)) < 0) {
+		if((rc = zmq_poll(pollables, 3, -1)) < 0) {
 			rc = errno;
 			if(rc == ETERM)
 				break;
@@ -346,8 +348,7 @@ void * recv_loop(void * parg) {
 			}
 		}
 
-		if(enablepull && zmq_getsockopt(pullsock, ZMQ_EVENTS,
-			&events, &size) == 0 && events == ZMQ_POLLIN) {
+		if(enablepull && pollables[0].revents & ZMQ_POLLIN) {
 			zmq_msg_init(&tmpmsg);
 			if((rc = zmq_recv(pullsock, &tmpmsg, 0)) != 0) {
 				zmq_msg_close(&tmpmsg);
@@ -359,28 +360,33 @@ void * recv_loop(void * parg) {
 				zmq_send(intpullbus, &tmpmsg, 0);
 			zmq_msg_close(&tmpmsg);
 		}
-		if(enablereq && zmq_getsockopt(reqsock, ZMQ_EVENTS,
-			&events, &size) == 0 && events == ZMQ_POLLIN) {
-			zmq_msg_init(&tmpmsg);
-			if((rc = zmq_recv(reqsock, &tmpmsg, 0)) != 0) {
+		if(enablereq && pollables[1].revents & ZMQ_POLLIN) {
+			do {
+				zmq_msg_init(&tmpmsg);
+				if((rc = zmq_recv(reqsock, &tmpmsg, 0)) != 0) {
+					zmq_msg_close(&tmpmsg);
+					continue;
+				}
+				if(nreqthreads == 0)
+					process_req_msg(&tmpmsg, reqsock);
+				else {
+					zmq_getsockopt(reqsock, ZMQ_RCVMORE, &more, &moresize); 
+					zmq_send(intreqbus, &tmpmsg, more ? ZMQ_SNDMORE : 0);
+				}
 				zmq_msg_close(&tmpmsg);
-				continue;
-			}
-			if(nreqthreads == 0)
-				process_req_msg(&tmpmsg, reqsock);
-			else
-				zmq_send(intreqbus, &tmpmsg, 0);
-			zmq_msg_close(&tmpmsg);
+			} while(nreqthreads > 0 && more);
 		}
-		if(nreqthreads > 0 && zmq_getsockopt(intreqbus, ZMQ_EVENTS,
-			&events, &size) == 0 && events == ZMQ_POLLIN) {
-			zmq_msg_init(&tmpmsg);
-			if((rc = zmq_recv(intreqbus, &tmpmsg, 0)) != 0) {
+		if(nreqthreads > 0 && pollables[2].revents & ZMQ_POLLIN) {
+			do {
+				zmq_msg_init(&tmpmsg);
+				if((rc = zmq_recv(intreqbus, &tmpmsg, 0)) != 0) {
+					zmq_msg_close(&tmpmsg);
+					continue;
+				}
+				zmq_getsockopt(intreqbus, ZMQ_RCVMORE, &more, &moresize);
+				zmq_send(reqsock, &tmpmsg, more ? ZMQ_SNDMORE : 0);
 				zmq_msg_close(&tmpmsg);
-				continue;
-			}
-			zmq_send(reqsock, &tmpmsg, 0);
-			zmq_msg_close(&tmpmsg);
+			} while(more);
 		}
 	}
 
