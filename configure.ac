@@ -1,5 +1,5 @@
 AC_PREREQ([2.58])
-AC_INIT([nagmq], [1.2], [jbreams@gmail.com])
+AC_INIT([nagmq], [1.2.2], [jbreams@gmail.com])
 AC_CONFIG_AUX_DIR([.])
 AM_INIT_AUTOMAKE([-Wall -Werror foreign])
 AC_CONFIG_SRCDIR([mods/nagmq_pub.c])
@@ -55,6 +55,6 @@ if test "x$PCRE_CONFIG" != "x"; then
 	AC_DEFINE([HAVE_PCRE], [], [PCRE Libraries are installed])
 fi
 
-AC_CONFIG_FILES([Makefile mods/Makefile dnxmq/Makefile])
+AC_CONFIG_FILES([Makefile mods/Makefile dnxmq/Makefile libev/Makefile])
 AC_CONFIG_SUBDIRS([jansson])
 AC_OUTPUT

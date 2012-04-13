@@ -41,7 +41,7 @@ set to zero.
 The following preprocessor constants specify the current version of
 the library:
 
-``JANSSON_MAJOR_VERSION``, ``JANSSON_MINOR_VERSION``, ``JANSSON_MICRO_VERSION``
+``JANSSON_VERSION_MAJOR``, ``JANSSON_VERSION_MINOR``, ``JANSSON_VERSION_MICRO``
   Integers specifying the major, minor and micro versions,
   respectively.
 
