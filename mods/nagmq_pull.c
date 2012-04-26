@@ -34,10 +34,13 @@ int handle_timedevent(int which, void * obj) {
 
 	int rc;
 	if(crpullsock) {
-		while(1) {
+		uint32_t events = 0;
+		size_t evsize = sizeof(events);
+		while(zmq_getsockopt(crpullsock, ZMQ_EVENTS, &events, &evsize) == 0 &&
+			events & ZMQ_POLLIN) {
 			zmq_msg_t crm;
 			zmq_msg_init(&crm);
-			if(zmq_recv(crpullsock, &crm, ZMQ_NOBLOCK) != 0) {
+			if(zmq_recv(crpullsock, &crm, 0) != 0) {
 				if(errno != EINTR)
 					break;
 			}
