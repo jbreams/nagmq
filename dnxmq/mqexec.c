@@ -7,7 +7,7 @@
 #include <stdint.h>
 #include <fcntl.h>
 #include <pwd.h>
-#include <libev/ev.h>
+#include <ev.h>
 #include <zmq.h>
 #include <jansson.h>
 #include <syslog.h>

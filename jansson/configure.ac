@@ -1,7 +1,7 @@
-AC_PREREQ([2.59])
-AC_INIT([jansson], [2.4-dev], [petri@digip.org])
+AC_PREREQ([2.60])
+AC_INIT([jansson], [2.3], [petri@digip.org])
 
-AM_INIT_AUTOMAKE([1.9 foreign])
+AM_INIT_AUTOMAKE([1.10 foreign])
 
 AC_CONFIG_SRCDIR([src/value.c])
 AC_CONFIG_HEADERS([config.h])

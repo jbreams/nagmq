@@ -197,10 +197,16 @@ void payload_end_object(struct payload * po) {
 }
 
 void payload_finalize(struct payload * po) {
+	size_t offset = po->bufused;
+	if(offset > 2)
+		offset -= 2;
+	adjust_payload_len(po, sizeof("] "));
 	if(po->json_buf[0] == '[')
-		sprintf(po->json_buf + po->bufused - 2, " ]");
+		sprintf(po->json_buf + offset, " ]");
 	else
-		sprintf(po->json_buf + po->bufused - 2, " }");
+		sprintf(po->json_buf + offset, " }");
+	if(offset == 2)
+		po->bufused += 2;
 	if(po->keys) {
 		int i;
 		for(i = 0; i < 255; i++) {
