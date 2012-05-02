@@ -301,8 +301,8 @@ static struct payload * parse_notification(nebstruct_notification_data * state) 
 		payload_new_string(ret, "type", "notification_start");
 	else if(state->type == NEBTYPE_NOTIFICATION_END)
 		payload_new_string(ret, "type", "notification_end");
-	parse_timestamp(ret, "start_time", &state->start_time);
-	parse_timestamp(ret, "end_time", &state->end_time);
+	payload_new_timestamp(ret, "start_time", &state->start_time);
+	payload_new_timestamp(ret, "end_time", &state->end_time);
 	payload_new_string(ret, "host_name", state->host_name);
 	payload_new_string(ret, "service_description", state->service_description);
 	payload_new_integer(ret, "state", state->state);
