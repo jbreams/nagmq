@@ -22,7 +22,7 @@ def send_tweet(msg, depth=0):
 	try:
 		api.update_status(msg[:140])
 	except Exception, e:
-		if(e.reason == 'Status is a duplicate'):
+		if(e.reason == 'Status is a duplicate.'):
 			msg += "({0})".format(
 				payload['timestamp']['tv_sec'])
 			send_tweet(msg, depth + 1)

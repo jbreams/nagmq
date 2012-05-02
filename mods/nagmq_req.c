@@ -610,6 +610,15 @@ static void parse_contact(contact * state, struct payload * ret) {
 		payload_end_array(ret);
 	} else
 		payload_new_string(ret, "address", NULL);
+	if(state->contactgroups_ptr && payload_start_array(ret, "contact_groups")) {
+		objectlist * link = state->contactgroups_ptr;
+		while(link) {
+			payload_new_string(ret, NULL,
+				((contactgroup*)link->object_ptr)->group_name);
+			link = link->next;
+		}
+	} else
+		payload_new_string(ret, "contactgroups", NULL);
 	payload_new_boolean(ret, "notify_on_service_unknown", state->notify_on_service_unknown);
 	payload_new_boolean(ret, "notify_on_service_warning", state->notify_on_service_warning);
 	payload_new_boolean(ret, "notify_on_service_critical", state->notify_on_service_critical);
