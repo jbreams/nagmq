@@ -14,7 +14,7 @@ api = tweepy.API(auth)
 zctx = zmq.Context()
 sub = zctx.socket(zmq.SUB)
 sub.connect("ipc:///tmp/nagmq.sock")
-sub.setsockopt(zmq.SUBSCRIBE, 'statechange')
+sub.setsockopt(zmq.SUBSCRIBE, 'notification_start')
 
 def send_tweet(msg, depth=0):
 	if(depth == 2):
@@ -43,15 +43,6 @@ while True:
 			payload['host_name'])
 	else:
 		name = payload['host_name']
-	if(payload['state'] != payload['last_hard_state']):
-		continue
-	if(payload['current_attempt'] == 1):
-		continue
-	if(payload['problem_has_been_acknowledged'] == True and
-		payload['state'] != 0):
-		continue
-	if(payload['is_flapping'] == True):
-		continue
 	if(payload['service_description'] != None):
 		if(payload['state'] == 0):
 			state = 'OK'
