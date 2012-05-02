@@ -23,7 +23,8 @@ extern json_t *  config;
 #define OR_HOSTCHECK_INITIATE 0
 #define OR_SERVICECHECK_INITIATE 1
 #define OR_EVENTHANDLER_START 2
-#define OR_MAX 3
+#define OR_NOTIFICATION_START 3
+#define OR_MAX 4
 static int overrides[OR_MAX];
 
 void lock_obj(char * hostname, char * service, char ** plugin_output,
@@ -293,6 +294,26 @@ static struct payload * parse_downtime(nebstruct_downtime_data * state) {
 	return ret;
 }
 
+static struct payload * parse_notification(nebstruct_notification_data * state) {
+	struct payload * ret = payload_new();
+
+	if(state->type == NEBTYPE_NOTIFICATION_START)
+		payload_new_string(ret, "type", "notification_start");
+	else if(state->type == NEBTYPE_NOTIFICATION_END)
+		payload_new_string(ret, "type", "notification_end");
+	parse_timestamp(ret, "start_time", &state->start_time);
+	parse_timestamp(ret, "end_time", &state->end_time);
+	payload_new_string(ret, "host_name", state->host_name);
+	payload_new_string(ret, "service_description", state->service_description);
+	payload_new_integer(ret, "state", state->state);
+	payload_new_string(ret, "output", state->output);
+	payload_new_string(ret, "ack_author", state->ack_author);
+	payload_new_string(ret, "ack_data", state->ack_data);
+	payload_new_boolean(ret, "escalated", state->escalated);
+	payload_new_integer(ret, "contacts_notified", state->contacts_notified);
+	return ret;
+}
+
 static struct payload * parse_flapping(nebstruct_flapping_data * state) {
 	struct payload * ret = payload_new();
 
@@ -377,8 +398,14 @@ int handle_nagdata(int which, void * obj) {
 				return 0;
 		}
 		break;
+	case NEBCALLBACK_NOTIFICATION_DATA:
+		payload = parse_notification(obj);
+		if(raw->type == NEBTYPE_NOTIFICATION_START &&
+			overrides[OR_NOTIFICATION_START])
+			rc = NEBERROR_CALLBACKOVERRIDE;
+		break;
 	case NEBCALLBACK_ACKNOWLEDGEMENT_DATA:
-		if(raw->type != NEBTYPE_NOTIFICATION_START)
+		if(raw->type != NEBTYPE_ACKNOWLEDGEMENT_ADD)
 			return 0;
 		payload = parse_acknowledgement(obj);
 		break;
@@ -417,7 +444,9 @@ static void override_string(const char * in) {
 	else if(strcasecmp(in, "host_check_initiate") == 0)
 		overrides[OR_HOSTCHECK_INITIATE] = 1;
 	else if(strcasecmp(in, "eventhandler_start") == 0)
-		overrides[OR_EVENTHANDLER_START] = 1;	
+		overrides[OR_EVENTHANDLER_START] = 1;
+	else if(strcasecmp(in, "notification_start") == 0)
+		overrides[OR_NOTIFICATION_START] = 1;	
 }
 
 int handle_pubstartup() {
@@ -459,6 +488,8 @@ int handle_pubstartup() {
 	neb_register_callback(NEBCALLBACK_ACKNOWLEDGEMENT_DATA, handle,
 		0, handle_nagdata);
 	neb_register_callback(NEBCALLBACK_STATE_CHANGE_DATA, handle,
+		0, handle_nagdata);
+	neb_register_callback(NEBCALLBACK_NOTIFICATION_DATA, handle,
 		0, handle_nagdata);
 	return 0;
 }
