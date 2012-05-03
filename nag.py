@@ -20,7 +20,7 @@ args = deque(args)
 verbmap = { 
 	'enable': [ 'checks', 'notifications' ],
 	'disable': [ 'checks', 'notifications' ],
-	'add': ['acknowledgement'],
+	'add': ['acknowledgement', 'comment' ],
 	'remove': ['acknowledgement'],
 	'status': [ ],
 }
@@ -99,7 +99,7 @@ def handle_notifications(verb, obj):
 	name = obj['host_name']
 	if('service_description' in obj):
 		cmd['service_description'] = obj['service_description']
-		name += '@' + obj['service_description']
+		name = obj['service_description'] + '@' + name
 		cmd['command_name'] = verb + '_service_notifications'
 	else:
 		cmd['command_name'] = verb + "_host_notifications"
@@ -118,7 +118,7 @@ def handle_checks(verb, obj):
 	name = obj['host_name']
 	if('service_description' in obj):
 		cmd['service_description'] = obj['service_description']
-		name += '@' + obj['service_description']
+		name = obj['service_description'] + '@' + name
 		cmd['command_name'] = verb + "_service_checks"
 	else:
 		cmd['command_name'] = verb + "_host_checks"
@@ -132,15 +132,9 @@ def handle_checks(verb, obj):
 	print "[{0}]: Checks {1}".format(name, pasttenses[verb])
 
 def handle_acknowledgement(verb, obj):
-	cmd = { 'type': 'acknowledgement', 'host_name':obj['host_name'],
-		'author_name':username, 'comment_data': opts.comment,
-		'time_stamp': { 'tv_sec': time.time() },
-		'notify_contacts': opts.notify,
-		'persistent_comment': opts.persistent }
 	name = obj['host_name']
 	if('service_description' in obj):
-		cmd['service_description'] = obj['service_description']
-		name += '@' + obj['service_description']
+		name = obj['service_description'] + '@' + name
 	if(verb == 'add'):
 		if(obj['current_state'] == 0):
 			print "[{0}]: No problem found".format(name)
@@ -148,16 +142,46 @@ def handle_acknowledgement(verb, obj):
 		elif(obj['problem_has_been_acknowledged']):
 			print "[{0}]: Problem already acknowledged".format(name)
 			return
-	elif(verb == 'remove' and not obj['problem_has_been_acknowledged']):
-		print "[{0}]: No acknowledgement to remove".format(name)
-		return
+		cmd = { 'type': 'acknowledgement',
+			'author_name':username, 'comment_data': opts.comment,
+			'time_stamp': { 'tv_sec': time.time() },
+			'notify_contacts': opts.notify,
+			'persistent_comment': opts.persistent }
+	elif(verb == 'remove'):
+		if(not obj['problem_has_been_acknowledged']):
+			print "[{0}]: No acknowledgement to remove".format(name)
+			return
+		cmd = { 'type': 'command' }
+		if('service_description' in obj):
+			cmd['command_name'] = 'remove_service_acknowledgement'
+		else:
+			cmd['command_name'] = 'remove_host_acknowledgement'
+	cmd['host_name'] = obj['host_name']
+	if('service_description' in obj):
+		cmd['service_description'] = obj['service_description']
 	pushsock.send_json(cmd)
 	print "[{0}]: Acknowledgement {1}".format(name, pasttenses[verb])
+
+def handle_comment(verb, obj):
+	cmd = { 'type': 'comment', 'host_name':obj['host_name'],
+		'author_name':username, 'comment_data': opts.comment,
+		'time_stamp': { 'tv_sec': time.time() },
+		'persistent_comment': opts.persistent }
+	name = obj['host_name']
+	if('service_description' in obj):
+		cmd['service_description'] = obj['service_description']
+		name = obj['service_description'] + '@' + name
+	if(verb != 'add'):
+		print '[{0}]: Cannot {1} comments!'.format(name, verb)
+		return
+	pushsock.send_json(cmd)
+	print "[{0}]: Comment {1}".format(name, pasttenses[verb])
 	
 nounmap = {
 	'notifications': handle_notifications,
 	'checks': handle_checks,
-	'acknowledgement': handle_acknowledgement }
+	'acknowledgement': handle_acknowledgement,
+	'comment': handle_comment }
 
 def is_authorized(o):
 	if(os.getuid() == 0):

@@ -129,8 +129,8 @@ static void process_acknowledgement(json_t * payload) {
 		*author_name, *comment_data;
 	int persistent_comment = 0, notify_contacts = 0,
 		acknowledgement_type = 0;
-	host * host_target;
-	service * service_target;
+	host * host_target = NULL;
+	service * service_target = NULL;
 	json_error_t err;
 	if(json_unpack_ex(payload, &err, 0, "{s:s s?:s s:s s:s s?:i s?:b s?:b}",
 		"host_name", &host_name, "service_description", &service_description,
@@ -148,7 +148,7 @@ static void process_acknowledgement(json_t * payload) {
 	if(service_target)
 		acknowledge_service_problem(service_target, author_name, comment_data,
 			acknowledgement_type, notify_contacts, persistent_comment);
-	else 
+	else if(host_target)
 		acknowledge_host_problem(host_target, author_name, comment_data,
 			acknowledgement_type, notify_contacts, persistent_comment);
 	json_decref(payload);
@@ -199,8 +199,8 @@ static void process_downtime(json_t * payload) {
 }
 
 static void process_cmd(json_t * payload) {
-	host * host_target;
-	service * service_target;
+	host * host_target = NULL;
+	service * service_target = NULL;
 	char * host_name = NULL, *service_description = NULL, *cmd_name;
 
 	if(json_unpack(payload, "{s?:s s:?s s:s}",
