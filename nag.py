@@ -270,6 +270,7 @@ for s in sorted(services.keys()):
 		if(mynoun):
 			nounmap[mynoun](myverb, h)
 	if(myverb == 'status'):
+		print so
 		print "[{0}]: {1} {2}".format(
 			s, status_to_string(so['current_state'], False),
 			so['plugin_output'])
