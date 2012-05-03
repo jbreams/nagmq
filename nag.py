@@ -169,12 +169,22 @@ def is_authorized(o):
 	return False
 
 def parse_object(o, svcname):
-	if(o['type'] == 'host' and not svcname):
+	if(o['type'] == 'host'):
 		if(o['host_name'] in hosts):
 			return
 		if(not is_authorized(o)):
-			return			
-		hosts[o['host_name']] = o
+			return
+		if(not svcname):
+			hosts[o['host_name']] = o
+		for s in o['services']:
+			if(svcname and s != svcname):
+				continue
+			reqsock.send_json( {
+				'host_name': o['host_name'],
+				'service_description': s,
+				'keys': keys } )
+			for so in json.loads(reqsock.recv()):
+				parse_object(so, svcname)
 	elif(o['type'] == 'service'):
 		if(svcname and svcname != o['service_description']):
 			return
@@ -201,14 +211,22 @@ for td in args:
 	if(not p2):
 		reqsock.send_json( {
 			'host_name': p1,
-			'hostgroup_name': p1,
 			'include_services': True,
+			'keys': keys } )
+		for o in json.loads(reqsock.recv()):
+			parse_object(o, None)
+
+		if(len(services) > 0 or len(hosts) > 0):
+			continue
+
+		reqsock.send_json( {
+			'hostgroup_name': p1,
 			'include_hosts': True,
 			'keys': keys } )
 		for o in json.loads(reqsock.recv()):
 			parse_object(o, None)
 
-		if(len(services) > 0 and len(hosts) > 0):
+		if(len(services) > 0 or len(hosts) > 0):
 			continue
 		reqsock.send_json( {
 			'list_services': p1,
@@ -230,7 +248,6 @@ for td in args:
 		reqsock.send_json( {
 			'hostgroup_name': p2,
 			'include_hosts': True,
-			'include_services': True,
 			'keys': keys } )
 		for o in json.loads(reqsock.recv()):
 			parse_object(o, p1)
@@ -270,7 +287,6 @@ for s in sorted(services.keys()):
 		if(mynoun):
 			nounmap[mynoun](myverb, h)
 	if(myverb == 'status'):
-		print so
 		print "[{0}]: {1} {2}".format(
 			s, status_to_string(so['current_state'], False),
 			so['plugin_output'])
