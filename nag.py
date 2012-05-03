@@ -1,7 +1,8 @@
 #!/usr/bin/python26
 
-import json, time, zmq, re, os, pwd
+import json, time, zmq, re, os, pwd, types
 from optparse import OptionParser
+from collections import deque
 
 op = OptionParser(usage = "[opts] {verb} {noun} [service]@{host|hostgroup}")
 op.add_option("-c", "--comment", type="string", action="store", dest="comment",
@@ -14,13 +15,11 @@ op.add_option("--config-file", action="store", type="string", dest="configfile",
 	help="Overrides default nagmq config file", default="/etc/nagios/nagmq.conf")
 
 (opts, args) = op.parse_args()
-if(len(args) < 2):
-	print "Did not specify enough arguments!"
-	exit(-1)
+args = deque(args)
 
 verbmap = { 
 	'enable': [ 'checks', 'notifications' ],
-	'disable': ['checks', 'notifications' ],
+	'disable': [ 'checks', 'notifications' ],
 	'add': ['acknowledgement'],
 	'remove': ['acknowledgement'],
 	'status': [ ],
@@ -40,27 +39,28 @@ keys = ['host_name', 'services', 'hosts', 'contacts', 'contact_groups',
 myverb = None
 mynoun = None
 
-if(args.count() < 3):
+if(len(args) < 2):
 	print "Did not specify enough arguments!"
 	exit(1)
-arg = args.pop()
 for v in verbmap:
-	if v.startswith(argv[0].lowercase()):
+	if v.startswith(args[0].lower()):
 		myverb = v
+		args.popleft()
 		break
 if not myverb:
 	print "Did not specify a verb!"
 	exit(1)
 
 for n in verbmap[myverb]:
-	if n.startswith(argv[1].lowercase()):
+	if n.startswith(args[0].lower()):
 		mynoun = n
+		args.popleft()
 		break
 if not mynoun and verbmap[myverb]:
 	print "Could not find a noun for {0}".format(myverb);
 	exit(1)
 
-configfile = open(opts['config'], 'r')
+configfile = open(opts.configfile, 'r')
 config = json.load(configfile)
 configfile.close()
 if('pull' not in config or 'bind' not in config['pull']):
@@ -72,23 +72,27 @@ if('reply' not in config or 'bind' not in config['reply']):
 
 ctx = zmq.Context()
 reqsock = ctx.socket(zmq.REQ)
-if(type(config['reply']['bind']) == str):
+if(isinstance(config['reply']['bind'], types.StringTypes)):
 	reqsock.connect(config['reply']['bind'])
 elif(type(config['reply']['bind']) == list):
 	for a in config['reply']['bind']:
 		if(reqsock.connect(a)):
 			break
+else:
+	print "No reply bindpoint!"
 pushsock = ctx.socket(zmq.PUSH)
-if(type(config['pull']['bind']) == str):
+if(isinstance(config['pull']['bind'], types.StringTypes)):
 	pushsock.connect(config['pull']['bind'])
 elif(type(config['pull']['bind']) == list):
 	for a in config['pull']['bind']:
 		if(pushsock.connect(a)):
 			break
+else:
+	print "No pull bindpoint!"
 
 services = dict()
 hosts = dict()
-contactgroups = [ ]
+contactgroups = set([ ])
 
 def handle_notifications(verb, obj):
 	cmd = { 'host_name':obj['host_name'], 'type':'command' }
@@ -96,13 +100,16 @@ def handle_notifications(verb, obj):
 	if('service_description' in obj):
 		cmd['service_description'] = obj['service_description']
 		name += '@' + obj['service_description']
-	cmd['command_name'] = verb + "_notifications"
+		cmd['command_name'] = verb + '_service_notifications'
+	else:
+		cmd['command_name'] = verb + "_host_notifications"
 	if(verb == 'enable' and obj['notifications_enabled']):
 		print "[{0}]: Notifications already enabled".format(name)
 		return
 	elif(verb == 'disable' and not obj['notifications_enabled']):
 		print "[{0}]: Notifications already disabled".format(name)
 		return
+	print cmd
 	pushsock.send_json(cmd)
 	print "[{0}]: Notifications {1}".format(name, pasttenses[verb])
 
@@ -124,7 +131,7 @@ def handle_checks(verb, obj):
 	pushsock.send_json(cmd)
 	print "[{0}]: Checks {1}".format(name, pasttenses[verb])
 
-def handle_acknowledgements(verb, obj):
+def handle_acknowledgement(verb, obj):
 	cmd = { 'type': 'acknowledgement', 'host_name':obj['host_name'],
 		'author_name':username, 'comment_data': opts.comment,
 		'time_stamp': { 'tv_sec': time.time() },
@@ -134,9 +141,8 @@ def handle_acknowledgements(verb, obj):
 	if('service_description' in obj):
 		cmd['service_description'] = obj['service_description']
 		name += '@' + obj['service_description']
-
 	if(verb == 'add'):
-		if(obj['current_status'] == 0):
+		if(obj['current_state'] == 0):
 			print "[{0}]: No problem found".format(name)
 			return
 		elif(obj['problem_has_been_acknowledged']):
@@ -146,19 +152,27 @@ def handle_acknowledgements(verb, obj):
 		print "[{0}]: No acknowledgement to remove".format(name)
 		return
 	pushsock.send_json(cmd)
-	print "{0}: Acknowledgement {1}".format(name, pasttenses[verb])
+	print "[{0}]: Acknowledgement {1}".format(name, pasttenses[verb])
 	
 nounmap = {
 	'notifications': handle_notifications,
 	'checks': handle_checks,
 	'acknowledgement': handle_acknowledgement }
 
+def is_authorized(o):
+	if(os.getuid() == 0):
+		return True
+	if(o['contacts'] and username in o['contacts']):
+		return True
+	if(len(contactgroups.intersection(set(o['contact_groups']))) > 0):
+		return True
+	return False
+
 def parse_object(o, svcname):
 	if(o['type'] == 'host' and not svcname):
 		if(o['host_name'] in hosts):
 			return
-		if(os.getuid() != 0 and username not in o['contacts'] and
-			len(contactgroups.intersection(set(o['contact_groups']))) == 0):
+		if(not is_authorized(o)):
 			return			
 		hosts[o['host_name']] = o
 	elif(o['type'] == 'service'):
@@ -167,8 +181,7 @@ def parse_object(o, svcname):
 		name = "{0}@{1}".format(o['service_description'], o['host_name'])
 		if(name in services):
 			return
-		if(os.getuid() != 0 and username not in o['contacts'] and
-			len(contactgroups.intersection(set(o['contact_groups']))) == 0):
+		if(not is_authorized(o)):
 			return
 		services[name] = o
 
@@ -176,15 +189,15 @@ username = pwd.getpwuid(os.getuid())[0]
 if(os.getuid() != 0):
 	reqsock.send_json( {
 		'contact_name': username,
-		'keys': ['contactgroups', 'type', 'name'] } )
+		'keys': ['contact_groups', 'type', 'name'] } )
 	for o in json.loads(reqsock.recv()):
 		if(o['type'] == 'contact'):
-			contactgroups = set(o['contactgroups'])
+			contactgroups = set(o['contact_groups'])
 			break
 	
-for td in argv[2:]:
+for td in args:
 	tm = re.match(r'([^\@]+)?\@?([^\s]+)?', td)
-	p1, p2 = (tm.group(1), tm.group(2))
+	p1, p2 = tm.group(1), tm.group(2)
 	if(not p2):
 		reqsock.send_json( {
 			'host_name': p1,
@@ -242,21 +255,24 @@ def status_to_string(val, ishost):
 		elif(val == 3):
 			return "UNKNOWN"
 
-hosts_printed = [ ]
+hosts_printed = { }
 for s in sorted(services.keys()):
-	if(s['host_name'] not in hosts_printed and
-		s['host_name'] in hosts):
-		h = hosts[s['host_name']]
+	so = services[s]
+	if(so['host_name'] not in hosts_printed and
+		so['host_name'] in hosts):
+		h = hosts[so['host_name']]
 		if(myverb == 'status'):
 			print "[{0}]: {1} {2}".format(
 				h['host_name'],
 				status_to_string(h['current_state'], True),
 				h['plugin_output'])
 		hosts_printed[h['host_name']] = True
-		nounmap[mynoun](myverb, h)
+		if(mynoun):
+			nounmap[mynoun](myverb, h)
 	if(myverb == 'status'):
 		print "[{0}]: {1} {2}".format(
-			s, status_to_string(s['current_state'], False),
-			s['plugin_output'])
-	nounmap[mynoun](myverb, services[s])
+			s, status_to_string(so['current_state'], False),
+			so['plugin_output'])
+	if(mynoun):
+		nounmap[mynoun](myverb, services[s])
 exit(0)
