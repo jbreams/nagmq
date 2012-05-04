@@ -1,0 +1,67 @@
+#!/bin/bash
+
+. /etc/init.d/functions
+. /etc/sysconfig/mqexec
+
+prog="mqexec"
+
+start() {
+	if [ -z "$NOBROKER" ]; then
+		echo -n $"Starting $prog broker: "
+		if [ -e /var/lock/subsys/mqexec ]; then
+			echo -n $"cannot start mqexec. It is already running.";
+			failure $"cannot start mqexec. mqexec is already running.";
+			echo
+			return 1
+		fi
+		daemon /opt/local/bin/mqexec $NAGMQCONFIG broker
+		RETVAL=$?
+		[ $RETVAL -eq 0 ] || return $RETVAL
+		echo
+	fi
+
+	for i in `eval echo {0..$EXECUTORCOUNT}`; do
+		echo -n $"Starting $prog worker #$i: "
+		daemon /opt/local/bin/mqexec $NAGMQCONFIG worker
+		RETVAL=$?
+		[ $RETVAL -eq 0 ] || return $RETVAL
+		echo
+	done
+	touch /var/lock/subsys/mqexec
+	return $RETVAL
+}
+
+stop() {
+	echo -n $"Stopping $prog: "
+	if [ ! -e /var/lock/subsys/mqexec ]; then
+		echo -n $"cannot stop mqexec: it is not running."
+		failure $"cannot stop mqexec: it is not running."
+		echo
+		return 1
+	fi
+	killproc mqexec
+	RETVAL=$?
+	echo
+	[ $RETVAL -eq 0 ] && rm -f /var/lock/subsys/mqexec
+	return $RETVAL
+}
+
+restart() {
+	stop
+	start
+}
+
+case "$1" in
+	start)
+		start
+		;;
+	stop)
+		stop
+		;;
+	restart)
+		restart
+		;;
+	*)
+		echo $"Usage: $0 {start|stop|restart}"
+		exit 1
+esac
