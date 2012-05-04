@@ -6,23 +6,16 @@
 prog="mqexec"
 
 start() {
-	if [ -z "$NOBROKER" ]; then
-		echo -n $"Starting $prog broker: "
-		if [ -e /var/lock/subsys/mqexec ]; then
-			echo -n $"cannot start mqexec. It is already running.";
-			failure $"cannot start mqexec. mqexec is already running.";
-			echo
-			return 1
-		fi
-		daemon /opt/local/bin/mqexec $NAGMQCONFIG broker
-		RETVAL=$?
-		[ $RETVAL -eq 0 ] || return $RETVAL
+	if [ -e /var/lock/subsys/mqexec ]; then
+		echo -n $"cannot start mqexec. It is already running.";
+		failure $"cannot start mqexec. mqexec is already running.";
 		echo
+		return 1
 	fi
 
 	for i in `eval echo {0..$EXECUTORCOUNT}`; do
 		echo -n $"Starting $prog worker #$i: "
-		daemon /opt/local/bin/mqexec $NAGMQCONFIG worker
+		daemon mqexec $NAGMQCONFIG
 		RETVAL=$?
 		[ $RETVAL -eq 0 ] || return $RETVAL
 		echo
