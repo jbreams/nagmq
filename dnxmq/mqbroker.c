@@ -89,7 +89,7 @@ void parse_sock_directive(json_t * arg, int offset) {
 	int ntype = -1;
 	char *type;
 	int64_t hwm = 0, swap = 0, affinity = 0;
-	json_t * subscribe = NULL, *connect = NULL, *bind;
+	json_t * subscribe = NULL, *connect = NULL, *bind = NULL;
 	void * sock;
 	if(json_unpack(arg, "{s:s s?:o s?:o s?:o s?i s?i s?i}", 
 		"type", &type, "connect", &connect, "bind", &bind,
@@ -241,7 +241,7 @@ int main(int argc, char ** argv) {
 	ndevs = setup_zmq(config);
 	json_decref(config);
 	// Don't check for events on monitor sockets
-	for(i = 0; i < ndevs * 3; i += 3)
+	for(i = 2; i < ndevs * 3; i += 3)
 		pollables[i].events = 0;
 
 	struct sigaction killaction, oldaction;
@@ -268,16 +268,20 @@ int main(int argc, char ** argv) {
 
 		size_t i;
 		for(i = 0; i < ndevs; i++) {
-			if(pollables[i].revents & ZMQ_POLLIN)
+			if(pollables[i].revents & ZMQ_POLLIN) {
+				logit(DEBUG, "Received message from frontend for device %d", i);
 				do_forward(
 					pollables[i].socket,
 					pollables[i+1].socket,
 					pollables[i+2].socket);
-			if(pollables[i+1].revents & ZMQ_POLLIN)
+			}
+			if(pollables[i+1].revents & ZMQ_POLLIN) {
+				logit(DEBUG, "Received message from backend for device %d", i);
 				do_forward(
 					pollables[i+1].socket,
 					pollables[i].socket,
 					pollables[i+2].socket);
+			}
 		}
 	} while(keeprunning);
 

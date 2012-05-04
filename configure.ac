@@ -1,4 +1,4 @@
-AC_PREREQ([2.58])
+AC_PREREQ([2.60])
 AC_INIT([nagmq], [1.2.5], [jbreams@gmail.com])
 AC_CONFIG_AUX_DIR([.])
 AM_INIT_AUTOMAKE([-Wall -Werror foreign])
@@ -19,6 +19,8 @@ AC_ARG_WITH([pcre-config],
 AC_PATH_PROG(PCRE_CONFIG, [pcre-config], $pcre_config_prog)
 
 AC_PROG_CC
+AM_PROG_CC_C_O
+AM_PROG_AR
 AC_PROG_LIBTOOL
 
 AC_CHECK_LIB([zmq], [zmq_socket], [],
