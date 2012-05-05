@@ -422,6 +422,7 @@ void recv_job_cb(struct ev_loop * loop, ev_io * i, int event) {
 		zmq_getsockopt(i->data, ZMQ_RCVMORE, &rcvmore, &rms);
 		if(rcvmore) {
 			zmq_msg_close(&inmsg);
+			zmq_msg_init(&inmsg);
 			if(zmq_recv(i->data, &inmsg, 0) != 0) {
 				logit(ERR, "Error receiving message from broker %s",
 					zmq_strerror(errno));
