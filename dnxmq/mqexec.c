@@ -497,22 +497,52 @@ int main(int argc, char ** argv) {
 	ev_io pullio;
 	struct ev_loop  * loop;
 	json_t * jobs = NULL, * results, *publisher = NULL;
-	int iothreads = 1;
-	int pullfd = -1, i;
+	int pullfd = -1, i, daemonize = 0, iothreads = 1;
 	size_t pullfds = sizeof(pullfd);
 	json_t * config, *filter = NULL;
 	json_error_t config_err;
+	char ch;
 
-	if(argc < 2) {
-		logit(ERR, "Must supply path to nagmq config.");
-		exit(-1);
+	while((ch = getopt(argc, argv, "vsd")) != -1) {
+		switch(ch) {
+			case 'v':
+				verbose = 1;
+				break;
+			case 's':
+				usesyslog = 1;
+				break;
+			case 'd':
+				daemonize = 1;
+				break;
+			case 'h':
+				printf("%s [-dsvh] {pathtoconfig}\n"
+					"\t-d\tDaemonize\n"
+					"\t-s\tUse syslog for logging\n"
+					"\t-v\tVerbose logging\n"
+					"\t-h\tPrint this message\n", argv[0]);
+				break;
+		}
+	}
+	if(daemonize)
+		usesyslog = 1;
+	
+	argc -= optind;
+	argv += optind;
+	if(argc < 1) {
+		logit(ERR, "Must supply path to executor config!");
+		exit(1);
 	}
 
-	config = json_load_file(argv[1], JSON_DISABLE_EOF_CHECK, &config_err);
+	config = json_load_file(argv[0], JSON_DISABLE_EOF_CHECK, &config_err);
 	if(config == NULL) {
 		logit(ERR, "Error parsing config: %s: (line: %d column: %d)",
 			config_err.text, config_err.line, config_err.column);
-		exit(-1);
+		exit(1);
+	}
+
+	if(daemonize && daemon(0, 0) < 0) {
+		logit(ERR, "Error daemonizing: %s", strerror(errno));
+		exit(1);
 	}
 
 	if(json_unpack(config, "{s:{s?:os:os?is?bs?bs?:o}}",

@@ -5,6 +5,7 @@
 #include <jansson.h>
 #include <syslog.h>
 #include <signal.h>
+#include <unistd.h>
 
 zmq_pollitem_t * pollables;
 size_t ndevices;
@@ -224,17 +225,48 @@ int main(int argc, char ** argv) {
 	json_error_t config_err;
 	json_t * config;
 	size_t ndevs, i;
-	int rc;
+	int rc, daemonize = 0;
+	char ch;
 
-	if(argc < 2) {
-		logit(ERR, "Must supply path to nagmq config");
+	while((ch = getopt(argc, argv, "vsd")) != -1) {
+		switch(ch) {
+			case 'v':
+				verbose = 1;
+				break;
+			case 's':
+				usesyslog = 1;
+				break;
+			case 'd':
+				daemonize = 1;
+				break;
+			case 'h':
+				printf("%s [-dsvh] {pathtoconfig}\n"
+					"\t-d\tDaemonize\n"
+					"\t-s\tUse syslog for logging\n"
+					"\t-v\tVerbose logging\n"
+					"\t-h\tPrint this message\n", argv[0]);
+				break;
+		}
+	}
+	if(daemonize)
+		usesyslog = 1;
+	
+	argc -= optind;
+	argv += optind;
+	if(argc < 1) {
+		logit(ERR, "Must supply path to broker config!");
 		exit(1);
 	}
 
-	config = json_load_file(argv[1], JSON_DISABLE_EOF_CHECK, &config_err);
+	config = json_load_file(argv[0], JSON_DISABLE_EOF_CHECK, &config_err);
 	if(config == NULL) {
 		logit(ERR, "Error parsing config: %s: (line: %d column: %d)",
 			config_err.text, config_err.line, config_err.column);
+		exit(1);
+	}
+
+	if(daemonize && daemon(0, 0) < 0) {
+		logit(ERR, "Error daemonizing: %s", strerror(errno));
 		exit(1);
 	}
 
