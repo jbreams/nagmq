@@ -265,9 +265,11 @@ int main(int argc, char ** argv) {
 			logit(WARN, "Received error from poll: %s",
 				zmq_strerror(rc));
 		}
+		if(rc < 1)
+			continue;
 
 		size_t i;
-		for(i = 0; i < ndevs; i++) {
+		for(i = 0; i < ndevs * 3; i+= 3) {
 			if(pollables[i].revents & ZMQ_POLLIN) {
 				logit(DEBUG, "Received message from frontend for device %d", i);
 				do_forward(
