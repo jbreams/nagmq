@@ -414,7 +414,8 @@ void recv_job_cb(struct ev_loop * loop, ev_io * i, int event) {
 
 		zmq_msg_init(&inmsg);
 		if(zmq_recv(i->data, &inmsg, 0) != 0) {
-			logit(ERR, "Error receiving message from broker %d", errno);
+			logit(ERR, "Error receiving message from broker %s",
+				zmq_strerror(errno));
 			continue;
 		}
 
@@ -422,7 +423,8 @@ void recv_job_cb(struct ev_loop * loop, ev_io * i, int event) {
 		if(rcvmore) {
 			zmq_msg_close(&inmsg);
 			if(zmq_recv(i->data, &inmsg, 0) != 0) {
-				logit(ERR, "Error receiving message from broker %d", errno);
+				logit(ERR, "Error receiving message from broker %s",
+					zmq_strerror(errno));
 				continue;
 			}
 		}
@@ -500,8 +502,8 @@ int main(int argc, char ** argv) {
 	json_t * config, *filter = NULL;
 	json_error_t config_err;
 
-	if(argc == 2) {
-		logit(ERR, "Must supply path to nagmq config and process type.");
+	if(argc < 2) {
+		logit(ERR, "Must supply path to nagmq config.");
 		exit(-1);
 	}
 
