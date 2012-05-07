@@ -150,12 +150,12 @@ void parse_sock_directive(json_t * arg, int offset) {
 	}
 }
 
-size_t setup_zmq(json_t * config) {
+size_t setup_zmq(json_t * config, const char * configname) {
 	int iothreads = 1;
 	size_t i = 0, x = 0;
 	json_t * devarray;
 	if(json_unpack(config, "{s?:i s:o}", "iothreads", &iothreads,
-		"devices", &devarray) != 0) {
+		configname, &devarray) != 0) {
 		logit(ERR, "Error getting config while setting up context");
 		exit(1);
 	}
@@ -226,9 +226,9 @@ int main(int argc, char ** argv) {
 	json_t * config;
 	size_t ndevs, i;
 	int rc, daemonize = 0;
-	char ch;
+	char ch, * confarray = "devices";
 
-	while((ch = getopt(argc, argv, "vsd")) != -1) {
+	while((ch = getopt(argc, argv, "vsdc:")) != -1) {
 		switch(ch) {
 			case 'v':
 				verbose = 1;
@@ -240,11 +240,15 @@ int main(int argc, char ** argv) {
 				daemonize = 1;
 				break;
 			case 'h':
-				printf("%s [-dsvh] {pathtoconfig}\n"
+				printf("%s [-dsvh] [-c arrayname] {pathtoconfig}\n"
 					"\t-d\tDaemonize\n"
 					"\t-s\tUse syslog for logging\n"
 					"\t-v\tVerbose logging\n"
-					"\t-h\tPrint this message\n", argv[0]);
+					"\t-h\tPrint this message\n"
+					"\t-c name\tSpecify the conf object to use\n", argv[0]);
+				break;
+			case 'c':
+				confarray = optarg;
 				break;
 		}
 	}
@@ -270,7 +274,7 @@ int main(int argc, char ** argv) {
 		exit(1);
 	}
 
-	ndevs = setup_zmq(config);
+	ndevs = setup_zmq(config, confarray);
 	json_decref(config);
 	// Don't check for events on monitor sockets
 	for(i = 2; i < ndevs * 3; i += 3)

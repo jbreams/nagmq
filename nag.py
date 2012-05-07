@@ -63,32 +63,16 @@ if not mynoun and verbmap[myverb]:
 configfile = open(opts.configfile, 'r')
 config = json.load(configfile)
 configfile.close()
-if('pull' not in config or 'bind' not in config['pull']):
-	print "Could not find definition for pull socket in config file"
-	exit(1)
-if('reply' not in config or 'bind' not in config['reply']):
-	print "Could not find definition for reply socket in config file"
+if('cli' not in config or 'reply' not in config['cli'] or
+	'pull' not in config['cli']):
+	print "Could not find cli configuration in configuration file"
 	exit(1)
 
 ctx = zmq.Context()
 reqsock = ctx.socket(zmq.REQ)
-if(isinstance(config['reply']['bind'], types.StringTypes)):
-	reqsock.connect(config['reply']['bind'])
-elif(type(config['reply']['bind']) == list):
-	for a in config['reply']['bind']:
-		if(reqsock.connect(a)):
-			break
-else:
-	print "No reply bindpoint!"
+reqsock.connect(config['cli']['reply'])
 pushsock = ctx.socket(zmq.PUSH)
-if(isinstance(config['pull']['bind'], types.StringTypes)):
-	pushsock.connect(config['pull']['bind'])
-elif(type(config['pull']['bind']) == list):
-	for a in config['pull']['bind']:
-		if(pushsock.connect(a)):
-			break
-else:
-	print "No pull bindpoint!"
+pushsock.connect(config['cli']['pull'])
 
 services = dict()
 hosts = dict()

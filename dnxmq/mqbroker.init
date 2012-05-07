@@ -4,6 +4,10 @@
 . /etc/sysconfig/mqbroker
 prog="mqbroker"
 
+if [ -z "$BROKERCONFIG" ]; then
+	BROKERCONFIG=$NAGMQCONFIG
+fi
+
 start() {
 	echo -n $"Starting $prog: "
 	if [ -e /var/lock/subsys/mqbroker ]; then
@@ -13,7 +17,7 @@ start() {
 		return 1
 	fi
 
-	daemon mqbroker $NAGMQCONFIG
+	daemon mqbroker -d $BROKERCONFIG
 	RETVAL=$?
 	[ $RETVAL -eq 0 ] || return $RETVAL
 	echo

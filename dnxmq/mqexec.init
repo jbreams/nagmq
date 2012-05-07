@@ -15,7 +15,7 @@ start() {
 
 	for i in `eval echo {0..$EXECUTORCOUNT}`; do
 		echo -n $"Starting $prog worker #$i: "
-		daemon mqexec $NAGMQCONFIG
+		daemon mqexec -d $NAGMQCONFIG
 		RETVAL=$?
 		[ $RETVAL -eq 0 ] || return $RETVAL
 		echo
