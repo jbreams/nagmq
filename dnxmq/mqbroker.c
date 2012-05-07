@@ -211,9 +211,14 @@ void do_forward(void * in, void *out, void *mon) {
 	}
 
 	zmq_getsockopt(in, ZMQ_RCVMORE, &rcvmore, &size);
+	if(mon) {
+		zmq_msg_t monmsg;
+		zmq_msg_init(&monmsg);
+		zmq_msg_copy(&monmsg, &tmpmsg);
+		zmq_send(mon, &monmsg, rcvmore ? ZMQ_SNDMORE : 0);
+		zmq_msg_close(&monmsg);
+	}
 	zmq_send(out, &tmpmsg, rcvmore ? ZMQ_SNDMORE : 0);
-	if(mon)
-		zmq_send(mon, &tmpmsg, rcvmore ? ZMQ_SNDMORE : 0);
 	zmq_msg_close(&tmpmsg);
 }
 
