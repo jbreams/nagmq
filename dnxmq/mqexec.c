@@ -197,7 +197,7 @@ void free_cb(void * data, void * hint) {
 }
 
 void obj_for_ending(struct child_job * j, const char * output,
-	int return_code, int exited_ok) {
+	int return_code, int early_timeout, int exited_ok) {
 	zmq_msg_t outmsg;
 	const char * keys[] = { "host_name", "service_description",
 		"check_options", "scheduled_check", "reschedule_check",
@@ -209,9 +209,10 @@ void obj_for_ending(struct child_job * j, const char * output,
 		gettimeofday(&j->start, NULL);
 	gettimeofday(&finish, NULL);
 	json_t * jout = json_pack(
-		"{ s:s s:i s:i s:{ s:i s:i } s:{ s:i s:i } s:s }",
+		"{ s:s s:i s:i s:i s:{ s:i s:i } s:{ s:i s:i } s:s }",
 		"output", output, "return_code", return_code,
-		"exited_ok", exited_ok, "start_time", "tv_sec", j->start.tv_sec,
+		"exited_ok", exited_ok, "early_timeout", early_timeout,
+		"start_time", "tv_sec", j->start.tv_sec,
 		"tv_usec", j->start.tv_usec, "finish_time", "tv_sec",
 		finish.tv_sec, "tv_usec", finish.tv_usec, "type",
 		j->service ? "service_check_processed":"host_check_processed");
@@ -261,7 +262,8 @@ void child_timeout_cb(struct ev_loop * loop, ev_timer * t, int event) {
 	}
 	ev_child_stop(loop, &j->child);
 
-	obj_for_ending(j, "Check timed out", 4, 0);
+	obj_for_ending(j, "Check timed out", 4, 1, 1);
+
 	logit(DEBUG, "Child %d timed out. Sending timeout message upstream",
 		j->child.pid);
 	json_decref(j->input);
@@ -282,7 +284,7 @@ void child_end_cb(struct ev_loop * loop, ev_child * c, int event) {
 	if(!j->bufused)
 		strcpy(j->buffer, "");
 
-	obj_for_ending(j, j->buffer, WEXITSTATUS(c->rstatus), 1);
+	obj_for_ending(j, j->buffer, WEXITSTATUS(c->rstatus), 0, 1);
 	logit(DEBUG, "Child %d ended with %d. Sending \"%s\" upstream",
 		c->rpid, c->rstatus, j->buffer);
 	json_decref(j->input);
@@ -332,7 +334,7 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 	if(pipe(fds) < 0) {
 		logit(ERR, "Error creating pipe for %s: %s",
 			command_line, strerror(errno));
-		obj_for_ending(j, "Error creating pipe", 4, 0);
+		obj_for_ending(j, "Error creating pipe", 4, 0, 0);
 		free(j);
 		json_decref(input);
 		return;		
@@ -365,7 +367,7 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 	else if(pid < 0) {
 		logit(ERR, "Error forking for %s: %s",
 			command_line, strerror(errno));
-		obj_for_ending(j, "Error forking", 4, 0);
+		obj_for_ending(j, "Error forking", 4, 0, 0);
 		json_decref(input);
 		ev_io_stop(loop, &j->io);
 		close(fds[1]);
