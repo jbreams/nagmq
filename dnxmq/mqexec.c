@@ -503,7 +503,7 @@ int main(int argc, char ** argv) {
 	size_t pullfds = sizeof(pullfd);
 	json_t * config, *filter = NULL;
 	json_error_t config_err;
-	char ch;
+	char ch, *configobj = "executor";
 
 	while((ch = getopt(argc, argv, "vsd")) != -1) {
 		switch(ch) {
@@ -516,12 +516,16 @@ int main(int argc, char ** argv) {
 			case 'd':
 				daemonize = 1;
 				break;
+			case 'c':
+				configobj = optarg;
+				break;
 			case 'h':
-				printf("%s [-dsvh] {pathtoconfig}\n"
+				printf("%s [-dsvh] [-c name] {pathtoconfig}\n"
 					"\t-d\tDaemonize\n"
 					"\t-s\tUse syslog for logging\n"
 					"\t-v\tVerbose logging\n"
-					"\t-h\tPrint this message\n", argv[0]);
+					"\t-h\tPrint this message\n"
+					"\t-c name\tOverride default config object name\n", argv[0]);
 				break;
 		}
 	}
@@ -548,7 +552,7 @@ int main(int argc, char ** argv) {
 	}
 
 	if(json_unpack(config, "{s:{s?:os:os?is?bs?bs?:o}}",
-		"executor", "jobs", &jobs, "results", &results,
+		configobj, "jobs", &jobs, "results", &results,
 		"iothreads", &iothreads, "verbose", &verbose,
 		"syslog", &usesyslog, "filter", &filter,
 		"publisher", &publisher) != 0) {

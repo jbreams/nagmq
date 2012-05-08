@@ -245,7 +245,7 @@ int main(int argc, char ** argv) {
 				daemonize = 1;
 				break;
 			case 'h':
-				printf("%s [-dsvh] [-c arrayname] {pathtoconfig}\n"
+				printf("%s [-dsvh] [-c name] {pathtoconfig}\n"
 					"\t-d\tDaemonize\n"
 					"\t-s\tUse syslog for logging\n"
 					"\t-v\tVerbose logging\n"
