@@ -7,8 +7,6 @@
 #include <signal.h>
 #include <unistd.h>
 
-zmq_pollitem_t * pollables;
-size_t ndevices;
 void * zmqctx;
 int usesyslog = 0, verbose = 0;
 volatile sig_atomic_t keeprunning = 1;
@@ -86,7 +84,7 @@ int parse_connect(void * sock, json_t * val, int bind, json_t * subscribe) {
 	return 0;
 }
 
-void parse_sock_directive(json_t * arg, int offset) {
+void parse_sock_directive(json_t * arg, zmq_pollitem_t * pollable) {
 	int ntype = -1;
 	char *type;
 	int64_t hwm = 0, swap = 0, affinity = 0;
@@ -138,62 +136,16 @@ void parse_sock_directive(json_t * arg, int offset) {
 	zmq_setsockopt(sock, ZMQ_SWAP, &swap, sizeof(swap));
 	zmq_setsockopt(sock, ZMQ_AFFINITY, &affinity, sizeof(affinity));
 
-	pollables[offset].socket = sock;
-	pollables[offset].events = 0;
+	pollable->socket = sock;
+	pollable->events = 0;
 	switch(ntype) {
 		case ZMQ_ROUTER:
 		case ZMQ_DEALER:
 		case ZMQ_SUB:
 		case ZMQ_PULL:
-			pollables[offset].events = ZMQ_POLLIN;
+			pollable->events = ZMQ_POLLIN;
 			break;
 	}
-}
-
-size_t setup_zmq(json_t * config, const char * configname) {
-	int iothreads = 1;
-	size_t i = 0, x = 0;
-	json_t * devarray;
-	if(json_unpack(config, "{s?:i s:o}", "iothreads", &iothreads,
-		configname, &devarray) != 0) {
-		logit(ERR, "Error getting config while setting up context");
-		exit(1);
-	}
-
-	zmqctx = zmq_init(iothreads);
-	if(zmqctx == NULL) {
-		logit(ERR, "Error creating ZMQ context: %s", zmq_strerror(errno));
-		exit(1);
-	}
-
-	if(!json_is_array(devarray)) {
-		logit(ERR, "Device array is not an array!");
-		exit(1);
-	}
-
-	// Allocate one poll item for the frontend, backend, and monitor sockets
-	// of each device
-	ndevices = json_array_size(devarray);
-	pollables = malloc(sizeof(zmq_pollitem_t) * ndevices * 3);
-	memset(pollables, 0, sizeof(zmq_pollitem_t) * ndevices * 3);
-
-	for(i = 0; i < ndevices; i++) {
-		json_t * device = json_array_get(devarray, i);
-		json_t * frontend, *backend, *monitor = NULL;
-		if(json_unpack(device, "{so so s?o}",
-			"frontend", &frontend, "backend", &backend,
-			"monitor", &monitor) != 0) {
-			logit(ERR, "Error unpacking device %d", i);
-			exit(1);
-		}
-		parse_sock_directive(frontend, x++);
-		parse_sock_directive(backend, x++);
-		if(monitor)
-			parse_sock_directive(monitor, x++);
-		else
-			x++;
-	}
-	return i;
 }
 
 void do_forward(void * in, void *out, void *mon) {
@@ -226,12 +178,88 @@ void handle_kill(int signum) {
 	keeprunning = 0;
 }
 
+void * broker_loop(void * param) {
+	json_t * devarray = (json_t*)param;
+	zmq_pollitem_t * pollables;
+	size_t ndevices;
+	size_t i = 0, x = 0, rc;
+
+	if(!json_is_array(devarray)) {
+		logit(ERR, "Device array is not an array!");
+		exit(1);
+	}
+
+	// Allocate one poll item for the frontend, backend, and monitor sockets
+	// of each device
+	ndevices = json_array_size(devarray);
+	pollables = malloc(sizeof(zmq_pollitem_t) * ndevices * 3);
+	memset(pollables, 0, sizeof(zmq_pollitem_t) * ndevices * 3);
+
+	for(i = 0; i < ndevices; i++) {
+		json_t * device = json_array_get(devarray, i);
+		json_t * frontend, *backend, *monitor = NULL;
+		if(json_unpack(device, "{so so s?o}",
+			"frontend", &frontend, "backend", &backend,
+			"monitor", &monitor) != 0) {
+			logit(ERR, "Error unpacking device %d", i);
+			exit(1);
+		}
+		parse_sock_directive(frontend, &pollables[x++]);
+		parse_sock_directive(backend, &pollables[x++]);
+		if(monitor) {
+			parse_sock_directive(monitor, &pollables[x++]);
+			pollables[x - 1].events = 0;
+		} else
+			x++;
+	}
+
+	json_decref(devarray);
+
+	do {
+		rc = zmq_poll(pollables, ndevices * 3, -1);
+		if(rc < 0) {
+			rc = errno;
+			if(rc == ETERM)
+				break;
+			logit(WARN, "Received error from poll: %s",
+				zmq_strerror(rc));
+		}
+		if(rc < 1)
+			continue;
+
+		size_t i;
+		for(i = 0; i < ndevices * 3; i+= 3) {
+			if(pollables[i].revents & ZMQ_POLLIN) {
+				logit(DEBUG, "Received message from frontend for device %d", i);
+				do_forward(
+					pollables[i].socket,
+					pollables[i+1].socket,
+					pollables[i+2].socket);
+			}
+			if(pollables[i+1].revents & ZMQ_POLLIN) {
+				logit(DEBUG, "Received message from backend for device %d", i);
+				do_forward(
+					pollables[i+1].socket,
+					pollables[i].socket,
+					pollables[i+2].socket);
+			}
+		}
+	} while(keeprunning);
+
+	for(i = 0; i < ndevices * 3; i++) {
+		if(pollables[i].socket)
+			zmq_close(pollables[i].socket);
+	}
+	free(pollables);
+	return 0;
+}
+
 int main(int argc, char ** argv) {
 	json_error_t config_err;
-	json_t * config;
-	size_t ndevs, i;
-	int rc, daemonize = 0;
-	char ch, * confarray = "devices";
+	json_t * config, *confarray = NULL;
+	int rc, daemonize = 0, iothreads = 1;
+	char ch, * configname = "devices";
+	pthread_t * threads = NULL;
 
 	while((ch = getopt(argc, argv, "vsdc:")) != -1) {
 		switch(ch) {
@@ -253,7 +281,7 @@ int main(int argc, char ** argv) {
 					"\t-c name\tSpecify the conf object to use\n", argv[0]);
 				break;
 			case 'c':
-				confarray = optarg;
+				configname = optarg;
 				break;
 		}
 	}
@@ -274,16 +302,28 @@ int main(int argc, char ** argv) {
 		exit(1);
 	}
 
+	if(json_unpack(config, "{s?:i s:O}", "iothreads", &iothreads,
+		configname, &confarray) != 0) {
+		logit(ERR, "Error getting config while setting up context");
+		exit(1);
+	}
+	json_decref(config);
+
+	zmqctx = zmq_init(iothreads);
+	if(zmqctx == NULL) {
+		logit(ERR, "Error creating ZMQ context: %s", zmq_strerror(errno));
+		exit(1);
+	}
+
+	if(!json_is_array(confarray) || json_array_size(confarray) < 1) {
+		logit(ERR, "Configuration array is invalid!");
+		exit(1);
+	}
+
 	if(daemonize && daemon(0, 0) < 0) {
 		logit(ERR, "Error daemonizing: %s", strerror(errno));
 		exit(1);
 	}
-
-	ndevs = setup_zmq(config, confarray);
-	json_decref(config);
-	// Don't check for events on monitor sockets
-	for(i = 2; i < ndevs * 3; i += 3)
-		pollables[i].events = 0;
 
 	struct sigaction killaction, oldaction;
 	killaction.sa_handler = handle_kill;
@@ -297,42 +337,24 @@ int main(int argc, char ** argv) {
 	if(oldaction.sa_handler != SIG_IGN)
 		sigaction(SIGINT, &killaction, NULL);
 
-	do {
-		rc = zmq_poll(pollables, ndevs * 3, -1);
-		if(rc < 0) {
-			rc = errno;
-			if(rc == ETERM)
-				break;
-			logit(WARN, "Received error from poll: %s",
-				zmq_strerror(rc));
+	if(!json_is_array(json_array_get(confarray, 0)))
+		broker_loop(confarray);
+	else {
+		size_t i, nbrokers = json_array_size(confarray);
+		threads = malloc(sizeof(pthread_t) * (json_object_size(confarray) - 1));
+		memset(threads, 0, sizeof(pthread_t) * (json_object_size(confarray) - 1));
+		for(i = 1; i < nbrokers; i++) {
+			json_t * obj = json_copy(json_array_get(confarray, i));
+			pthread_create(&threads[i - 1], NULL, broker_loop, obj);
 		}
-		if(rc < 1)
-			continue;
+		json_t *firstobj = json_copy(json_array_get(confarray, 0));
+		json_decref(confarray);
+		broker_loop(firstobj);
 
-		size_t i;
-		for(i = 0; i < ndevs * 3; i+= 3) {
-			if(pollables[i].revents & ZMQ_POLLIN) {
-				logit(DEBUG, "Received message from frontend for device %d", i);
-				do_forward(
-					pollables[i].socket,
-					pollables[i+1].socket,
-					pollables[i+2].socket);
-			}
-			if(pollables[i+1].revents & ZMQ_POLLIN) {
-				logit(DEBUG, "Received message from backend for device %d", i);
-				do_forward(
-					pollables[i+1].socket,
-					pollables[i].socket,
-					pollables[i+2].socket);
-			}
-		}
-	} while(keeprunning);
-
-	for(i = 0; i < ndevs * 3; i++) {
-		if(pollables[i].socket)
-			zmq_close(pollables[i].socket);
+		for(i =0; i < nbrokers - 1; i++)
+			pthread_join(&threads[i]);
 	}
+
 	zmq_term(zmqctx);
-	free(pollables);
 	return 0;
 }
