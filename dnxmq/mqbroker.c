@@ -341,8 +341,8 @@ int main(int argc, char ** argv) {
 		broker_loop(confarray);
 	else {
 		size_t i, nbrokers = json_array_size(confarray);
-		threads = malloc(sizeof(pthread_t) * (json_object_size(confarray) - 1));
-		memset(threads, 0, sizeof(pthread_t) * (json_object_size(confarray) - 1));
+		threads = malloc(sizeof(pthread_t) * (nbrokers - 1));
+		memset(threads, 0, sizeof(pthread_t) * (nbrokers - 1));
 		for(i = 1; i < nbrokers; i++) {
 			json_t * obj = json_copy(json_array_get(confarray, i));
 			pthread_create(&threads[i - 1], NULL, broker_loop, obj);

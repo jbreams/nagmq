@@ -262,7 +262,7 @@ void child_timeout_cb(struct ev_loop * loop, ev_timer * t, int event) {
 	}
 	ev_child_stop(loop, &j->child);
 
-	obj_for_ending(j, "Check timed out", 4, 1, 1);
+	obj_for_ending(j, "Check timed out", 3, 1, 1);
 
 	logit(DEBUG, "Child %d timed out. Sending timeout message upstream",
 		j->child.pid);
@@ -334,7 +334,7 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 	if(pipe(fds) < 0) {
 		logit(ERR, "Error creating pipe for %s: %s",
 			command_line, strerror(errno));
-		obj_for_ending(j, "Error creating pipe", 4, 0, 0);
+		obj_for_ending(j, "Error creating pipe", 3, 0, 0);
 		free(j);
 		json_decref(input);
 		return;		
@@ -367,7 +367,7 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 	else if(pid < 0) {
 		logit(ERR, "Error forking for %s: %s",
 			command_line, strerror(errno));
-		obj_for_ending(j, "Error forking", 4, 0, 0);
+		obj_for_ending(j, "Error forking", 3, 0, 0);
 		json_decref(input);
 		ev_io_stop(loop, &j->io);
 		close(fds[1]);
