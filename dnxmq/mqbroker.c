@@ -298,7 +298,7 @@ int main(int argc, char ** argv) {
 		sigaction(SIGINT, &killaction, NULL);
 
 	do {
-		rc = zmq_poll(pollables, ndevs * 3, 0);
+		rc = zmq_poll(pollables, ndevs * 3, -1);
 		if(rc < 0) {
 			rc = errno;
 			if(rc == ETERM)
