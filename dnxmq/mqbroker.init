@@ -1,4 +1,5 @@
 #!/bin/bash
+# chkconfig: 2345 55 25
 
 . /etc/init.d/functions
 . /etc/sysconfig/mqbroker
