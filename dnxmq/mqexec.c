@@ -23,12 +23,14 @@
 
 void * zmqctx;
 // Worker Sockets
-void * pullsock;
-void * pushsock;
+void * pullsock = NULL;
+void * pushsock = NULL;
 // Broker Sockets
 int usesyslog = 0, verbose = 0;
 char myfqdn[255];
 char mynodename[255];
+uint32_t runningjobs = 0;
+ev_io pullio;
 
 struct child_job {
 	json_t * input;
@@ -268,6 +270,8 @@ void child_timeout_cb(struct ev_loop * loop, ev_timer * t, int event) {
 		j->child.pid);
 	json_decref(j->input);
 	free(j);
+	if(--runningjobs == 0 && !pullsock)
+		ev_break(loop, EVBREAK_ALL);
 }
 
 void child_end_cb(struct ev_loop * loop, ev_child * c, int event) {
@@ -289,6 +293,8 @@ void child_end_cb(struct ev_loop * loop, ev_child * c, int event) {
 		c->rpid, c->rstatus, j->buffer);
 	json_decref(j->input);
 	free(j);
+	if(--runningjobs == 0 && !pullsock)
+		ev_break(loop, EVBREAK_ALL);
 }
 
 void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
@@ -388,6 +394,7 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 	ev_child_init(&j->child, child_end_cb, pid, 0);
 	j->child.data = j;
 	ev_child_start(loop, &j->child);
+	runningjobs++;
 }
 
 void recv_job_cb(struct ev_loop * loop, ev_io * i, int event) {
@@ -488,6 +495,13 @@ void parse_sock_directive(void * socket, json_t * arg, int bind) {
 	}
 }
 
+void handle_end(struct ev_loop * loop, ev_signal * w, int revents) {
+	zmq_close(pullsock);
+	pullsock = NULL;
+	ev_io_stop(loop, &pullio);
+	ev_signal_stop(loop, w);
+}
+
 int getfd(void * socket) {
 	int fd;
 	size_t fds = sizeof(fd);
@@ -496,8 +510,8 @@ int getfd(void * socket) {
 }
 
 int main(int argc, char ** argv) {
-	ev_io pullio;
-	struct ev_loop  * loop;
+	ev_signal termhandler, huphandler;
+	struct ev_loop * loop;
 	json_t * jobs = NULL, * results, *publisher = NULL;
 	int pullfd = -1, i, daemonize = 0, iothreads = 1;
 	size_t pullfds = sizeof(pullfd);
@@ -614,11 +628,17 @@ int main(int argc, char ** argv) {
 	ev_io_start(loop, &pullio);
 
 	json_decref(config);
+	ev_signal_init(&termhandler, handle_end, SIGTERM);
+	ev_signal_start(loop, &termhandler);
+	ev_signal_init(&huphandler, handle_end, SIGHUP);
+	ev_signal_start(loop, &huphandler);
+
 	logit(INFO, "Starting DNXMQ event loop");
 	ev_run(loop, 0);
 	logit(INFO, "DNXMQ event loop terminated");
 
-	zmq_close(pullsock);
+	if(pullsock)
+		zmq_close(pullsock);
 	zmq_close(pushsock);
 	zmq_term(zmqctx);
 	return 0;
