@@ -309,12 +309,6 @@ int main(int argc, char ** argv) {
 	}
 	json_decref(config);
 
-	zmqctx = zmq_init(iothreads);
-	if(zmqctx == NULL) {
-		logit(ERR, "Error creating ZMQ context: %s", zmq_strerror(errno));
-		exit(1);
-	}
-
 	if(!json_is_array(confarray) || json_array_size(confarray) < 1) {
 		logit(ERR, "Configuration array is invalid!");
 		exit(1);
@@ -322,6 +316,12 @@ int main(int argc, char ** argv) {
 
 	if(daemonize && daemon(0, 0) < 0) {
 		logit(ERR, "Error daemonizing: %s", strerror(errno));
+		exit(1);
+	}
+
+	zmqctx = zmq_init(iothreads);
+	if(zmqctx == NULL) {
+		logit(ERR, "Error creating ZMQ context: %s", zmq_strerror(errno));
 		exit(1);
 	}
 
