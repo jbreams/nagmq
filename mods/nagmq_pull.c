@@ -158,11 +158,11 @@ static void process_comment(json_t * payload) {
 	char * host_name, *service_description = NULL, *comment_data, *author_name;
 	time_t entry_time, expire_time;
 	int persistent = 0, expires = 0;
-	if(json_unpack(payload, "{s:s s?:s s:s s:{s:i} s:b s:b s:i}",
+	if(json_unpack(payload, "{s:s s?:s s:s s:{s:i} s:b s:b s:i s:s}",
 		"host_name", &host_name, "service_description", &service_description,
 		"comment_data", &comment_data, "timestamp", "tv_sec", &entry_time,
 		"persistent", &persistent, "expires", &expires, "expire_time",
-		&expire_time) != 0) {
+		&expire_time, "author_name", &author_name) != 0) {
 		json_decref(payload);
 		return;
 	}
@@ -202,10 +202,13 @@ static void process_cmd(json_t * payload) {
 	host * host_target = NULL;
 	service * service_target = NULL;
 	char * host_name = NULL, *service_description = NULL, *cmd_name;
+	char * comment = NULL;
+	time_t start_time = 0;
 
-	if(json_unpack(payload, "{s?:s s:?s s:s}",
+	if(json_unpack(payload, "{s?:s s:?s s:s s?:s s?:i}",
 		"host_name", &host_name, "service_description", &service_description,
-		"command_name", &cmd_name) != 0) {
+		"command_name", &cmd_name, "comment", &comment, "start_time",
+		&start_time) != 0) {
 		json_decref(payload);
 		return;
 	}
@@ -247,6 +250,18 @@ static void process_cmd(json_t * payload) {
 		enable_passive_service_checks(service_target);
 	else if(strcmp(cmd_name, "disable_passive_service_checks") == 0 && service_target)
 		disable_passive_service_checks(service_target);
+	else if(strcmp(cmd_name, "start_using_event_handlers") == 0)
+		start_using_event_handlers();
+	else if(strcmp(cmd_name, "stop_using_event_handlers") == 0)
+		stop_using_event_handlers();
+	else if(strcmp(cmd_name, "enable_service_event_handler") == 0 && service_target)
+		enable_service_event_handler(service_target);
+	else if(strcmp(cmd_name, "disable_service_event_handler") == 0 && service_target)
+		disable_service_event_handler(service_target);
+	else if(strcmp(cmd_name, "enable_host_event_handler") == 0 && host_target)
+		enable_host_event_handler(host_target);
+	else if(strcmp(cmd_name, "disable_host_event_handler") == 0 && host_target)
+		disable_host_event_handler(host_target);
 	else if(strcmp(cmd_name, "enable_host_checks") == 0 && host_target)
 		enable_host_checks(host_target);
 	else if(strcmp(cmd_name, "disable_host_checks") == 0 && host_target)
@@ -319,6 +334,9 @@ static void process_cmd(json_t * payload) {
 			enable_and_propagate_notifications(host_target, level,
 				affect_top_host, affect_hosts, affect_services);
 	}
+	else if(strcmp(cmd_name, "delete_downtime") == 0)
+		delete_downtime_by_hostname_service_description_start_time_comment(
+			host_name, service_description, start_time, comment);
 
 	json_decref(payload);
 }
