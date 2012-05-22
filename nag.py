@@ -3,6 +3,7 @@
 import json, time, zmq, re, os, pwd, types
 from optparse import OptionParser
 from collections import deque
+from datetime import timedelta, datetime
 
 op = OptionParser(usage = "[opts] {verb} {noun} [service]@{host|hostgroup}")
 op.add_option("-c", "--comment", type="string", action="store", dest="comment",
@@ -17,9 +18,9 @@ op.add_option("-s", "--start", type="string", action="store", dest="starttime",
 	help="Start time for downtime")
 op.add_option("-e", "--end", type="string", action="store", dest="endtime",
 	help="End time for downtime")
-op.add_option("-f", "--flexible", type="store_true", dest="flexible",
+op.add_option("-f", "--flexible", action="store_true", dest="flexible",
 	help="Specifies downtime should be flexible", default=False)
-op.add_option('-d', '--duration', type="store", dest="duration",
+op.add_option('-d', '--duration', type="string", dest="duration",
 	help="Specify duration instead of times for downtime")
 
 
@@ -199,7 +200,7 @@ def rm_downtime(obj):
 	print "[{0}]: Removing downtime".format(name)
 
 def add_downtime(obj):
-	cmd = { 'host_name':obj['host_name'], type:'downtime',
+	cmd = { 'host_name':obj['host_name'], 'type':'downtime',
 		'author_name':username, 'comment_data': opts.comment,
 		'time_stamp': { 'tv_sec': time.time() }, 'fixed': int(opts.flexible == 0) }
 	name = obj['host_name']
@@ -216,14 +217,15 @@ def add_downtime(obj):
 	if(opts.duration):
 		dr = re.match('^(\d+)(m|h|d)?$', opts.duration)
 		if(dr.group(2)):
+			val = int(dr.group(1))
 			if(dr.group(2) == 'm'):
-				duration = datetime.timedelta(minutes=dr.group(1))
+				duration = timedelta(minutes=val)
 			elif(dr.group(2) == 'h'):
-				duration = datetime.timedelta(hours=dr.group(1))
+				duration = timedelta(hours=val)
 			elif(dr.group(2) == 'd'):
-				duration = datetime.timedelta(days=dr.group(1))
+				duration = timedelta(days=val)
 		elif(dr.group(1)):
-			duration = datetime.timedelta(minutes=dr.group(1))
+			duration = timedelta(minutes=int(dr.group(1)))
 		else:
 			print "[{0}]: Format error for duration!".format(name)
 			return
@@ -232,11 +234,11 @@ def add_downtime(obj):
 		endtime = datetime.strptime(opts.endtime, '%m-%d %H:%M')
 		duration = endtime - starttime
 
-	cmd['start_time'] = time.mktime(starttime)
-	cmd['end_time'] = time.mktime(endtime)
-	cmd['duration'] = duration.total_seconds()
+	cmd['start_time'] = time.mktime(starttime.timetuple())
+	cmd['end_time'] = time.mktime(endtime.timetuple())
+	cmd['duration'] = duration.seconds
 	cmd['triggered_by'] = 0
-
+	
 	pushsock.send_json(cmd)
 	print "[{0}]: Adding downtime for {1}".format(name, str(duration))
 
