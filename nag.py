@@ -13,15 +13,24 @@ op.add_option("-n", "--notify", action="store_true", dest="notify",
 	help="Notify contacts about action", default=False)
 op.add_option("--config-file", action="store", type="string", dest="configfile",
 	help="Overrides default nagmq config file", default="/etc/nagios/nagmq.conf")
+op.add_option("-s", "--start", type="string", action="store", dest="starttime",
+	help="Start time for downtime")
+op.add_option("-e", "--end", type="string", action="store", dest="endtime",
+	help="End time for downtime")
+op.add_option("-f", "--flexible", type="store_true", dest="flexible",
+	help="Specifies downtime should be flexible", default=False)
+op.add_option('-d', '--duration', type="store", dest="duration",
+	help="Specify duration instead of times for downtime")
+
 
 (opts, args) = op.parse_args()
 args = deque(args)
 
 verbmap = { 
-	'enable': [ 'checks', 'notifications' ],
-	'disable': [ 'checks', 'notifications' ],
-	'add': ['acknowledgement', 'comment' ],
-	'remove': ['acknowledgement'],
+	'enable': [ 'checks', 'notifications', 'eventhandler' ],
+	'disable': [ 'checks', 'notifications', 'eventhandler' ],
+	'add': ['acknowledgement', 'comment', 'downtime' ],
+	'remove': ['acknowledgement', 'downtime' ],
 	'status': [ ],
 }
 
@@ -35,7 +44,7 @@ pasttenses = {
 keys = ['host_name', 'services', 'hosts', 'contacts', 'contact_groups',
 	'service_description', 'current_state', 'members', 'type', 'name',
 	'problem_has_been_acknowledged', 'plugin_output', 'checks_enabled',
-	'notifications_enabled' ]
+	'notifications_enabled', 'event_handler_enabled' ]
 myverb = None
 mynoun = None
 
@@ -160,12 +169,90 @@ def handle_comment(verb, obj):
 		return
 	pushsock.send_json(cmd)
 	print "[{0}]: Comment {1}".format(name, pasttenses[verb])
+
+def handle_eventhandler(verb, obj):
+	cmd = { 'host_name':obj['host_name'], 'type':'command' }
+	name = obj['host_name']
+	if('service_description' in obj):
+		cmd['service_description'] = obj['service_description']
+		name = obj['service_description'] + '@' + name
+		cmd['command_name'] = verb + "_service_event_handler"
+	else:
+		cmd['command_name'] = verb + "_host_event_handler"
+	if(verb == 'enable' and obj['event_handler_enabled']):
+		print "[{0}]: Event handler already enabled".format(name)
+		return
+	elif(verb == 'disable' and not obj['event_handler_enabled']):
+		print "[{0}]: Event handler already disabled".format(name)
+		return
+	pushsock.send_json(cmd)
+	print "[{0}]: Event handler {1}".format(name, pasttenses[verb])
+
+def rm_downtime(obj):
+	cmd = { 'host_name':obj['host_name'], 'type':'command',
+		'command_name': 'delete_downtime' }
+	name = obj['host_name']
+	if('service_description' in obj):
+		cmd['service_description'] = obj['service_description']
+		name = obj['service_description'] + '@' + name
+	pushsock.send_json(cmd)
+	print "[{0}]: Removing downtime".format(name)
+
+def add_downtime(obj):
+	cmd = { 'host_name':obj['host_name'], type:'downtime',
+		'author_name':username, 'comment_data': opts.comment,
+		'time_stamp': { 'tv_sec': time.time() }, 'fixed': int(opts.flexible == 0) }
+	name = obj['host_name']
+	if('service_description' in obj):
+		cmd['service_description'] = obj['service_description']
+		name = obj['service_description'] + '@' + name
+
+	starttime, endtime, duration = tuple([None] * 3)
+	if(opts.starttime):
+		starttime = datetime.strptime(opts.starttime, '%m-%d %H:%M')
+	else:
+		starttime = datetime.now()
+
+	if(opts.duration):
+		dr = re.match('^(\d+)(m|h|d)?$', opts.duration)
+		if(dr.group(2)):
+			if(dr.group(2) == 'm'):
+				duration = datetime.timedelta(minutes=dr.group(1))
+			elif(dr.group(2) == 'h'):
+				duration = datetime.timedelta(hours=dr.group(1))
+			elif(dr.group(2) == 'd'):
+				duration = datetime.timedelta(days=dr.group(1))
+		elif(dr.group(1)):
+			duration = datetime.timedelta(minutes=dr.group(1))
+		else:
+			print "[{0}]: Format error for duration!".format(name)
+			return
+		endtime = starttime + duration
+	elif(opts.endtime):
+		endtime = datetime.strptime(opts.endtime, '%m-%d %H:%M')
+		duration = endtime - starttime
+
+	cmd['start_time'] = time.mktime(starttime)
+	cmd['end_time'] = time.mktime(endtime)
+	cmd['duration'] = duration.total_seconds()
+	cmd['triggered_by'] = 0
+
+	pushsock.send_json(cmd)
+	print "[{0}]: Adding downtime for {1}".format(name, str(duration))
+
+def handle_downtime(verb, obj):
+	if(verb == 'add'):
+		add_downtime(obj)
+	elif(verb == 'remove'):
+		rm_downtime(obj)
 	
 nounmap = {
 	'notifications': handle_notifications,
 	'checks': handle_checks,
 	'acknowledgement': handle_acknowledgement,
-	'comment': handle_comment }
+	'comment': handle_comment,
+	'downtime': handle_downtime,
+	'eventhandler': handle_eventhandler }
 
 def is_authorized(o):
 	if(os.getuid() == 0):
