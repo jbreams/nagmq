@@ -157,7 +157,7 @@ def handle_acknowledgement(verb, obj):
 	print "[{0}]: Acknowledgement {1}".format(name, pasttenses[verb])
 
 def handle_comment(verb, obj):
-	cmd = { 'type': 'comment', 'host_name':obj['host_name'],
+	cmd = { 'type': 'comment_add', 'host_name':obj['host_name'],
 		'author_name':username, 'comment_data': opts.comment,
 		'time_stamp': { 'tv_sec': time.time() },
 		'persistent_comment': opts.persistent }
@@ -200,9 +200,9 @@ def rm_downtime(obj):
 	print "[{0}]: Removing downtime".format(name)
 
 def add_downtime(obj):
-	cmd = { 'host_name':obj['host_name'], 'type':'downtime',
+	cmd = { 'host_name':obj['host_name'], 'type':'downtime_add',
 		'author_name':username, 'comment_data': opts.comment,
-		'time_stamp': { 'tv_sec': time.time() }, 'fixed': int(opts.flexible == 0) }
+		'entry_time': int(time.time()) , 'fixed': opts.flexible == 0 }
 	name = obj['host_name']
 	if('service_description' in obj):
 		cmd['service_description'] = obj['service_description']
@@ -234,8 +234,8 @@ def add_downtime(obj):
 		endtime = datetime.strptime(opts.endtime, '%m-%d %H:%M')
 		duration = endtime - starttime
 
-	cmd['start_time'] = time.mktime(starttime.timetuple())
-	cmd['end_time'] = time.mktime(endtime.timetuple())
+	cmd['start_time'] = int(time.mktime(starttime.timetuple()))
+	cmd['end_time'] = int(time.mktime(endtime.timetuple()))
 	cmd['duration'] = duration.seconds
 	cmd['triggered_by'] = 0
 	
