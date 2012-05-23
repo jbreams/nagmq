@@ -84,7 +84,7 @@ int parse_connect(void * sock, json_t * val, int bind, json_t * subscribe) {
 	return 0;
 }
 
-void parse_sock_directive(json_t * arg, zmq_pollitem_t * pollable) {
+void parse_sock_directive(json_t * arg, zmq_pollitem_t * pollable, int * noblock) {
 	int ntype = -1;
 	char *type;
 	int64_t hwm = 0, swap = 0, affinity = 0;
@@ -93,7 +93,7 @@ void parse_sock_directive(json_t * arg, zmq_pollitem_t * pollable) {
 	if(json_unpack(arg, "{s:s s?:o s?:o s?:o s?i s?i s?i}", 
 		"type", &type, "connect", &connect, "bind", &bind,
 		"subscribe", &subscribe, "hwm", &hwm, "swap", &swap,
-		"affinity", &affinity) != 0)
+		"affinity", &affinity, "noblock", noblock) != 0)
 		return;
 	if(strcasecmp(type, "dealer") == 0)
 		ntype = ZMQ_DEALER;
@@ -148,11 +148,12 @@ void parse_sock_directive(json_t * arg, zmq_pollitem_t * pollable) {
 	}
 }
 
-void do_forward(void * in, void *out, void *mon) {
+void do_forward(void * in, void *out, void *mon, int noblock, int monnoblock) {
 	zmq_msg_t tmpmsg;
 	int rc;
 	int64_t rcvmore;
 	size_t size = sizeof(rcvmore);
+	int flags = 0;
 
 	zmq_msg_init(&tmpmsg);
 	if(zmq_recv(in, &tmpmsg, 0) != 0) {
@@ -164,13 +165,15 @@ void do_forward(void * in, void *out, void *mon) {
 
 	zmq_getsockopt(in, ZMQ_RCVMORE, &rcvmore, &size);
 	if(mon) {
+		flags = (rcvmore ? ZMQ_SNDMORE : 0) | (monnoblock ? ZMQ_NOBLOCK : 0);
 		zmq_msg_t monmsg;
 		zmq_msg_init(&monmsg);
 		zmq_msg_copy(&monmsg, &tmpmsg);
-		zmq_send(mon, &monmsg, rcvmore ? ZMQ_SNDMORE : 0);
+		zmq_send(mon, &monmsg, flags);
 		zmq_msg_close(&monmsg);
 	}
-	zmq_send(out, &tmpmsg, rcvmore ? ZMQ_SNDMORE : 0);
+	flags = (rcvmore ? ZMQ_SNDMORE : 0) | (noblock ? ZMQ_NOBLOCK : 0);
+	zmq_send(out, &tmpmsg, flags);
 	zmq_msg_close(&tmpmsg);
 }
 
@@ -190,6 +193,9 @@ void * broker_loop(void * param) {
 		void * monitor;
 		zmq_pollitem_t * frontpoll;
 		zmq_pollitem_t * backpoll;
+		int frontnoblock;
+		int backnoblock;
+		int monnoblock;
 	} * devices = NULL;
 
 	if(!json_is_array(devarray)) {
@@ -213,7 +219,7 @@ void * broker_loop(void * param) {
 			exit(1);
 		}
 		zmq_pollitem_t pollitem;
-		parse_sock_directive(frontend, &pollitem);
+		parse_sock_directive(frontend, &pollitem, &devices[i].frontnoblock);
 		devices[i].frontend = pollitem.socket;
 		if(pollitem.events == ZMQ_POLLIN) {
 			// For now these pointers are used as boolean
@@ -222,14 +228,14 @@ void * broker_loop(void * param) {
 			devices[i].frontpoll = (void*)1;
 			x++;
 		}
-		parse_sock_directive(backend, &pollitem);
+		parse_sock_directive(backend, &pollitem, &devices[i].backnoblock);
 		devices[i].backend = pollitem.socket;
 		if(pollitem.events == ZMQ_POLLIN) {
 			devices[i].backpoll = (void*)1;
 			x++;
 		}
 		if(monitor) {
-			parse_sock_directive(monitor, &pollitem);
+			parse_sock_directive(monitor, &pollitem, &devices[i].monnoblock);
 			devices[i].monitor = pollitem.socket;
 		}
 	}
@@ -271,14 +277,18 @@ void * broker_loop(void * param) {
 				do_forward(
 					devices[i].frontend,
 					devices[i].backend,
-					devices[i].monitor);
+					devices[i].monitor,
+					devices[i].backnoblock,
+					devices[i].monnoblock);
 			}
 			if(devices[i].backpoll && devices[i].backpoll->revents & ZMQ_POLLIN) {
 				logit(DEBUG, "Received message from backend for device %d", i);
 				do_forward(
 					devices[i].backend,
 					devices[i].frontend,
-					devices[i].monitor);
+					devices[i].monitor,
+					devices[i].frontnoblock,
+					devices[i].monnoblock);
 			}
 		}
 	} while(keeprunning);
