@@ -184,6 +184,14 @@ void * broker_loop(void * param) {
 	size_t ndevices;
 	size_t i = 0, x = 0, rc;
 
+	struct device {
+		void * frontend;
+		void * backend;
+		void * monitor;
+		zmq_pollitem_t * frontpoll;
+		zmq_pollitem_t * backpoll;
+	} * devices = NULL;
+
 	if(!json_is_array(devarray)) {
 		logit(ERR, "Device array is not an array!");
 		exit(1);
@@ -192,8 +200,8 @@ void * broker_loop(void * param) {
 	// Allocate one poll item for the frontend, backend, and monitor sockets
 	// of each device
 	ndevices = json_array_size(devarray);
-	pollables = malloc(sizeof(zmq_pollitem_t) * ndevices * 3);
-	memset(pollables, 0, sizeof(zmq_pollitem_t) * ndevices * 3);
+	devices = malloc(sizeof(struct device) * ndevices);
+	memset(devices, 0, sizeof(struct device) * ndevices);
 
 	for(i = 0; i < ndevices; i++) {
 		json_t * device = json_array_get(devarray, i);
@@ -204,19 +212,48 @@ void * broker_loop(void * param) {
 			logit(ERR, "Error unpacking device %d", i);
 			exit(1);
 		}
-		parse_sock_directive(frontend, &pollables[x++]);
-		parse_sock_directive(backend, &pollables[x++]);
-		if(monitor) {
-			parse_sock_directive(monitor, &pollables[x++]);
-			pollables[x - 1].events = 0;
-		} else
+		zmq_pollitem_t pollitem;
+		parse_sock_directive(frontend, &pollitem);
+		devices[i].frontend = pollitem.socket;
+		if(pollitem.events == ZMQ_POLLIN) {
+			// For now these pointers are used as boolean
+			// values - they'll be swapped with real pointers
+			// in the next step
+			devices[i].frontpoll = (void*)1;
 			x++;
+		}
+		parse_sock_directive(backend, &pollitem);
+		devices[i].backend = pollitem.socket;
+		if(pollitem.events == ZMQ_POLLIN) {
+			devices[i].backpoll = (void*)1;
+			x++;
+		}
+		if(monitor) {
+			parse_sock_directive(monitor, &pollitem);
+			devices[i].monitor = pollitem.socket;
+		}
+	}
+
+	pollables = malloc(sizeof(zmq_pollitem_t) * x);
+	memset(pollables, 0, sizeof(zmq_pollitem_t) * x);
+	x = 0;
+	for(i = 0; i < ndevices; i++) {
+		if(devices[i].frontpoll) {
+			pollables[x].socket = devices[i].frontend;
+			pollables[x].events = ZMQ_POLLIN;
+			devices[i].frontpoll = &pollables[x++];
+		}
+		if(devices[i].backpoll) {
+			pollables[x].socket = devices[i].backend;
+			pollables[x].events = ZMQ_POLLIN;
+			devices[i].backpoll = &pollables[x++];
+		}
 	}
 
 	json_decref(devarray);
 
 	do {
-		rc = zmq_poll(pollables, ndevices * 3, -1);
+		rc = zmq_poll(pollables, x, -1);
 		if(rc < 0) {
 			rc = errno;
 			if(rc == ETERM)
@@ -228,29 +265,34 @@ void * broker_loop(void * param) {
 			continue;
 
 		size_t i;
-		for(i = 0; i < ndevices * 3; i+= 3) {
-			if(pollables[i].revents & ZMQ_POLLIN) {
+		for(i = 0; i < ndevices; i++) {
+			if(devices[i].frontpoll && devices[i].frontpoll->revents & ZMQ_POLLIN) {
 				logit(DEBUG, "Received message from frontend for device %d", i);
 				do_forward(
-					pollables[i].socket,
-					pollables[i+1].socket,
-					pollables[i+2].socket);
+					devices[i].frontend,
+					devices[i].backend,
+					devices[i].monitor);
 			}
-			if(pollables[i+1].revents & ZMQ_POLLIN) {
+			if(devices[i].backpoll && devices[i].backpoll->revents & ZMQ_POLLIN) {
 				logit(DEBUG, "Received message from backend for device %d", i);
 				do_forward(
-					pollables[i+1].socket,
-					pollables[i].socket,
-					pollables[i+2].socket);
+					devices[i].backend,
+					devices[i].frontend,
+					devices[i].monitor);
 			}
 		}
 	} while(keeprunning);
 
-	for(i = 0; i < ndevices * 3; i++) {
-		if(pollables[i].socket)
-			zmq_close(pollables[i].socket);
+	for(i = 0; i < ndevices; i++) {
+		if(devices[i].frontend)
+			zmq_close(devices[i].frontend);
+		if(devices[i].backend)
+			zmq_close(devices[i].backend);
+		if(devices[i].monitor)
+			zmq_close(devices[i].monitor);
 	}
 	free(pollables);
+	free(devices);
 	return 0;
 }
 
