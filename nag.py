@@ -103,7 +103,6 @@ def handle_notifications(verb, obj):
 	elif(verb == 'disable' and not obj['notifications_enabled']):
 		print "[{0}]: Notifications already disabled".format(name)
 		return
-	print cmd
 	pushsock.send_json(cmd)
 	print "[{0}]: Notifications {1}".format(name, pasttenses[verb])
 

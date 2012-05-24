@@ -156,7 +156,7 @@ static void process_acknowledgement(json_t * payload) {
 
 static void process_comment(json_t * payload) {
 	char * host_name, *service_description = NULL, *comment_data, *author_name;
-	time_t entry_time, expire_time;
+	time_t entry_time = 0, expire_time = 0;
 	int persistent = 0, expires = 0;
 	if(json_unpack(payload, "{s:s s?:s s:s s:{s:i} s:b s:b s:i s:s}",
 		"host_name", &host_name, "service_description", &service_description,
@@ -177,9 +177,9 @@ static void process_comment(json_t * payload) {
 static void process_downtime(json_t * payload) {
 	char * host_name, * service_description = NULL;
 	char * author_name, *comment_data;
-	time_t start_time, end_time, entry_time;
+	time_t start_time = 0, end_time = 0, entry_time = 0;
 	int fixed;
-	unsigned long duration, triggered_by, downtimeid;
+	unsigned long duration = 0, triggered_by = 0, downtimeid;
 
 	if(json_unpack(payload, "{s:s s?:s s:i s:s s:s s:i s:i s:b s:i s:i}",
 		"host_name", &host_name, "service_description", &service_description,
