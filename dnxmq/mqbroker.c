@@ -90,7 +90,7 @@ void parse_sock_directive(json_t * arg, zmq_pollitem_t * pollable, int * noblock
 	int64_t hwm = 0, swap = 0, affinity = 0;
 	json_t * subscribe = NULL, *connect = NULL, *bind = NULL;
 	void * sock;
-	if(json_unpack(arg, "{s:s s?:o s?:o s?:o s?i s?i s?i}", 
+	if(json_unpack(arg, "{s:s s?:o s?:o s?:o s?i s?i s?i s?b}", 
 		"type", &type, "connect", &connect, "bind", &bind,
 		"subscribe", &subscribe, "hwm", &hwm, "swap", &swap,
 		"affinity", &affinity, "noblock", noblock) != 0)

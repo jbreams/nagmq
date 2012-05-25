@@ -57,11 +57,13 @@ static struct payload * parse_program_status(nebstruct_program_status_data * sta
 
 static struct payload * parse_event_handler(nebstruct_event_handler_data * state) {
 	struct payload * ret = payload_new();
-	host * host_obj = find_host(state->host_name);
+	host * host_obj = NULL;
 	service * service_obj = NULL;
-	if(state->service_description)
-		service_obj = find_service(state->host_name,
-			state->service_description);
+	if(state->service_description) {
+		service_obj = (service*)state->object_ptr;
+		host_obj = service_obj->host_ptr;
+	} else
+		host_obj = (host*)state->object_ptr;
 
 	payload_new_string(ret, "host_name", state->host_name);
 	payload_new_string(ret, "service_description", state->service_description);
@@ -101,7 +103,7 @@ extern check_result check_result_info;
 
 static struct payload * parse_host_check(nebstruct_host_check_data * state) {
 	struct payload * ret = payload_new();
-	host * obj = find_host(state->host_name);
+	host * obj = (host*)state->object_ptr; 
 
 	payload_new_string(ret, "host_name", state->host_name);
 	payload_new_integer(ret, "check_type", state->check_type);
@@ -146,7 +148,7 @@ static struct payload * parse_host_check(nebstruct_host_check_data * state) {
 
 static struct payload * parse_service_check(nebstruct_service_check_data * state) {
 	struct payload * ret = payload_new();
-	service * obj = find_service(state->host_name, state->service_description);
+	service * obj = (service*)state->object_ptr;
 
 	payload_new_string(ret, "host_name", state->host_name);
 	payload_new_string(ret, "service_description", state->service_description);
@@ -208,10 +210,13 @@ static struct payload * parse_acknowledgement(nebstruct_acknowledgement_data * s
 
 static struct payload * parse_statechange(nebstruct_statechange_data * state) {
 	struct payload * ret = payload_new();
-	host * host_target = find_host(state->host_name);
+	host * host_target = NULL;
 	service * service_target = NULL;
-	if(state->service_description)
-		service_target = find_service(state->host_name, state->service_description);
+	if(state->service_description) {
+		service_target = (service*)state->object_ptr;
+		host_target = service_target->host_ptr;
+	} else
+		host_target = (host*)state->object_ptr;
 
 	payload_new_string(ret, "type", "statechange");
 	payload_new_string(ret, "host_name", state->host_name);
@@ -311,6 +316,31 @@ static struct payload * parse_notification(nebstruct_notification_data * state) 
 	payload_new_string(ret, "ack_data", state->ack_data);
 	payload_new_boolean(ret, "escalated", state->escalated);
 	payload_new_integer(ret, "contacts_notified", state->contacts_notified);
+
+	contactgroupsmember * cgtmp;
+	contactsmember * ctmp;
+	if(state->service_description) {
+		cgtmp = ((service*)state->object_ptr)->contact_groups;
+		ctmp = ((service*)state->object_ptr)->contacts;
+	} else {
+		cgtmp = ((host*)state->object_ptr)->contact_groups;
+		ctmp = ((host*)state->object_ptr)->contacts;
+	}
+
+	payload_start_array(ret, "contacts");
+	while(ctmp) {
+		payload_new_string(ret, NULL, ctmp->contact_name);
+		ctmp = ctmp->next;
+	}
+	payload_end_array(ret);
+
+	payload_start_array(ret, "contact_groups");
+	while(cgtmp) {
+		payload_new_string(ret, NULL, cgtmp->group_name);
+		cgtmp = cgtmp->next;
+	}
+	payload_end_array(ret);
+
 	return ret;
 }
 
