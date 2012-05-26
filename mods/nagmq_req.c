@@ -632,6 +632,37 @@ static void parse_contact(contact * state, struct payload * ret) {
 	payload_new_boolean(ret, "notify_on_host_flapping", state->notify_on_host_flapping);
 	payload_new_boolean(ret, "notify_on_host_downtime", state->notify_on_host_downtime);
 	payload_new_string(ret, "host_notification_period", state->host_notification_period);
+
+	if(payload_start_array(ret, "host_notification_options")) {
+		if(state->notify_on_host_down)
+			payload_new_string(ret, NULL, "d");
+		if(state->notify_on_host_unreachable)
+			payload_new_string(ret, NULL, "u");
+		if(state->notify_on_host_recovery)
+			payload_new_string(ret, NULL, "r");
+		if(state->notify_on_host_flapping)
+			payload_new_string(ret, NULL, "f");
+		if(state->notify_on_host_downtime)
+			payload_new_string(ret, NULL, "s");
+		payload_end_array(ret);
+	}
+
+	if(payload_start_array(ret, "service_notification_options")) {
+		if(state->notify_on_service_unknown)
+			payload_new_string(ret, NULL, "u");
+		if(state->notify_on_service_warning)
+			payload_new_string(ret, NULL, "w");
+		if(state->notify_on_service_critical)
+			payload_new_string(ret, NULL, "c");
+		if(state->notify_on_service_recovery)
+			payload_new_string(ret, NULL, "r");
+		if(state->notify_on_service_flapping)
+			payload_new_string(ret, NULL, "f");
+		if(state->notify_on_service_downtime)
+			payload_new_string(ret, NULL, "s");
+		payload_end_array(ret)
+	}
+
 	payload_new_string(ret, "service_notification_period", state->service_notification_period);
 	payload_new_boolean(ret, "host_notifications_enabled", state->host_notifications_enabled);
 	payload_new_boolean(ret, "service_notifications_enabled", state->service_notifications_enabled);
