@@ -678,9 +678,9 @@ static void parse_contact(contact * state, struct payload * ret) {
 
 	time_t now = time(NULL);
 	payload_new_boolean(ret, "in_host_notification_period",
-		check_time_against_period(now, state->host_notification_period_ptr));
+		check_time_against_period(now, state->host_notification_period_ptr) == 0);
 	payload_new_boolean(ret, "in_service_notification_period",
-		check_time_against_period(now, state->service_notification_period_ptr));
+		check_time_against_period(now, state->service_notification_period_ptr) == 0);
 
 	time_t nexttime;
 	get_next_valid_time(now, &nexttime, state->host_notification_period_ptr);
