@@ -660,7 +660,7 @@ static void parse_contact(contact * state, struct payload * ret) {
 			payload_new_string(ret, NULL, "f");
 		if(state->notify_on_service_downtime)
 			payload_new_string(ret, NULL, "s");
-		payload_end_array(ret)
+		payload_end_array(ret);
 	}
 
 	payload_new_string(ret, "service_notification_period", state->service_notification_period);
