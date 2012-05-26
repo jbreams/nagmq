@@ -644,6 +644,19 @@ static void parse_contact(contact * state, struct payload * ret) {
 	payload_new_integer(ret, "modified_host_attributes", state->modified_host_attributes);
 	payload_new_integer(ret, "modified_service_attributes", state->modified_service_attributes);
 	parse_custom_variables(ret, state->custom_variables);
+
+	time_t now = time(NULL);
+	payload_new_boolean(ret, "in_host_notification_period",
+		check_time_against_period(now, state->host_notification_period_ptr));
+	payload_new_boolean(ret, "in_service_notification_period",
+		check_time_against_period(now, state->service_notification_period_ptr));
+
+	time_t nexttime;
+	get_next_valid_time(now, &nexttime, state->host_notification_period_ptr);
+	payload_new_integer(ret, "next_host_notification_time", nexttime);
+	get_next_valid_time(now, &nexttime, state->service_notification_period_ptr);
+	payload_new_integer(ret, "next_service_notification_time", nexttime);
+	
 	payload_end_object(ret);
 }
 

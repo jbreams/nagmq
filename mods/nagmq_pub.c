@@ -429,6 +429,8 @@ int handle_nagdata(int which, void * obj) {
 		}
 		break;
 	case NEBCALLBACK_NOTIFICATION_DATA:
+		if(raw->type != NEBTYPE_NOTIFICATION_START)
+			return 0;
 		payload = parse_notification(obj);
 		if(raw->type == NEBTYPE_NOTIFICATION_START &&
 			overrides[OR_NOTIFICATION_START])
