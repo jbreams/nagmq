@@ -272,6 +272,8 @@ def parse_object(o, svcname):
 			return
 		if(not svcname):
 			hosts[o['host_name']] = o
+		if(not o['services']):
+			return
 		for s in o['services']:
 			if(svcname and s != svcname):
 				continue
@@ -367,7 +369,6 @@ def status_to_string(val, ishost):
 			return "CRITICAL"
 		elif(val == 3):
 			return "UNKNOWN"
-
 hosts_printed = { }
 for s in sorted(services.keys()):
 	so = services[s]
@@ -388,4 +389,18 @@ for s in sorted(services.keys()):
 			so['plugin_output'])
 	if(mynoun):
 		nounmap[mynoun](myverb, services[s])
+
+if(len(services.keys()) > 0):
+	exit(0)
+
+for h in sorted(hosts.keys()):
+	ho = hosts[h]
+	if myverb == 'status':
+		print "[{0}]: {1} {2}".format(
+			ho['host_name'],
+			status_to_string(ho['current_state'], True),
+			ho['plugin_output'])
+	elif mynoun:
+		nounmap[mynount](myverb, h)
+
 exit(0)
