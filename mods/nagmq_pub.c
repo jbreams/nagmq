@@ -301,6 +301,13 @@ static struct payload * parse_downtime(nebstruct_downtime_data * state) {
 
 static struct payload * parse_notification(nebstruct_notification_data * state) {
 	struct payload * ret = payload_new();
+	service * service_obj = NULL;
+	host * host_obj;
+
+	if(state->service_description)
+		service_obj = (service*)state->object_ptr;
+	else
+		host_obj = (host*)state->object_ptr;
 
 	if(state->type == NEBTYPE_NOTIFICATION_START)
 		payload_new_string(ret, "type", "notification_start");
@@ -319,12 +326,12 @@ static struct payload * parse_notification(nebstruct_notification_data * state) 
 
 	contactgroupsmember * cgtmp;
 	contactsmember * ctmp;
-	if(state->service_description) {
-		cgtmp = ((service*)state->object_ptr)->contact_groups;
-		ctmp = ((service*)state->object_ptr)->contacts;
+	if(service_obj) {
+		cgtmp = service_obj->contact_groups;
+		ctmp = service_obj->contacts;
 	} else {
-		cgtmp = ((host*)state->object_ptr)->contact_groups;
-		ctmp = ((host*)state->object_ptr)->contacts;
+		cgtmp = host_obj->contact_groups;
+		ctmp = host_obj->contacts;
 	}
 
 	payload_start_array(ret, "contacts");
@@ -340,6 +347,18 @@ static struct payload * parse_notification(nebstruct_notification_data * state) 
 		cgtmp = cgtmp->next;
 	}
 	payload_end_array(ret);
+
+	if(service_obj) {
+		payload_new_integer(ret, "last_state", service_obj->last_state);
+		payload_new_integer(ret, "last_hard_state", service_obj->last_hard_state);
+		payload_new_integer(ret, "last_check", service_obj->last_check);
+		payload_new_integer(ret, "last_state_change", service_obj->last_state_change);
+	} else {
+		payload_new_integer(ret, "last_state", host_obj->last_state);
+		payload_new_integer(ret, "last_hard_state", host_obj->last_hard_state);
+		payload_new_integer(ret, "last_check", host_obj->last_check);
+		payload_new_integer(ret, "last_state_change", host_obj->last_state_change);
+	}
 
 	return ret;
 }
