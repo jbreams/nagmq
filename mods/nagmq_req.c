@@ -729,7 +729,12 @@ void send_msg(void * sock, struct payload * po) {
 	zmq_msg_init_data(&outmsg, po->json_buf, po->bufused, free_cb, NULL);
 	zmq_send(sock, &outmsg, 0);
 	zmq_msg_close(&outmsg);
-	free(po->type);
+	if(po->type)
+		free(po->type);
+	if(po->service_description)
+		free(po->service_description);
+	if(po->host_name)
+		free(po->host_name);
 	free(po);
 }
 
@@ -809,13 +814,23 @@ void process_req_msg(zmq_msg_t * reqmsg, void * sock) {
 	int include_services = 0, include_hosts = 0, include_contacts = 0;
 	int list_hosts = 0, expand_lists = 0;
 	json_t * list_services = NULL, *keys = NULL;
+	json_error_t err;
 	struct payload * po;
 
-	req = json_loadb(zmq_msg_data(reqmsg), zmq_msg_size(reqmsg), 0, NULL);
-	if(req == NULL)
-		return;
+	po = malloc(sizeof(struct payload));
+	memset(po, 0, sizeof(struct payload));
+	payload_start_array(po, NULL);
 
-	if(json_unpack(req, "{ s?:s s?:s s?:s s?:s s?:s s?:s s?:b s?:b"
+	req = json_loadb(zmq_msg_data(reqmsg), zmq_msg_size(reqmsg), 0, &err);
+	if(req == NULL) {
+		err_msg(po, "Error loading json", "text",err.text,
+			"source", err.source, NULL);
+		send_msg(sock, po);
+		return;
+	}
+
+	if(json_unpack_ex(req, &err, 0,
+		"{ s?:s s?:s s?:s s?:s s?:s s?:s s?:b s?:b"
 		" s?:b s?:b s?:o s?:b s?:o s?:s }",
 		"host_name", &host_name, "service_description",
 		&service_description, "hostgroup_name", &hostgroup_name,
@@ -828,12 +843,11 @@ void process_req_msg(zmq_msg_t * reqmsg, void * sock) {
 		"expand_lists", &expand_lists, "keys", &keys,
 		"timeperiod_name", &timeperiod_name) != 0) {
 		json_decref(req);
+		err_msg(po, "Error parsing request", "text", err.text, 
+			"source", err.source, NULL);
+		send_msg(sock, po);
 		return;
 	}
-
-	po = malloc(sizeof(struct payload));
-	memset(po, 0, sizeof(struct payload));
-	payload_start_array(po, NULL);
 
 	if(keys != NULL && json_is_array(keys)) {
 		int i;

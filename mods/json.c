@@ -119,6 +119,10 @@ void payload_new_string(struct payload * po, char * key, char * val) {
 	*out = '\0';
 	if(key && strcmp(key, "type") == 0)
 		po->type = strdup(save);
+	else if(key && strcmp(key, "host_name") == 0)
+		po->host_name = strdup(save);
+	else if(key && strcmp(key, "service_description") == 0)
+		po->service_description = strdup(save);
 	po->bufused += out - save;
 	po->bufused += sprintf(po->json_buf + po->bufused, "\", ");
 }

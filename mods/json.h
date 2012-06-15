@@ -6,6 +6,8 @@ struct keybucket {
 
 struct payload {
 	char * type;
+	char * host_name;
+	char * service_description;
 	char * json_buf;
 	struct keybucket ** keys;
 	size_t buflen, bufused;

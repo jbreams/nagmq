@@ -387,9 +387,31 @@ void free_cb(void * ptr, void * hint) {
 void process_payload(struct payload * payload) {
 	zmq_msg_t type, dump;
 	int rc;
+	char * header;
+	size_t headerlen = strlen(payload->type);
 
-	zmq_msg_init_data(&type, payload->type, strlen(payload->type),
-		free_cb, NULL);
+	if(payload->service_description) {
+		header = malloc(headerlen + 
+			strlen(payload->service_description) +
+			strlen(payload->host_name) + sizeof("  "));
+		headerlen = sprintf(header, "%s %s %s", payload->type,
+			payload->host_name, payload->service_description);
+		free(payload->host_name);
+		free(payload->service_description);
+		free(payload->type);
+	} else if(payload->host_name) {
+		header = malloc(headerlen + 
+			strlen(payload->host_name) + sizeof(" "));
+		headerlen = sprintf(header, "%s %s", payload->type,
+			payload->host_name);
+		free(payload->host_name);
+		free(payload->type);
+	} else {
+		strcpy(header, payload->type);
+		free(payload->type);
+	}
+
+	zmq_msg_init_data(&type, header, headerlen, free_cb, NULL);
 	rc = (zmq_send(pubext, &type, ZMQ_SNDMORE|ZMQ_NOBLOCK) == 0) ? 0 : errno;
 	zmq_msg_close(&type);
 	if(rc != 0) {
