@@ -22,6 +22,8 @@ op.add_option("-f", "--flexible", action="store_true", dest="flexible",
 	help="Specifies downtime should be flexible", default=False)
 op.add_option('-d', '--duration', type="string", dest="duration",
 	help="Specify duration instead of times for downtime")
+op.add_option('-x', '--hosts-only', type='store_true', dest='hostsonly',
+	help='Only look for hosts when parsing arguments', default=False)
 
 
 (opts, args) = op.parse_args()
@@ -272,7 +274,7 @@ def parse_object(o, svcname):
 			return
 		if(not svcname):
 			hosts[o['host_name']] = o
-		if(not o['services']):
+		if(not o['services'] or opts.hostsonly):
 			return
 		for s in o['services']:
 			if(svcname and s != svcname):
@@ -283,7 +285,7 @@ def parse_object(o, svcname):
 				'keys': keys } )
 			for so in json.loads(reqsock.recv()):
 				parse_object(so, svcname)
-	elif(o['type'] == 'service'):
+	elif(o['type'] == 'service' and not opts.hostsonly):
 		if(svcname and svcname != o['service_description']):
 			return
 		name = "{0}@{1}".format(o['service_description'], o['host_name'])
@@ -401,6 +403,6 @@ for h in sorted(hosts.keys()):
 			status_to_string(ho['current_state'], True),
 			ho['plugin_output'])
 	elif mynoun:
-		nounmap[mynount](myverb, h)
+		nounmap[mynoun](myverb, ho)
 
 exit(0)
