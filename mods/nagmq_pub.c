@@ -355,6 +355,7 @@ static struct payload * parse_notification(nebstruct_notification_data * state) 
 		payload_new_integer(ret, "last_hard_state", service_obj->last_hard_state);
 		payload_new_integer(ret, "last_check", service_obj->last_check);
 		payload_new_integer(ret, "last_state_change", service_obj->last_state_change);
+		payload_new_integer(ret, "last_notification", service_obj->last_notification);
 	} else {
 		payload_new_integer(ret, "current_notification_number", host_obj->current_notification_number);
 		payload_new_integer(ret, "current_notification_id", host_obj->current_notification_id);
@@ -362,6 +363,7 @@ static struct payload * parse_notification(nebstruct_notification_data * state) 
 		payload_new_integer(ret, "last_hard_state", host_obj->last_hard_state);
 		payload_new_integer(ret, "last_check", host_obj->last_check);
 		payload_new_integer(ret, "last_state_change", host_obj->last_state_change);
+		payload_new_integer(ret, "last_notification", host_obj->last_host_notification);
 	}
 
 	return ret;
