@@ -410,10 +410,8 @@ void process_payload(struct payload * payload) {
 			payload->host_name);
 		free(payload->host_name);
 		free(payload->type);
-	} else {
-		strcpy(header, payload->type);
-		free(payload->type);
-	}
+	} else
+		header = payload->type;
 
 	zmq_msg_init_data(&type, header, headerlen, free_cb, NULL);
 	rc = (zmq_send(pubext, &type, ZMQ_SNDMORE|ZMQ_NOBLOCK) == 0) ? 0 : errno;
