@@ -22,7 +22,7 @@ op.add_option("-f", "--flexible", action="store_true", dest="flexible",
 	help="Specifies downtime should be flexible", default=False)
 op.add_option('-d', '--duration', type="string", dest="duration",
 	help="Specify duration instead of times for downtime")
-op.add_option('-x', '--hosts-only', type='store_true', dest='hostsonly',
+op.add_option('-x', '--hosts-only', action='store_true', dest='hostsonly',
 	help='Only look for hosts when parsing arguments', default=False)
 
 
