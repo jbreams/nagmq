@@ -241,7 +241,7 @@ def add_downtime(obj):
 	cmd['triggered_by'] = 0
 	
 	pushsock.send_json(cmd)
-	print "[{0}]: Adding downtime for {1}".format(name, str(duration))
+	print "[{0}]: Adding {1}downtime for {2}".format(name, 'flexible ' if opts.flexible else '', str(duration))
 
 def handle_downtime(verb, obj):
 	if(verb == 'add'):
