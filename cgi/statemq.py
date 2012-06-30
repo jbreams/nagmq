@@ -1,6 +1,6 @@
 #!/usr/bin/python26
  
-import time, zmq, os, cgi
+import time, zmq, os, cgi, json
 
 zctx = zmq.Context()
 req = zctx.socket(zmq.REQ)
@@ -33,6 +33,11 @@ if config and 'administrators' in config:
 elif config and 'readonly' in config:
 	if resolve_user(user, config['readonly']):
 		user = None
+
+def dedup(k):
+	global params
+	params[k] = params[k][0]
+map(dedup, params)
 
 if user:
 	params['for_user'] = user
