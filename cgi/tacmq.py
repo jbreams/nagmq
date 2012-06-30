@@ -1,6 +1,7 @@
 #!/usr/bin/python26
  
-import time, zmq, os, cgi, json
+import time, zmq, os, cgi, json, cgitb
+cgitb.enable()
 
 zctx = zmq.Context()
 req = zctx.socket(zmq.REQ)
@@ -9,10 +10,7 @@ req.connect("tcp://localhost:5557")
 configfile = open('/etc/nagios/nagmq.conf', 'r')
 config = json.load(configfile)
 configfile.close()
-config = config['cgi']
-
-print 'Content-Type: application/json'
-print
+config = config['cgi'] if 'cgi' in config else None
 
 user = os.environ['REMOTE_USER']
 params = cgi.parse()
@@ -44,37 +42,35 @@ elif config and 'readonly' in config:
 	if resolve_user(user, config['readonly']):
 		user = None
 
-reqobj = { keys: [ 'type', 'host_name', 'current_state', 
-	'service_description', 'has_been_checked' ], 
-	'include_hosts': True, 'include_services': True }
+reqobj = { 'keys': [ 'type', 'host_name', 'current_state', 
+	'service_description', 'has_been_checked' ] }
 
 if user:
 	reqobj['for_user'] = user
 
-if params['hostgroup_name']:
+if 'hostgroup_name' in params:
 	reqobj['hostgroup_name'] = params['hostgroup_name']
-elif params['servicegroup_name']:
+	reqobj['include_services'] = True
+elif 'servicegroup_name' in params:
 	reqobj['servicegroup_name'] = params['servicegroup_name']
+	reqobj['include_hosts'] = True
 else:
-	reqobj['list_hosts'] : True
-	reqobj['list_services'] : True
-	reqobj['expand_lists'] : True
+	reqobj['list_hosts'] = True
+	reqobj['list_services'] = True
+	reqobj['expand_lists'] = True
 if include_output:
-	reqobj['keys'].append('output')
+	reqobj['keys'].append('plugin_output')
 
 req.send_json(reqobj)
 res = req.recv_json()
 
 def build_result():
-	res = [ ]
-	for x in range(0, 4):
-		if include_output:
-			res[x] = { }
-		elif just_count:
-			res[x] = 0
-		else:
-			res[x] = [ ]
-	return res
+	if include_output:
+		return [{},{},{},{},{}]
+	elif just_count:
+		return [0, 0, 0, 0, 0]
+	else:
+		return [[],[],[],[],[]]
 
 hosts = build_result()
 services = build_result()
@@ -82,25 +78,27 @@ services = build_result()
 def add_entry(obj):
 	global hosts, services
 	if obj['type'] == 'service':
+		state = obj['current_state']
 		if not obj['has_been_checked']:
-			obj['current_state'] = 4
+			state = 4
 		name = '{0}@{1}'.format(
 			obj['service_description'], obj['host_name'])
 		if include_output:
-			services[obj['current_state']][name] = obj['output']
+			services[state][name] = obj['plugin_output']
 		elif just_count:
-			services[obj['current_state']] += 1
+			services[state] += 1
 		else:
-			services[obj['current_state']].append(name)
+			services[state].append(name)
 	elif obj['type'] == 'host':
+		state = obj['current_state']
 		if not obj['has_been_checked']:
-			obj['current_state'] = 4
+			state = 4
 		if include_output:
-			hosts[obj['current_state']][obj['host_name'] = obj['output']
+			hosts[state][obj['host_name']] = obj['plugin_output']
 		elif just_count:
-			hosts[obj['current_state']] += 1
+			hosts[state] += 1
 		else:
-			hosts[obj['current_state']].append(obj['host_name'])
+			hosts[state].append(obj['host_name'])
 
 for o in res:
 	add_entry(o)
@@ -110,6 +108,7 @@ output = { 'hosts': { 'UP': hosts[0], 'DOWN': hosts[1],
 	'services': { 'OK': services[0], 'WARNING': services[1],
 	'CRITICAL': services[2], 'UNKNOWN': services[3],
 	'PENDING': services[4] } }
-
-json.dumps(output)
+print 'Content-Type: application/json'
+print
+print json.dumps(output)
 exit(0)
