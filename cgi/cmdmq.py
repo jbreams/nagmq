@@ -18,7 +18,11 @@ print 'Content-Type: application/json'
 print
 
 user = os.environ['REMOTE_USER']
-params = cgi.FieldStorage()
+rawparams = cgi.FieldStorage()
+params = { }
+for k in rawparams.keys()
+	params[k] = rawparams.getfirst(k)
+
 if 'service_description' in params:
 	req.send_json({ 'host_name': params['host_name'],
 		'service_description': params['service_description'],
@@ -37,7 +41,7 @@ elif 'host_name' in params:
 		print json.dumps({ "result": "{0} not authorized for {1}".format(
 			user, params['host_name'])})
 		exit(0)
-elif config 'administrators' in config:
+elif config and 'administrators' in config:
 	req.send_json( { 'contactgroup_name': config['administrators'],
 		'keys': [ 'type', 'members' ] } )
 	res = req.recv_json()
