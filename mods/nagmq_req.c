@@ -550,6 +550,10 @@ static void parse_hostgroup(hostgroup * state, struct payload * ret,
 	hostsmember *hlck = state->members;
 	if(hlck && (rc = payload_start_array(ret, "members"))) {
 		while(hlck) {
+			if(for_user && !is_contact_for_host(hlck->host_ptr, for_user)) {
+				hlck = hlck->next;
+				continue;
+			}
 			payload_new_string(ret, NULL, hlck->host_name);
 			hlck = hlck->next;
 		}
@@ -583,6 +587,10 @@ static void parse_servicegroup(servicegroup * state, struct payload * ret,
 	servicesmember *slck = state->members;
 	if(slck && (rc = payload_start_array(ret, "members"))) {
 		while(slck) {
+			if(for_user && !is_contact_for_service(slck->service_ptr, for_user)) {
+				slck = slck->next;
+				continue;
+			}
 			payload_new_string(ret, NULL, slck->service_description);
 			slck = slck->next;
 		}
