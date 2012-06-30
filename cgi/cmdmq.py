@@ -12,10 +12,7 @@ req.connect("tcp://localhost:5557")
 configfile = open('/etc/nagios/nagmq.conf', 'r')
 config = json.load(configfile)
 configfile.close()
-config = config['cgi']
-
-print 'Content-Type: application/json'
-print
+config = config['cgi'] if 'cgi' in config else None
 
 user = os.environ['REMOTE_USER']
 rawparams = cgi.FieldStorage()
@@ -57,5 +54,7 @@ else:
 	exit(0)
 
 push.send_json(params)
+print 'Content-Type: application/json'
+print
 print json.dumps( { "result": "Command sent" } )
 exit(0)

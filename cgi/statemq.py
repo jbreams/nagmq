@@ -9,10 +9,7 @@ req.connect("tcp://localhost:5557")
 configfile = open('/etc/nagios/nagmq.conf', 'r')
 config = json.load(configfile)
 configfile.close()
-config = config['cgi']
-
-print 'Content-Type: application/json'
-print
+config = config['cgi'] if 'cgi' in config else None
 
 user = os.environ['REMOTE_USER']
 params = cgi.parse()
@@ -40,5 +37,8 @@ elif config and 'readonly' in config:
 if user:
 	params['for_user'] = user
 req.send_json(params)
+
+print 'Content-Type: application/json'
+print
 print req.recv()
 exit(0)
