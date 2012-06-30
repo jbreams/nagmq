@@ -17,6 +17,11 @@ params = cgi.parse()
 include_output = False
 just_count = False
 
+def dedup(k):
+	global params
+	params[k] = params[k][0]
+map(dedup, params.keys())
+
 host_latency = { 'min': float('inf'), 'max': 0, 'average': 0 }
 host_execution_times = { 'min': float('inf'), 'max': 0, 'average': 0 }
 service_latency = { 'min': float('inf'), 'max': 0, 'average': 0 }
@@ -56,10 +61,10 @@ if user:
 
 if 'hostgroup_name' in params:
 	reqobj['hostgroup_name'] = params['hostgroup_name']
-	reqobj['include_services'] = True
+	reqobj['include_hosts'] = True
 elif 'servicegroup_name' in params:
 	reqobj['servicegroup_name'] = params['servicegroup_name']
-	reqobj['include_hosts'] = True
+	reqobj['include_services'] = True
 else:
 	reqobj['list_hosts'] = True
 	reqobj['list_services'] = True
@@ -83,8 +88,7 @@ services = build_result()
 nhosts, nservices = 0, 0
 
 def add_entry(obj):
-	global hosts, services, host_latency, host_execution_times,
-		nhosts, nservices
+	global hosts, services, host_latency, host_execution_times, nhosts, nservices
 	if obj['type'] == 'service':
 		state = obj['current_state']
 		if not obj['has_been_checked']:
@@ -100,7 +104,7 @@ def add_entry(obj):
 		service_execution_times['min'] = min(
 			service_execution_times['min'], obj['execution_time'])
 		service_execution_times['max'] = max(
-			service_execution_times['min'], obj['execution_time'])
+			service_execution_times['max'], obj['execution_time'])
 		service_execution_times['average'] += obj['execution_time'];
 		service_latency['min'] = min(service_latency['min'], obj['latency'])
 		service_latency['max'] = max(service_latency['max'], obj['latency'])
@@ -119,20 +123,21 @@ def add_entry(obj):
 			hosts[state].append(obj['host_name'])
 		host_execution_times['min'] = min(host_execution_times['min'],
 			obj['execution_time'])
-		host_execution_times['max'] = max(host_execution_times['min'],
+		host_execution_times['max'] = max(host_execution_times['max'],
 			obj['execution_time'])
 		host_execution_times['average'] += obj['execution_time'];
 		host_latency['min'] = min(host_latency['min'], obj['latency'])
 		host_latency['max'] = max(host_latency['max'], obj['latency'])
 		host_latency['average'] += obj['latency']
 		nhosts += 1
-
 map(add_entry, res)
 
-service_latency['average'] /= nservices
-service_execution_times['average'] /= nservices
-host_latency['average'] /= nhosts
-host_execution_times['average'] /= nhosts
+if nservices > 0:
+	service_latency['average'] /= nservices
+	service_execution_times['average'] /= nservices
+if nhosts > 0:
+	host_latency['average'] /= nhosts
+	host_execution_times['average'] /= nhosts
 
 output = { 'hosts': { 'UP': hosts[0], 'DOWN': hosts[1],
 	'UNREACHABLE': hosts[2], 'PENDING': hosts[4],
@@ -140,7 +145,7 @@ output = { 'hosts': { 'UP': hosts[0], 'DOWN': hosts[1],
 	'services': { 'OK': services[0], 'WARNING': services[1],
 	'CRITICAL': services[2], 'UNKNOWN': services[3],
 	'PENDING': services[4], 'latency': service_latency,
-	'execution_time', service_execution_times } }
+	'execution_time': service_execution_times } }
 print 'Content-Type: application/json'
 print
 print json.dumps(output)
