@@ -17,12 +17,15 @@
 #include <zmq.h>
 #include <pthread.h>
 #include "jansson.h"
+#include "config.h"
 
 extern int errno;
 
 static check_result * crhead = NULL;
 pthread_mutex_t cr_mutex = PTHREAD_MUTEX_INITIALIZER;
+#ifdef HAVE_TIMEDEVENT_END
 pthread_mutex_t reaper_mutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
 void * crpullsock = NULL;
 
 int handle_timedevent(int which, void * obj) {
@@ -31,6 +34,7 @@ int handle_timedevent(int which, void * obj) {
 		return ERROR;
 	if(data->event_type != EVENT_CHECK_REAPER)
 		return 0;
+#ifdef HAVE_TIMEDEVENT_END
 	if(data->type == NEBTYPE_TIMEDEVENT_END) {
 		pthread_mutex_unlock(&reaper_mutex);
 		return 0;
@@ -39,6 +43,10 @@ int handle_timedevent(int which, void * obj) {
 		return 0;
 
 	pthread_mutex_lock(&reaper_mutex);
+#else
+	if(data->type != NEBTYPE_TIMEDEVENT_EXECUTE)
+		return 0;
+#endif
 
 	int rc;
 	if(crpullsock) {

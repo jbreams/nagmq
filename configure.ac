@@ -18,6 +18,12 @@ AC_ARG_WITH([pcre-config],
 	[pcre_config_prog=$withval])
 AC_PATH_PROG(PCRE_CONFIG, [pcre-config], $pcre_config_prog)
 
+AC_ARG_WITH([timedevent-end],
+	[AC_HELP_STRING([--with-timedevent-end],
+		[Nagios Core is patched to broker end of timed events])],
+	[AC_DEFINE([HAVE_TIMEDEVENT_END], [],
+		[Nagios is patched to broker end of timed events])])
+
 AC_PROG_CC
 AM_PROG_CC_C_O
 AM_PROG_AR

@@ -303,11 +303,15 @@ static void parse_host(host * state, struct payload * ret,
 
 	if(payload_has_keys(ret, "plugin_output",
 		"long_plugin_output", "perf_data", NULL) > 0) {
+#ifdef HAVE_TIMEDEVENT_END
 		pthread_mutex_lock(&reaper_mutex);
+#endif
 		payload_new_string(ret, "plugin_output", state->plugin_output);
 		payload_new_string(ret, "long_plugin_output", state->long_plugin_output);
 		payload_new_string(ret, "perf_data", state->perf_data);
+#ifdef HAVE_TIMEDEVENT_END
 		pthread_mutex_unlock(&reaper_mutex);
+#endif
 	}
 	payload_new_integer(ret, "state_type", state->state_type);
 	payload_new_integer(ret, "current_attempt", state->current_attempt);
@@ -460,11 +464,15 @@ static void parse_service(service * state, struct payload * ret,
 	payload_new_integer(ret, "last_hard_state", state->last_hard_state);
 	if(payload_has_keys(ret, "plugin_output",
 		"long_plugin_output", "perf_data", NULL) > 0) {
+#ifdef HAVE_TIMEDEVENT_END
 		pthread_mutex_lock(&reaper_mutex);
+#endif
 		payload_new_string(ret, "plugin_output", state->plugin_output);
 		payload_new_string(ret, "long_plugin_output", state->long_plugin_output);
 		payload_new_string(ret, "perf_data", state->perf_data);
+#ifdef HAVE_TIMEDEVENT_END
 		pthread_mutex_unlock(&reaper_mutex);
+#endif
 	}
 	payload_new_integer(ret, "state_type", state->state_type);
 	payload_new_integer(ret, "next_check", state->next_check);
