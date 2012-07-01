@@ -7,6 +7,7 @@ struct payload {
 	char hashed_keys[382];
 	char use_hash;
 	size_t buflen, bufused;
+	char keep_auxdata;
 };
 
 struct payload * payload_new();
