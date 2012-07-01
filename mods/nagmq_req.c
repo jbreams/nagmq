@@ -18,11 +18,7 @@
 #include "jansson.h"
 
 extern int errno;
-
-void lock_obj(char * hostname, char * service, char ** plugin_output,
-	char ** long_plugin_output, char ** perf_data);
-void unlock_obj(char * hostname, char * service, char * plugin_output,
-	char * long_plugin_output, char * perf_data);
+extern pthread_mutex_t reaper_mutex;
 
 static void parse_service(service * state, struct payload * ret,
 	int include_host, int include_contacts);
@@ -307,13 +303,11 @@ static void parse_host(host * state, struct payload * ret,
 
 	if(payload_has_keys(ret, "plugin_output",
 		"long_plugin_output", "perf_data", NULL) > 0) {
-		char * plugin_output, *long_plugin_output, *perf_data;
-		lock_obj(state->name, NULL, &plugin_output,
-			&long_plugin_output, &perf_data);
-		payload_new_string(ret, "plugin_output", plugin_output);
-		payload_new_string(ret, "long_plugin_output", long_plugin_output);
-		payload_new_string(ret, "perf_data", perf_data);
-		unlock_obj(state->name, NULL, NULL, NULL, NULL);
+		pthread_mutex_lock(&reaper_mutex);
+		payload_new_string(ret, "plugin_output", state->plugin_output);
+		payload_new_string(ret, "long_plugin_output", state->long_plugin_output);
+		payload_new_string(ret, "perf_data", state->perf_data);
+		pthread_mutex_unlock(&reaper_mutex);
 	}
 	payload_new_integer(ret, "state_type", state->state_type);
 	payload_new_integer(ret, "current_attempt", state->current_attempt);
@@ -466,13 +460,11 @@ static void parse_service(service * state, struct payload * ret,
 	payload_new_integer(ret, "last_hard_state", state->last_hard_state);
 	if(payload_has_keys(ret, "plugin_output",
 		"long_plugin_output", "perf_data", NULL) > 0) {
-		char * plugin_output, *long_plugin_output, *perf_data;
-		lock_obj(state->host_name, state->description, &plugin_output,
-			&long_plugin_output, &perf_data);
-		payload_new_string(ret, "plugin_output", plugin_output);
-		payload_new_string(ret, "long_plugin_output", long_plugin_output);
-		payload_new_string(ret, "perf_data", perf_data);
-		unlock_obj(state->host_name, state->description, NULL, NULL, NULL);
+		pthread_mutex_lock(&reaper_mutex);
+		payload_new_string(ret, "plugin_output", state->plugin_output);
+		payload_new_string(ret, "long_plugin_output", state->long_plugin_output);
+		payload_new_string(ret, "perf_data", state->perf_data);
+		pthread_mutex_unlock(&reaper_mutex);
 	}
 	payload_new_integer(ret, "state_type", state->state_type);
 	payload_new_integer(ret, "next_check", state->next_check);

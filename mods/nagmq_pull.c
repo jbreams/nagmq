@@ -22,15 +22,23 @@ extern int errno;
 
 static check_result * crhead = NULL;
 pthread_mutex_t cr_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t reaper_mutex = PTHREAD_MUTEX_INITIALIZER;
 void * crpullsock = NULL;
 
 int handle_timedevent(int which, void * obj) {
 	nebstruct_timed_event_data * data = obj;
 	if(which != NEBCALLBACK_TIMED_EVENT_DATA)
 		return ERROR;
-	if(data->type != NEBTYPE_TIMEDEVENT_EXECUTE &&
-		data->event_type != EVENT_CHECK_REAPER)
+	if(data->event_type != EVENT_CHECK_REAPER)
 		return 0;
+	if(data->type == NEBTYPE_TIMEDEVENT_END) {
+		pthread_mutex_unlock(&reaper_mutex);
+		return 0;
+	}
+	else if(data->type != NEBTYPE_TIMEDEVENT_EXECUTE)
+		return 0;
+
+	pthread_mutex_lock(&reaper_mutex);
 
 	int rc;
 	if(crpullsock) {

@@ -17,7 +17,6 @@
 #include "jansson.h"
 
 NEB_API_VERSION(CURRENT_NEB_API_VERSION)
-static skiplist * lock_skiplist = NULL;
 static void * nagmq_handle = NULL;
 static pthread_t threadid;
 static pthread_cond_t init_cond = PTHREAD_COND_INITIALIZER;
@@ -26,122 +25,10 @@ void * zmq_ctx;
 nebmodule * handle;
 json_t * config;
 
-struct lock_skip_obj {
-	char * host_name;
-	char * service_description;
-	char * plugin_output;
-	char * long_plugin_output;
-	char * perf_data;
-	pthread_mutex_t lock;
-};
-
-int lock_obj_compare(void * ar, void * br) {
-	struct lock_skip_obj *a = ar, *b = br;
-	int r;
-	if(a->service_description || b->service_description) {
-		if(a->service_description && !b->service_description)
-			return -1;
-		else if(!a->service_description && b->service_description)
-			return 1;
-		else if((r = strcmp(a->service_description, b->service_description)) != 0)
-			return r;
-	}
-	if((r = strcmp(a->host_name, b->host_name)) != 0)
-		return r;
-	return 0;
-}
-
-void lock_obj(char * hostname, char * service, char ** plugin_output,
-	char ** long_plugin_output, char ** perf_data) {
-	static pthread_mutex_t listlock = PTHREAD_MUTEX_INITIALIZER;
-	if(!lock_skiplist)
-		return;
-	struct lock_skip_obj test = { hostname, service, NULL, NULL, NULL,
-		PTHREAD_MUTEX_INITIALIZER };
-	pthread_mutex_lock(&listlock);
-	struct lock_skip_obj * lock = skiplist_find_first(lock_skiplist, &test, NULL);
-	if(lock == NULL) {
-		lock = malloc(sizeof(struct lock_skip_obj));
-		memset(lock, 0, sizeof(struct lock_skip_obj));
-		lock->host_name = strdup(hostname);
-		if(service)
-			lock->service_description = strdup(service);
-		else
-			lock->service_description = NULL;
-		pthread_mutex_init(&lock->lock, NULL);
-		skiplist_insert(lock_skiplist, lock);
-	}
-	pthread_mutex_unlock(&listlock);
-
-	if(plugin_output)
-		*plugin_output = lock->plugin_output;
-	if(long_plugin_output)
-		*long_plugin_output = lock->long_plugin_output;
-	if(perf_data)
-		*perf_data = lock->perf_data;
-
-	pthread_mutex_lock(&lock->lock);
-}
-
-void unlock_obj(char * hostname, char * service, char * plugin_output,
-	char * long_plugin_output, char * perf_data) {
-	if(!lock_skiplist)
-		return;
-	struct lock_skip_obj test = { hostname, service, NULL, NULL, NULL,
-		PTHREAD_MUTEX_INITIALIZER };
-	struct lock_skip_obj * lock = skiplist_find_first(lock_skiplist, &test, NULL);
-	if(lock == NULL) {
-		lock = malloc(sizeof(struct lock_skip_obj));
-		memset(lock, 0, sizeof(struct lock_skip_obj));
-		lock->host_name = strdup(hostname);
-		if(service)
-			lock->service_description = strdup(service);
-		else
-			lock->service_description = NULL;
-		pthread_mutex_init(&lock->lock, NULL);
-		skiplist_insert(lock_skiplist, lock);
-	}
-
-	if(plugin_output) {
-		if(lock->plugin_output)
-			free(lock->plugin_output);
-		lock->plugin_output = strdup(plugin_output);
-	}
-	if(long_plugin_output) {
-		if(lock->long_plugin_output)
-			free(lock->long_plugin_output);
-		lock->long_plugin_output = strdup(long_plugin_output);
-	}
-	if(perf_data) {
-		if(lock->perf_data)
-			free(lock->perf_data);
-		lock->perf_data = strdup(perf_data);
-	}
-
-	pthread_mutex_unlock(&lock->lock);
-}
-
 int nebmodule_deinit(int flags, int reason) {
 	neb_deregister_module_callbacks(nagmq_handle);
 	if(config)
 		json_decref(config);
-	if(lock_skiplist == NULL)
-		return 0;
-	struct lock_skip_obj * lock;
-	while((lock = skiplist_pop(lock_skiplist)) != NULL) {
-		if(lock->service_description)
-			free(lock->service_description);
-		free(lock->host_name);
-		if(lock->plugin_output)
-			free(lock->plugin_output);
-		if(lock->long_plugin_output)
-			free(lock->long_plugin_output);
-		if(lock->perf_data)
-			free(lock->perf_data);
-		pthread_mutex_destroy(&lock->lock);
-		free(lock);
-	}
-	skiplist_free(&lock_skiplist);
 	return 0;
 }
 
@@ -326,7 +213,6 @@ void * recv_loop(void * parg) {
 		pollables[1].events = ZMQ_POLLIN;
 	}
 
-	lock_skiplist = skiplist_new(15, 0.5, 0, 0, lock_obj_compare);
 	pthread_cond_signal(&init_cond);
 	pthread_mutex_unlock(&recv_loop_mutex);
 

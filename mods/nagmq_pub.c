@@ -27,11 +27,6 @@ extern json_t *  config;
 #define OR_MAX 4
 static int overrides[OR_MAX];
 
-void lock_obj(char * hostname, char * service, char ** plugin_output,
-	char ** long_plugin_output, char ** perf_data);
-void unlock_obj(char * hostname, char * service, char * plugin_output,
-	char * long_plugin_output, char * perf_data);
-
 static struct payload * parse_program_status(nebstruct_program_status_data * state) {
 	struct payload * ret = payload_new();	
 
@@ -130,7 +125,6 @@ static struct payload * parse_host_check(nebstruct_host_check_data * state) {
 		payload_new_integer(ret, "retry_interval", obj->retry_interval);
 		payload_new_boolean(ret, "accept_passive_checks", obj->accept_passive_host_checks);
 	} else if(state->type == NEBTYPE_HOSTCHECK_PROCESSED) {
-		lock_obj(state->host_name, NULL, NULL, NULL, NULL);
 		payload_new_string(ret, "type", "host_check_processed");
 		payload_new_timestamp(ret, "start_time", &state->start_time);
 		payload_new_timestamp(ret, "end_time", &state->end_time);
@@ -140,8 +134,6 @@ static struct payload * parse_host_check(nebstruct_host_check_data * state) {
 		payload_new_string(ret, "output", state->output);
 		payload_new_string(ret, "long_output", state->long_output);
 		payload_new_string(ret, "perf_data", state->perf_data);
-		unlock_obj(state->host_name, NULL, state->output,
-			state->long_output, state->perf_data);
 	}
 	return ret;
 }
@@ -176,7 +168,6 @@ static struct payload * parse_service_check(nebstruct_service_check_data * state
 		payload_new_integer(ret, "retry_interval", obj->retry_interval);
 		payload_new_boolean(ret, "accept_passive_checks", obj->accept_passive_service_checks);
 	} else if(state->type == NEBTYPE_SERVICECHECK_PROCESSED) {
-		lock_obj(state->host_name, state->service_description, NULL, NULL, NULL);
 		payload_new_string(ret, "type", "service_check_processed");
 		payload_new_timestamp(ret, "start_time", &state->start_time);
 		payload_new_timestamp(ret, "end_time", &state->end_time);
@@ -186,8 +177,6 @@ static struct payload * parse_service_check(nebstruct_service_check_data * state
 		payload_new_string(ret, "output", state->output);
 		payload_new_string(ret, "long_output", state->long_output);
 		payload_new_string(ret, "perf_data", state->perf_data);
-		unlock_obj(state->host_name, state->service_description,
-			state->output, state->long_output, state->perf_data);
 	}
 	return ret;
 }
