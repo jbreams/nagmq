@@ -815,9 +815,8 @@ void do_list_services(struct payload * po, int expand_lists,
 
 void err_msg(struct payload * po, char * msg, ...) {
 	payload_start_object(po, NULL);
+	po->use_hash = 0;
 	payload_new_string(po, "type", "error");
-	if(po->keys)
-		payload_hash_key(po, "msg");
 	payload_new_string(po, "msg", msg);
 	va_list ap;
 	

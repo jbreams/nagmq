@@ -1,15 +1,11 @@
 
-struct keybucket {
-	char * key;
-	struct keybucket * next;
-};
-
 struct payload {
 	char * type;
 	char * host_name;
 	char * service_description;
 	char * json_buf;
-	struct keybucket ** keys;
+	char hashed_keys[382];
+	char use_hash;
 	size_t buflen, bufused;
 };
 
