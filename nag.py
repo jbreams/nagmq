@@ -265,7 +265,6 @@ def send_req(o):
 	return reqsock.recv_json()
 
 def parse_object(o, svcname):
-	print o
 	if(o['type'] == 'host'):
 		if(o['host_name'] in hosts):
 			return
