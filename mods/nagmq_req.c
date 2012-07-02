@@ -917,7 +917,7 @@ void process_req_msg(zmq_msg_t * reqmsg, void * sock) {
 				service_description, "host_name", host_name, NULL);
 			goto end;
 		}
-		if(!is_contact_for_service(svctarget, for_user)) {
+		if(for_user && !is_contact_for_service(svctarget, for_user)) {
 			err_msg(po, "User not authorized for service", "service_description",
 				service_description, "host_name", host_name, NULL);
 			goto end;
@@ -930,7 +930,7 @@ void process_req_msg(zmq_msg_t * reqmsg, void * sock) {
 			err_msg(po, "Could not find host", "host_name", host_name, NULL);
 			goto end;
 		}
-		if(!is_contact_for_host(hsttarget, for_user)) {
+		if(for_user && !is_contact_for_host(hsttarget, for_user)) {
 			err_msg(po, "User not authorized for host", "host_name", host_name, NULL);
 			goto end;
 		}
