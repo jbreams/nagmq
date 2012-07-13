@@ -44,8 +44,8 @@ pasttenses = {
 	'remove': 'removed'
 }
 
-keys = ['host_name', 'services', 'hosts', 'contacts', 'contact_groups',
-	'service_description', 'current_state', 'members', 'type', 'name',
+keys = ['host_name', 'services', 'hosts', 'service_description',
+	'current_state', 'members', 'type', 'name', 
 	'problem_has_been_acknowledged', 'plugin_output', 'checks_enabled',
 	'notifications_enabled', 'event_handler_enabled' ]
 myverb = None
@@ -257,20 +257,16 @@ nounmap = {
 	'downtime': handle_downtime,
 	'eventhandler': handle_eventhandler }
 
-def is_authorized(o):
-	if(os.getuid() == 0):
-		return True
-	if(o['contacts'] and username in o['contacts']):
-		return True
-	if(len(contactgroups.intersection(set(o['contact_groups']))) > 0):
-		return True
-	return False
+def send_req(o):
+	o['keys'] = keys
+	if username:
+		o['for_user'] = username
+	reqsock.send_json(o)
+	return reqsock.recv_json()
 
 def parse_object(o, svcname):
 	if(o['type'] == 'host'):
 		if(o['host_name'] in hosts):
-			return
-		if(not is_authorized(o)):
 			return
 		if(not svcname):
 			hosts[o['host_name']] = o
@@ -279,11 +275,7 @@ def parse_object(o, svcname):
 		for s in o['services']:
 			if(svcname and s != svcname):
 				continue
-			reqsock.send_json( {
-				'host_name': o['host_name'],
-				'service_description': s,
-				'keys': keys } )
-			for so in json.loads(reqsock.recv()):
+			for so in send_req ({'host_name': o['host_name'], 'service_description': s }):
 				parse_object(so, svcname)
 	elif(o['type'] == 'service' and not opts.hostsonly):
 		if(svcname and svcname != o['service_description']):
@@ -291,65 +283,38 @@ def parse_object(o, svcname):
 		name = "{0}@{1}".format(o['service_description'], o['host_name'])
 		if(name in services):
 			return
-		if(not is_authorized(o)):
-			return
 		services[name] = o
 
-username = pwd.getpwuid(os.getuid())[0]
+username = None
 if(os.getuid() != 0):
-	reqsock.send_json( {
-		'contact_name': username,
-		'keys': ['contact_groups', 'type', 'name'] } )
-	for o in json.loads(reqsock.recv()):
-		if(o['type'] == 'contact'):
-			contactgroups = set(o['contact_groups'])
-			break
+	username = pwd.getpwuid(os.getuid())[0]
 	
 for td in args:
 	tm = re.match(r'([^\@]+)?\@?([^\s]+)?', td)
 	p1, p2 = tm.group(1), tm.group(2)
 	if(not p2):
-		reqsock.send_json( {
-			'host_name': p1,
-			'include_services': True,
-			'keys': keys } )
-		for o in json.loads(reqsock.recv()):
+		for o in send_req( { 'host_name': p1, 'include_services': True } ):
 			parse_object(o, None)
 
 		if(len(services) > 0 or len(hosts) > 0):
 			continue
 
-		reqsock.send_json( {
-			'hostgroup_name': p1,
-			'include_hosts': True,
-			'keys': keys } )
-		for o in json.loads(reqsock.recv()):
+		for o in send_req({ 'hostgroup_name': p1, 'include_hosts': True }):
 			parse_object(o, None)
 
 		if(len(services) > 0 or len(hosts) > 0):
 			continue
-		reqsock.send_json( {
-			'list_services': p1,
-			'expand_lists': True,
-			'include_hosts': True,
-			'keys': keys } )
-		for o in json.loads(reqsock.recv()):
+		
+		for o in send_req({'list_services': p1, 'expand_lists': True, 'include_hosts': True }):
 			parse_object(o, p1)
 	else:
-		reqsock.send_json( {
-			'host_name': p2,
-			'service_description': p1,
-			'keys': keys } )
-		for o in json.loads(reqsock.recv()):
+		for o in send_req( { 'host_name': p2, 'service_description': p1 }):
 			parse_object(o, p1)
 
 		if(len(services) > 0):
 			continue
-		reqsock.send_json( {
-			'hostgroup_name': p2,
-			'include_hosts': True,
-			'keys': keys } )
-		for o in json.loads(reqsock.recv()):
+
+		for o in send_req({ 'hostgroup_name': p2, 'include_hosts': True }):
 			parse_object(o, p1)
 
 if(len(services) == 0 and len(hosts) == 0):
