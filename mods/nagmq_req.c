@@ -19,6 +19,10 @@
 
 extern int errno;
 extern pthread_mutex_t reaper_mutex;
+extern host * host_list;
+extern service * service_list;
+extern hostgroup * hostgroup_list;
+extern servicegroup * servicegroup_list;
 
 static void parse_service(service * state, struct payload * ret,
 	int include_host, int include_contacts);
@@ -536,7 +540,6 @@ static void parse_service(service * state, struct payload * ret,
 	}
 }
 
-
 static void parse_hostgroup(hostgroup * state, struct payload * ret,
 	int include_hosts, contact * for_user) {
 	int rc;
@@ -707,9 +710,6 @@ static void parse_contact(contact * state, struct payload * ret) {
 	payload_end_object(ret);
 }
 
-extern host * host_list;
-extern service * service_list;
-
 static void parse_contactgroup(contactgroup * state, struct payload * ret,
 	int include_contacts) {
 	int rc;
@@ -779,6 +779,27 @@ void do_list_hosts(struct payload * po, int expand_lists,
 	}
 }
 
+void do_list_hostgroups(struct payload * po, int expand_lists,
+	int include_hosts, contact * for_user) {
+	if(!expand_lists) {
+		payload_start_object(po, NULL);
+		payload_new_string(po, "type", "hostgroup_list");
+		payload_start_array(po, "hostgroups");
+	}
+	hostgroup * tmp_hostgroup = hostgroup_list;
+	while(tmp_hostgroup) {
+		if(expand_lists)
+			parse_hostgroup(tmp_hostgroup, po, include_hosts, for_user);
+		else
+			payload_new_string(po, NULL, tmp_hostgroup->group_name);
+		tmp_hostgroup = tmp_hostgroup->next;
+	}
+	if(!expand_lists) {
+		payload_end_array(po);
+		payload_end_object(po);
+	}
+}
+
 void do_list_services(struct payload * po, int expand_lists,
 	int include_hosts, int include_contacts, const char * tolist,
 	contact * auth_user) {
@@ -813,6 +834,28 @@ void do_list_services(struct payload * po, int expand_lists,
 	}
 }
 
+void do_list_servicegroups(struct payload * po, int expand_lists,
+	int include_services, contact * for_user) {
+	if(!expand_lists) {
+		payload_start_object(po, NULL);
+		payload_new_string(po, "type", "servicegroup_list");
+		payload_start_array(po, "servicegroups");
+	}
+	servicegroup * tmp_servicegroup = servicegroup_list;
+	while(tmp_servicegroup) {
+		if(expand_lists)
+			parse_servicegroup(tmp_servicegroup, po, include_services, for_user);
+		else
+			payload_new_string(po, NULL, tmp_servicegroup->group_name);
+		tmp_servicegroup = tmp_servicegroup->next;
+	}
+	if(!expand_lists) {
+		payload_end_array(po);
+		payload_end_object(po);
+	}
+}
+
+
 void err_msg(struct payload * po, char * msg, ...) {
 	payload_start_object(po, NULL);
 	po->use_hash = 0;
@@ -836,7 +879,7 @@ void process_req_msg(zmq_msg_t * reqmsg, void * sock) {
 	char * contact_name = NULL, *contactgroup_name = NULL;
 	char * timeperiod_name = NULL;
 	int include_services = 0, include_hosts = 0, include_contacts = 0;
-	int list_hosts = 0, expand_lists = 0;
+	int list_hosts = 0, expand_lists = 0, list_hostgroups = 0, list_servicegroups = 0;
 	json_t * list_services = NULL, *keys = NULL;
 	json_error_t err;
 	struct payload * po;
@@ -857,7 +900,7 @@ void process_req_msg(zmq_msg_t * reqmsg, void * sock) {
 
 	if(json_unpack_ex(req, &err, 0,
 		"{ s?:s s?:s s?:s s?:s s?:s s?:s s?:b s?:b"
-		" s?:b s?:b s?:o s?:b s?:o s?:s s?:s }",
+		" s?:b s?:b s?:o s?:b s?:o s?:s s?:s s?:b s?:b }",
 		"host_name", &host_name, "service_description",
 		&service_description, "hostgroup_name", &hostgroup_name,
 		"servicegroup_name", &servicegroup_name,
@@ -868,7 +911,9 @@ void process_req_msg(zmq_msg_t * reqmsg, void * sock) {
 		"list_services", &list_services,
 		"expand_lists", &expand_lists, "keys", &keys,
 		"timeperiod_name", &timeperiod_name,
-		"for_user", &for_username) != 0) {
+		"for_user", &for_username,
+		"list_hostgroups", &list_hostgroups,
+		"list_servicegroups", &list_servicegroups) != 0) {
 		json_decref(req);
 		err_msg(po, "Error parsing request", "text", err.text, 
 			"source", err.source, NULL);
@@ -900,6 +945,11 @@ void process_req_msg(zmq_msg_t * reqmsg, void * sock) {
 		do_list_services(po, expand_lists, include_hosts, include_contacts,
 			json_is_string(list_services) ?
 			json_string_value(list_services) : NULL, for_user);
+
+	if(list_hostgroups)
+		do_list_hostgroups(po, expand_lists, include_hosts, for_user);
+	if(list_servicegroups)
+		do_list_servicegroups(po, expand_lists, include_services, for_user);
 
 	if(service_description) {
 		service * svctarget;
