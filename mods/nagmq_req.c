@@ -220,7 +220,7 @@ static void parse_host(host * state, struct payload * ret,
 	hlck = state->child_hosts;
 	if(hlck && (rc = payload_start_array(ret, "child_hosts"))) {
 		while(hlck) {
-			payload_new_string(ret, NULL, hlck->host_name);
+			payload_new_string(ret, NULL, hlck->host_ptr->name);
 			hlck = hlck->next;
 		}
 		payload_end_array(ret);
