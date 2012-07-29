@@ -247,6 +247,17 @@ static void parse_host(host * state, struct payload * ret,
 	} else
 		payload_new_string(ret, "contact_groups", NULL);
 
+	objectlist * hglck = state->hostgroups_ptr;
+	if(hglck && (rc = payload_start_array(ret, "hostgroups"))) {
+		while(hglck && hglck->object_ptr) {
+			hostgroup * hg = hglck->object_ptr;
+			payload_new_string(ret, NULL, hg->group_name);
+			hglck = hglck->next;
+		}
+		payload_end_array(ret);
+	} else
+		payload_new_string(ret, "hostgroups", NULL);
+
 	payload_new_string(ret, "check_command", state->host_check_command);
 	payload_new_integer(ret, "initial_state", state->initial_state);
 	payload_new_double(ret, "check_interval", state->check_interval);
@@ -420,6 +431,17 @@ static void parse_service(service * state, struct payload * ret,
 		payload_end_array(ret);
 	} else
 		payload_new_string(ret, "contact_groups", NULL);
+
+	objectlist * sgplck = state->servicegroups_ptr;
+	if(sgplck && (rc = payload_start_array(ret, "servicegroups"))) {
+		while(sgplck && sgplck->object_ptr) {
+			servicegroup * sg = sgplck->object_ptr;
+			payload_new_string(ret, NULL, sg->group_name);
+			sgplck = sgplck->next;
+		}
+		payload_end_array(ret);
+	} else
+		payload_new_string(ret, "servicegroups", NULL);
 
 	payload_new_double(ret, "notification_interval", state->notification_interval);
 	payload_new_double(ret, "first_notification_delay", state->first_notification_delay);
