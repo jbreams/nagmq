@@ -30,6 +30,7 @@ Compilation and Installation
 
 Compile this from the Git repo by running::
 
+	$ autoreconf -i
 	$ ./configure
 	$ make
 	$ make install
@@ -51,34 +52,41 @@ one address, list them as an array.::
 	{
 		"publish": {
 			"enable": true,
-			"bind": [ "ipc:///tmp/nagmqpub.sock" ],
-			"override": [ "service_check_initiate", "host_check_initiate" ]
-		},
+			"bind": "ipc:///var/nagios/nagmqevents.sock",
+			"override": [ "service_check_initiate" ]
+		},  
 		"pull": {
 			"enable": true,
-			"bind": "ipc:///tmp/nagmqpull.sock",
+			"bind": "ipc:///var/nagios/nagmqcommands.sock",
 			"threads": 2
-		},
+		},  
 		"reply": {
 			"enable": true,
-			"bind": "ipc:///tmp/nagmqreply.sock",
+			"bind": "ipc:///var/nagios/nagmqstate.sock",
 			"threads": 2
-		},
+		},  
 		"executor": {
-			"jobs": { "address":"ipc:///tmp/dnxmqjobs.sock", "bind":false },
-			"results": { "address":"ipc:///tmp/dnxmqresults.sock", "bind":false },
-			"verbose": true,
-			"broker": {
-				"downstream": {
-					"push": { "address": "ipc:///tmp/dnxmqjobs.sock", "bind": true },
-					"pull": { "address": "ipc:///tmp/dnxmqresults.sock", "bind": true }
-				},
-				"upstream": {
-					"subscribe": { "address": "ipc:///tmp/nagmqpub.sock", "subscribe": [ "host_check_initiate", "service_check_initiate" ] },
-					"push": { "address": "ipc:///tmp/nagmqpull.sock" }
-				}
-			}
-		}
+			"jobs": "ipc:///var/nagios/mqexecjobs.sock",
+			"results": "ipc:///var/nagios/mqexecresults.sock"
+		},  
+		"cli": {
+			"pull": "tcp://localhost:5556",
+			"reply": "tcp://localhost:5557"
+		},  
+		"devices": [
+			[ { "backend": { "type": "push", "bind":"tcp://*:5558", "noblock":true },
+			"frontend": { "type": "sub", "connect":"ipc:///var/nagios/nagmqevents.sock",
+				"subscribe": [ "service_check_initiate" ] } },
+			{ "frontend": { "type": "pull", "bind":"tcp://*:5556" },
+			"backend": { "type": "push", "connect":"ipc:///var/nagios/nagmqcommands.sock" },
+			"monitor": { "type": "pub", "bind": "tcp://*:5559" } },
+			{ "frontend": { "type": "router", "bind":"tcp://127.0.0.1:5557" },
+			"backend": { "type": "dealer", "connect":"ipc:///var/nagios/nagmqstate.sock" } } ],
+			[ { "backend": { "type": "pull", "connect": "tcp://*:5558" },
+			"frontend": { "type": "push", "bind": "ipc:///var/nagios/mqexecjobs.sock" } },
+			{ "backend": { "type": "pull", "bind":  "ipc:///var/nagios/mqexecresults.sock" },
+			"frontend": { "type": "push", "connect": "tcp://*:5556" } } ] 
+		]   
 	}
 
 Restart Nagios, and you'll be able to connect to the message busses and
