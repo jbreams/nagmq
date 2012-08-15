@@ -12,6 +12,8 @@
 #include "naginclude/objects.h"
 #include "naginclude/broker.h"
 #include "naginclude/skiplist.h"
+#include "naginclude/comments.h"
+#include "naginclude/downtime.h"
 #include <zmq.h>
 #include <pthread.h>
 #include "json.h"
@@ -756,6 +758,98 @@ static void parse_contactgroup(contactgroup * state, struct payload * ret,
 			parse_contact(ctmp->contact_ptr, ret);
 			ctmp = ctmp->next;
 		}
+	}
+}
+
+static void parse_downtime(scheduled_downtime * state, struct payload *ret) {
+	payload_start_object(ret, NULL);
+	payload_new_string(ret, "type", "scheduled_downtime");
+	payload_new_string(ret, "host_name", state->host_name);
+	payload_new_string(ret, "service_description", state->service_description);
+	payload_new_integer(ret, "entry_time", state->entry_time);
+	payload_new_integer(ret, "start_time", state->start_time);
+	payload_new_integer(ret, "end_time", state->end_time);
+	payload_new_boolean(ret, "fixed", state->fixed);
+	payload_new_integer(ret, "triggered_by", state->triggered_by);
+	payload_new_integer(ret, "duration", state->duration);
+	payload_new_integer(ret, "downtime_id", state->downtime_id);
+	payload_new_string(ret, "author_name", state->author);
+	payload_new_string(ret, "comment_data", state->comment);
+	payload_new_integer(ret, "comment_id", state->comment_id);
+	payload_new_boolean(ret, "is_in_effect", state->is_in_effect);
+	payload_new_integer(ret, "start_flex_downtime", state->start_flex_downtime);
+	payload_new_integer(ret, "incremented_pending_downtime", state->incremented_pending_downtime);
+	payload_end_object(ret);
+}
+
+static void parse_comment(comment * state, struct payload * ret) {
+	payload_start_object(ret, NULL);
+	payload_new_string(ret, "type", "comment");
+	payload_new_integer(ret, "entry_type", state->entry_type);
+	payload_new_integer(ret, "comment_id", state->comment_id);
+	payload_new_integer(ret, "source", state->source);
+	payload_new_boolean(ret, "persistent", state->persistent);
+	payload_new_integer(ret, "entry_time", state->entry_time);
+	payload_new_boolean(ret, "expires", state->expires);
+	payload_new_integer(ret, "expire_time", state->expire_time);
+	payload_new_string(ret, "host_name", state->host_name);
+	payload_new_string(ret, "service_description", state->service_description);
+	payload_new_string(ret, "author_name", state->author);
+	payload_new_string(ret, "comment_data", state->comment_data);
+	payload_end_object(ret);
+}
+
+extern scheduled_downtime *scheduled_downtime_list;
+void do_list_downtimes(struct payload * po, host * hst, service * svc, contact * auth_user) {
+	scheduled_downtime * sdlck = scheduled_downtime_list;
+	while(sdlck) {
+		if(svc && sdlck->service_description &&
+			strcmp(sdlck->service_description, svc->description) == 0 &&
+			strcmp(sdlck->host_name, svc->host_name) == 0) {
+			if(auth_user && !is_contact_for_service(svc, auth_user)) {
+				sdlck = sdlck->next;
+				continue;
+			}
+			parse_downtime(sdlck, po);
+		}
+		else if(hst && sdlck->host_name &&
+			strcmp(sdlck->host_name, hst->name) == 0) {
+			if(auth_user && !is_contact_for_host(hst, auth_user)) {
+				sdlck = sdlck->next;
+				continue;
+			}
+			parse_downtime(sdlck, po);
+		}
+		else
+			parse_downtime(sdlck, po);
+		sdlck = sdlck->next;
+	}
+}
+
+extern comment *comment_list;
+void do_list_comments(struct payload * po, host * hst, service * svc, contact * auth_user) {
+	comment * clck = comment_list;
+	while(clck) {
+		if(svc && clck->service_description &&
+			strcmp(clck->service_description, svc->description) == 0 &&
+			strcmp(clck->host_name, svc->host_name) == 0) {
+			if(auth_user && !is_contact_for_service(svc, auth_user)) {
+				clck = clck->next;
+				continue;
+			}
+			parse_comment(clck, po);
+		}
+		else if(hst && clck->host_name &&
+			strcmp(clck->host_name, hst->name) == 0) {
+			if(auth_user && !is_contact_for_host(hst, auth_user)) {
+				clck = clck->next;
+				continue;
+			}
+			parse_comment(clck, po);
+		}
+		else
+			parse_comment(clck, po);
+		clck = clck->next;
 	}
 }
 
