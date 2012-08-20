@@ -55,15 +55,15 @@ int handle_timedevent(int which, void * obj) {
 		while(zmq_getsockopt(crpullsock, ZMQ_EVENTS, &events, &evsize) == 0 &&
 			events & ZMQ_POLLIN) {
 			zmq_msg_t crm;
+			check_result ** cr = NULL;
 			zmq_msg_init(&crm);
 			if(zmq_recv(crpullsock, &crm, 0) != 0) {
 				if(errno != EINTR)
 					break;
 			}
-
-			check_result * cr = zmq_msg_data(&crm);
+			cr = zmq_msg_data(&crm);
+			add_check_result_to_list(*cr);
 			zmq_msg_close(&crm);
-			add_check_result_to_list(cr);
 		}
 	} else {
 		pthread_mutex_lock(&cr_mutex);
@@ -129,7 +129,9 @@ static void process_status(json_t * payload, void * ressock) {
 
 	if(ressock) {
 		zmq_msg_t rmsg;
-		zmq_msg_init_data(&rmsg, newcr, sizeof(check_result), NULL, NULL);
+		zmq_msg_init_size(&rmsg, sizeof(check_result*));
+		check_result ** crout = zmq_msg_data(&rmsg);
+		*crout = newcr;
 		zmq_send(ressock, &rmsg, 0);
 		zmq_msg_close(&rmsg);
 	} else {
