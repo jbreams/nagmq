@@ -81,6 +81,113 @@ int handle_timedevent(int which, void * obj) {
 	return 0;
 }
 
+static void process_hastatus(json_t * payload) {
+	size_t max, i;
+	json_t * statedata;
+
+#ifdef HAVE_TIMEDEVENT_END
+	pthread_mutex_lock(&reaper_mutex);
+#endif
+
+	statedata = json_object_get(payload, "data");
+	if(!statedata || !json_is_array(statedata)) {
+		json_decref(payload);
+		return;
+	}
+
+	for(i = 0; i < max; i++) {
+		char * service_description = NULL, * host_name, *type;
+		char * plugin_output, * long_output = NULL, *perf_data = NULL;
+		int state, current_attempt, acknowledged, state_type;
+		int is_flapping, notifications_enabled, checks_enabled;
+		int passive_checks_enabled = -1, event_handler_enabled;
+		int flap_detection_enabled;
+
+		json_t * el = json_array_get(statedata, i);
+		if(json_unpack(el, "{s:s s?:s s:s s?:s s?:s s:i s:i s:i s:b "
+			"s:b s:b s:b s:b s:b s*:b s*:b s:s}",
+			"host_name", &host_name,
+			"service_description", &service_description,
+			"plugin_output", &plugin_output,
+			"long_output", &long_output,
+			"perf_data", &perf_data,
+			"current_state", &state,
+			"current_attempt", &current_attempt,
+			"state_type", &state_type,
+			"is_flapping", &is_flapping,
+			"notifications_enabled", &notifications_enabled,
+			"checks_enabled", &checks_enabled,
+			"event_handler_enabled", &event_handler_enabled,
+			"flap_detection_enabled", &flap_detection_enabled,
+			"problem_has_been_acknowledged", &acknowledged,
+			"accept_passive_service_checks", &passive_checks_enabled,
+			"accept_passive_host_checks", &passive_checks_enabled,
+			"type", &type) != 0) {
+			continue;
+		}
+		if(passive_checks_enabled < 0)
+			continue;
+
+		if(strcmp(type, "host") != 0 && strcmp(type, "service") != 0)
+			continue;
+
+		if(service_description) {
+			service * svctarget = find_service(host_name, service_description);
+			if(!svctarget)
+				continue;
+			svctarget->current_state = state;
+			svctarget->current_attempt = current_attempt;
+			svctarget->state_type = state_type;
+			svctarget->is_flapping = is_flapping;
+			svctarget->notifications_enabled = notifications_enabled;
+			svctarget->checks_enabled = checks_enabled;
+			svctarget->event_handler_enabled = event_handler_enabled;
+			svctarget->flap_detection_enabled = flap_detection_enabled;
+			svctarget->problem_has_been_acknowledged = acknowledged;
+			svctarget->accept_passive_service_checks = passive_checks_enabled;
+			if(svctarget->plugin_output)
+				free(svctarget->plugin_output);
+			svctarget->plugin_output = strdup(plugin_output);
+			if(svctarget->long_plugin_output)
+				free(svctarget->long_plugin_output);
+			svctarget->long_plugin_output = long_output ? strdup(long_output) : NULL;
+			if(svctarget->perf_data)
+				free(svctarget->perf_data);
+			svctarget->perf_data = perf_data ? strdup(perf_data) : NULL;
+		}			
+		else {
+			host * hsttarget = find_host(host_name);
+			if(!hsttarget)
+				continue;
+			hsttarget->current_state = state;
+			hsttarget->current_attempt = current_attempt;
+			hsttarget->state_type = state_type;
+			hsttarget->is_flapping = is_flapping;
+			hsttarget->notifications_enabled = notifications_enabled;
+			hsttarget->checks_enabled = checks_enabled;
+			hsttarget->event_handler_enabled = event_handler_enabled;
+			hsttarget->flap_detection_enabled = flap_detection_enabled;
+			hsttarget->problem_has_been_acknowledged = acknowledged;
+			hsttarget->accept_passive_host_checks = passive_checks_enabled;
+			if(hsttarget->plugin_output)
+				free(hsttarget->plugin_output);
+			hsttarget->plugin_output = strdup(plugin_output);
+			if(hsttarget->long_plugin_output)
+				free(hsttarget->long_plugin_output);
+			hsttarget->long_plugin_output = long_output ? strdup(long_output) : NULL;
+			if(hsttarget->perf_data)
+				free(hsttarget->perf_data);
+			hsttarget->perf_data = perf_data ? strdup(perf_data) : NULL;
+		}
+	}
+
+#ifdef HAVE_TIMEDEVENT_END
+	pthread_mutex_unlock(&reaper_mutex);
+#endif
+
+	json_decref(payload);
+}
+
 static void process_status(json_t * payload, void * ressock) {
 	char * host_name, *service_description = NULL, *output = NULL;
 	check_result * newcr = NULL, t;
@@ -384,6 +491,8 @@ void process_pull_msg(zmq_msg_t * payload_msg, void * outsock) {
 		process_comment(payload);
 	else if(strncmp(type, "downtime_add", typelen) == 0)
 		process_downtime(payload);
+	else if(strncmp(type, "state_data", typelen) == 0)
+		process_hadata(payload);
 	return;
 }
 

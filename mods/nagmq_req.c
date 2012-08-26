@@ -313,7 +313,7 @@ static void parse_host(host * state, struct payload * ret,
 	payload_new_integer(ret, "modified_attributes", state->modified_attributes);
 	payload_new_integer(ret, "circular_path_checked", state->circular_path_checked);
 	payload_new_integer(ret, "contains_circular_path", state->contains_circular_path);
-	payload_new_integer(ret, "problem_has_been_acknowledged", state->problem_has_been_acknowledged);
+	payload_new_boolean(ret, "problem_has_been_acknowledged", state->problem_has_been_acknowledged);
 	payload_new_integer(ret, "current_state", state->current_state);
 	payload_new_integer(ret, "last_state", state->last_state);
 	payload_new_integer(ret, "last_hard_state", state->last_hard_state);
