@@ -81,7 +81,7 @@ int handle_timedevent(int which, void * obj) {
 	return 0;
 }
 
-static void process_hastatus(json_t * payload) {
+static void process_bulkstate(json_t * payload) {
 	size_t max, i;
 	json_t * statedata;
 
@@ -492,7 +492,7 @@ void process_pull_msg(zmq_msg_t * payload_msg, void * outsock) {
 	else if(strncmp(type, "downtime_add", typelen) == 0)
 		process_downtime(payload);
 	else if(strncmp(type, "state_data", typelen) == 0)
-		process_hadata(payload);
+		process_bulkstate(payload);
 	return;
 }
 
