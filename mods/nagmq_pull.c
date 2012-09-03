@@ -95,21 +95,28 @@ static void process_bulkstate(json_t * payload) {
 		return;
 	}
 
+	max = json_array_size(statedata);
+
 	for(i = 0; i < max; i++) {
 		char * service_description = NULL, * host_name, *type;
 		char * plugin_output, * long_output = NULL, *perf_data = NULL;
 		int state, current_attempt, acknowledged, state_type;
 		int is_flapping, notifications_enabled, checks_enabled;
 		int passive_checks_enabled = -1, event_handler_enabled;
-		int flap_detection_enabled;
+		int flap_detection_enabled, has_been_checked;
+		time_t last_check, last_state_change, last_notification;
+		json_t *jlong_output = NULL, *jperf_data = NULL;
+		double latency, execution_time;
 
 		json_t * el = json_array_get(statedata, i);
-		if(json_unpack(el, "{s:s s?:s s:s s?:s s?:s s:i s:i s:i s:b "
-			"s:b s:b s:b s:b s:b s*:b s*:b s:s}",
+		if(json_unpack_ex(el, 
+			"{s:s s?:s s:s s?:o s?:o s:i s:i s:i s:b "
+			"s:b s:b s:b s:b s:b s?:b s?:b s:s s:i s:b s:i "
+			"s:f s:f s:i }",
 			"host_name", &host_name,
 			"service_description", &service_description,
 			"plugin_output", &plugin_output,
-			"long_output", &long_output,
+			"long_output", &jlong_output,
 			"perf_data", &perf_data,
 			"current_state", &state,
 			"current_attempt", &current_attempt,
@@ -122,14 +129,25 @@ static void process_bulkstate(json_t * payload) {
 			"problem_has_been_acknowledged", &acknowledged,
 			"accept_passive_service_checks", &passive_checks_enabled,
 			"accept_passive_host_checks", &passive_checks_enabled,
-			"type", &type) != 0) {
+			"type", &type,
+			"last_check", &last_check,
+			"has_been_checked", &has_been_checked,
+			"last_state_change", &last_state_change,
+			"latency", &latency,
+			"execution_time", &execution_time,
+			"last_notification", &last_notification) < 0)
 			continue;
-		}
+
 		if(passive_checks_enabled < 0)
 			continue;
 
 		if(strcmp(type, "host") != 0 && strcmp(type, "service") != 0)
 			continue;
+
+		if(jlong_output && json_is_string(jlong_output))
+			long_output = json_string_value(jlong_output);
+		if(jperf_data && json_is_string(jperf_data))
+			perf_data = json_string_value(jperf_data);
 
 		if(service_description) {
 			service * svctarget = find_service(host_name, service_description);
@@ -154,6 +172,12 @@ static void process_bulkstate(json_t * payload) {
 			if(svctarget->perf_data)
 				free(svctarget->perf_data);
 			svctarget->perf_data = perf_data ? strdup(perf_data) : NULL;
+			svctarget->last_check = last_check;
+			svctarget->last_state_change = last_state_change;
+			svctarget->has_been_checked = has_been_checked;
+			svctarget->last_notification = last_notification;
+			svctarget->latency = latency;
+			svctarget->execution_time = execution_time;
 		}			
 		else {
 			host * hsttarget = find_host(host_name);
@@ -178,6 +202,12 @@ static void process_bulkstate(json_t * payload) {
 			if(hsttarget->perf_data)
 				free(hsttarget->perf_data);
 			hsttarget->perf_data = perf_data ? strdup(perf_data) : NULL;
+			hsttarget->last_check = last_check;
+			hsttarget->last_state_change = last_state_change;
+			hsttarget->has_been_checked = has_been_checked;
+			hsttarget->last_host_notification = last_notification;
+			hsttarget->latency = latency;
+			hsttarget->execution_time = execution_time;
 		}
 	}
 
