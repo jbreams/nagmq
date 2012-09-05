@@ -65,7 +65,10 @@ one address, list them as an array.::
 			"bind": "ipc:///var/nagios/nagmqstate.sock",
 			"threads": 2
 		},  
-		"executor": {
+   		"executor": {
+    			"filter": { 
+    				"match": "localhost",
+    				"field": "host_name"},
 			"jobs": "ipc:///var/nagios/mqexecjobs.sock",
 			"results": "ipc:///var/nagios/mqexecresults.sock"
 		},  
@@ -89,7 +92,16 @@ one address, list them as an array.::
 		]   
 	}
 
+
+Start the dnxmq broker and worker:
+
+    $ mqbroker /etc/nagios/nagmq.config
+    $ mqexec /etc/nagios/nagmq.config
+
 Restart Nagios, and you'll be able to connect to the message busses and
 get data into and out of the broker!
+
+If you do NOT wish to use dnxmq, remove the "override" directive from the
+sample "publisher" config.
 
 .. _`Apache Version 2 license`: http://www.apache.org/licenses/LICENSE-2.0.html
