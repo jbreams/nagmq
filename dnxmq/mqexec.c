@@ -574,6 +574,8 @@ int main(int argc, char ** argv) {
 		exit(-1);
 	}
 
+	parse_filter(filter,0);
+
 	gethostname(myfqdn, sizeof(myfqdn));
 	gethostname(mynodename, sizeof(mynodename));
 	for(i = 0; i < sizeof(mynodename); i++) {
