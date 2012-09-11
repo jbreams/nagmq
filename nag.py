@@ -5,7 +5,16 @@ from optparse import OptionParser
 from collections import deque
 from datetime import timedelta, datetime
 
-op = OptionParser(usage = "[opts] {verb} {noun} [service]@{host|hostgroup}")
+op = OptionParser(usage = "%prog [opts] {verb} {noun} [service]@{host|hostgroup}",
+	description= """%prog is a CLI interface for Nagios.
+The available actions for nagios are: 
+add/remove acknowledgement,
+add/remove downtime,
+enable/disable checks,
+enable/disable notifications,
+add comment,
+or you can query the current status of a host or service with the status verb."""
+)
 op.add_option("-c", "--comment", type="string", action="store", dest="comment",
 	help="The comment to be added to the command", default="")
 op.add_option("-p", "--persistent", action="store_true", dest="persistent",
