@@ -244,6 +244,10 @@ def add_downtime(obj):
 		endtime = datetime.strptime(opts.endtime, '%m-%d %H:%M')
 		duration = endtime - starttime
 
+	if not duration and not endtime:
+		print "[{0}]: No duration/endtime specified for adding downtime!".format(name)
+		return
+
 	cmd['start_time'] = int(time.mktime(starttime.timetuple()))
 	cmd['end_time'] = int(time.mktime(endtime.timetuple()))
 	cmd['duration'] = duration.seconds
