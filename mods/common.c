@@ -242,8 +242,13 @@ void * recv_loop(void * parg) {
 			}
 			if(npullthreads == 0)
 				process_pull_msg(&tmpmsg, NULL);
-			else
-				zmq_send(intpullbus, &tmpmsg, 0);
+			else {
+				zmq_msg_t outmsg;
+				zmq_msg_init(&outmsg);
+				zmq_msg_copy(&outmsg, &tmpmsg);
+				zmq_send(intpullbus, &outmsg, 0);
+				zmq_msg_close(&outmsg);
+			}
 			zmq_msg_close(&tmpmsg);
 		}
 		if(enablereq && pollables[1].revents & ZMQ_POLLIN) {
@@ -256,8 +261,12 @@ void * recv_loop(void * parg) {
 				if(nreqthreads == 0)
 					process_req_msg(&tmpmsg, reqsock);
 				else {
+					zmq_msg_t outmsg;
+					zmq_msg_init(&outmsg);
+					zmq_msg_copy(&outmsg, &tmpmsg);
 					zmq_getsockopt(reqsock, ZMQ_RCVMORE, &more, &moresize); 
-					zmq_send(intreqbus, &tmpmsg, more ? ZMQ_SNDMORE : 0);
+					zmq_send(intreqbus, &outmsg, more ? ZMQ_SNDMORE : 0);
+					zmq_msg_close(&outmsg);
 				}
 				zmq_msg_close(&tmpmsg);
 			} while(nreqthreads > 0 && more);
@@ -269,8 +278,12 @@ void * recv_loop(void * parg) {
 					zmq_msg_close(&tmpmsg);
 					continue;
 				}
+				zmq_msg_t outmsg;
+				zmq_msg_init(&outmsg);
+				zmq_msg_copy(&outmsg, &tmpmsg);
 				zmq_getsockopt(intreqbus, ZMQ_RCVMORE, &more, &moresize);
-				zmq_send(reqsock, &tmpmsg, more ? ZMQ_SNDMORE : 0);
+				zmq_send(reqsock, &outmsg, more ? ZMQ_SNDMORE : 0);
+				zmq_msg_close(&outmsg);
 				zmq_msg_close(&tmpmsg);
 			} while(more);
 		}
