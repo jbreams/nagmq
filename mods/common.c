@@ -363,7 +363,8 @@ int handle_startup(int which, void * obj) {
 
 		zmq_close(pubext);
 		zmq_term(zmq_ctx);
-		pthread_join(threadid, NULL);
+		if(enablereq || enablepull)
+			pthread_join(threadid, NULL);
 	}
 	return 0;
 }
