@@ -513,13 +513,6 @@ void handle_end(struct ev_loop * loop, ev_signal * w, int revents) {
 	ev_signal_stop(loop, w);
 }
 
-int getfd(void * socket) {
-	int fd;
-	size_t fds = sizeof(fd);
-	zmq_getsockopt(socket, ZMQ_FD, &fd, &fds);
-	return fd;
-}
-
 int main(int argc, char ** argv) {
 	ev_signal termhandler, huphandler;
 	struct ev_loop * loop;
