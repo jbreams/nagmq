@@ -264,10 +264,14 @@ void child_timeout_cb(struct ev_loop * loop, ev_timer * t, int event) {
 	}
 	ev_child_stop(loop, &j->child);
 
-	obj_for_ending(j, "Check timed out", 3, 1, 1);
+	if(j->service >= 0) {
+		obj_for_ending(j, "Check timed out", 3, 1, 1);
+		logit(DEBUG, "Child %d timed out. Sending timeout message upstream",
+			j->child.pid);
+	} else
+		logit(DEBUG, "Non-check child %d timed out",
+			j->child.pid, j->buffer);
 
-	logit(DEBUG, "Child %d timed out. Sending timeout message upstream",
-		j->child.pid);
 	json_decref(j->input);
 	free(j);
 	if(--runningjobs == 0 && !pullsock)
@@ -288,9 +292,13 @@ void child_end_cb(struct ev_loop * loop, ev_child * c, int event) {
 	if(!j->bufused)
 		strcpy(j->buffer, "");
 
-	obj_for_ending(j, j->buffer, WEXITSTATUS(c->rstatus), 0, 1);
-	logit(DEBUG, "Child %d ended with %d. Sending \"%s\" upstream",
-		c->rpid, c->rstatus, j->buffer);
+	if(j->service >= 0) {
+		obj_for_ending(j, j->buffer, WEXITSTATUS(c->rstatus), 0, 1);
+		logit(DEBUG, "Child %d ended with %d. Sending \"%s\" upstream",
+			c->rpid, c->rstatus, j->buffer);
+	} else 
+		logit(DEBUG, "Non-check child %d ended with %d. It said \"%s\"",
+			c->rpid, c->rstatus, j->buffer);
 	json_decref(j->input);
 	free(j);
 	if(--runningjobs == 0 && !pullsock)
@@ -317,6 +325,7 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 	if(json_unpack(input, "{ s:s s:s s?:i }",
 		"type", &type, "command_line", &command_line,
 		"timeout", &timeout) != 0) {
+		logit(ERR, "Error unpacking JSON payload during kickoff");
 		json_decref(input);
 		return;
 	}
@@ -333,8 +342,10 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 	memset(j, 0, sizeof(struct child_job));
 	if(strcmp(type, "service_check_initiate") == 0)
 		j->service = 1;
-	else
+	else if(strcmp(type, "host_check_initiate") == 0)
 		j->service = 0;
+	else
+		j->service = -1;
 	j->input = input;
 
 	if(pipe(fds) < 0) {
@@ -350,7 +361,7 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 	ev_io_init(&j->io, child_io_cb, fds[0], EV_READ);
 	j->io.data = j;
 	ev_io_start(loop, &j->io);
-	
+
 	gettimeofday(&j->start, NULL);
 	pid = fork();
 	if(pid == 0) {
