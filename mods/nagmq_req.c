@@ -315,8 +315,11 @@ static void parse_host(host * state, struct payload * ret,
 	payload_new_integer(ret, "contains_circular_path", state->contains_circular_path);
 	payload_new_boolean(ret, "problem_has_been_acknowledged", state->problem_has_been_acknowledged);
 	payload_new_integer(ret, "current_state", state->current_state);
+	payload_new_statestr(ret, "current_state_str", state->current_state, state->has_been_checked, 0);
 	payload_new_integer(ret, "last_state", state->last_state);
+	payload_new_statestr(ret, "last_state_str", state->current_state, state->has_been_checked, 0);
 	payload_new_integer(ret, "last_hard_state", state->last_hard_state);
+	payload_new_statestr(ret, "last_hard_state_str", state->last_hard_state, state->has_been_checked, 0);
 
 	if(payload_has_keys(ret, "plugin_output",
 		"long_plugin_output", "perf_data", NULL) > 0) {
@@ -488,8 +491,12 @@ static void parse_service(service * state, struct payload * ret,
 	payload_new_boolean(ret, "problem_has_been_acknowledged", state->problem_has_been_acknowledged);
 	payload_new_integer(ret, "host_problem_at_last_check", state->host_problem_at_last_check);
 	payload_new_integer(ret, "current_state", state->current_state);
+	payload_new_statestr(ret, "current_state_str", state->current_state, state->has_been_checked, 1);
 	payload_new_integer(ret, "last_state", state->last_state);
+	payload_new_statestr(ret, "last_state_str", state->last_state, state->has_been_checked, 1);
 	payload_new_integer(ret, "last_hard_state", state->last_hard_state);
+	payload_new_statestr(ret, "last_hard_state_str", state->last_hard_state, state->has_been_checked, 1);
+	
 	if(payload_has_keys(ret, "plugin_output",
 		"long_plugin_output", "perf_data", NULL) > 0) {
 #ifdef HAVE_TIMEDEVENT_END

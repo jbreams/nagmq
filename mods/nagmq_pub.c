@@ -65,14 +65,20 @@ static struct payload * parse_event_handler(nebstruct_event_handler_data * state
 	payload_new_integer(ret, "state", state->state);
 	if(service_obj) {
 		payload_new_integer(ret, "last_state", service_obj->last_state);
+		payload_new_statestr(ret, "last_state_str", service_obj->last_state, service_obj->has_been_checked, 1);
 		payload_new_integer(ret, "last_hard_state", service_obj->last_hard_state);
+		payload_new_statestr(ret, "last_hard_state_str", service_obj->last_hard_state, service_obj->has_been_checked, 1);
 		payload_new_integer(ret, "last_check", service_obj->last_check);
 		payload_new_integer(ret, "last_state_change", service_obj->last_state_change);
+		payload_new_statestr(ret, "state_str", state->state, service_obj->has_been_checked, 1);
 	} else {
 		payload_new_integer(ret, "last_state", host_obj->last_state);
+		payload_new_statestr(ret, "last_state_str", host_obj->last_state, host_obj->has_been_checked, 0);
 		payload_new_integer(ret, "last_hard_state", host_obj->last_hard_state);
+		payload_new_statestr(ret, "last_hard_state_str", host_obj->last_hard_state, host_obj->has_been_checked, 0);
 		payload_new_integer(ret, "last_check", host_obj->last_check);
 		payload_new_integer(ret, "last_state_change", host_obj->last_state_change);
+		payload_new_statestr(ret, "state_str", state->state, host_obj->has_been_checked, 0);
 	}
 
 	if(state->type == NEBTYPE_EVENTHANDLER_START) {
@@ -108,8 +114,11 @@ static struct payload * parse_host_check(nebstruct_host_check_data * state) {
 	payload_new_integer(ret, "current_attempt", state->current_attempt);
 	payload_new_integer(ret, "max_attempts", state->max_attempts);
 	payload_new_integer(ret, "state", state->state);
+	payload_new_statestr(ret, "state_str", state->state, obj->has_been_checked, 0);
 	payload_new_integer(ret, "last_state", obj->last_state);
+	payload_new_statestr(ret, "last_state_str", obj->last_state, obj->has_been_checked, 0);
 	payload_new_integer(ret, "last_hard_state", obj->last_hard_state);
+	payload_new_statestr(ret, "last_hard_state_str", obj->last_hard_state, obj->has_been_checked, 0);
 	payload_new_integer(ret, "last_check", obj->last_check);
 	payload_new_integer(ret, "last_state_change", obj->last_state_change);
 	payload_new_double(ret, "latency", state->latency);
@@ -151,8 +160,11 @@ static struct payload * parse_service_check(nebstruct_service_check_data * state
 	payload_new_integer(ret, "current_attempt", state->current_attempt);
 	payload_new_integer(ret, "max_attempts", state->max_attempts);
 	payload_new_integer(ret, "state", state->state);
+	payload_new_statestr(ret, "state_str", state->state, obj->has_been_checked, 1);
 	payload_new_integer(ret, "last_state", obj->last_state);
+	payload_new_statestr(ret, "last_state_str", obj->last_state, obj->has_been_checked, 1);
 	payload_new_integer(ret, "last_hard_state", obj->last_hard_state);
+	payload_new_statestr(ret, "last_hard_state_str", obj->last_hard_state, obj->has_been_checked, 1);
 	payload_new_integer(ret, "last_check", obj->last_check);
 	payload_new_integer(ret, "last_state_change", obj->last_state_change);
 	payload_new_double(ret, "latency", state->latency);
@@ -188,6 +200,7 @@ static struct payload * parse_acknowledgement(nebstruct_acknowledgement_data * s
 	payload_new_string(ret, "host_name", state->host_name);
 	payload_new_string(ret, "service_description", state->service_description);
 	payload_new_integer(ret, "state", state->state);
+	payload_new_statestr(ret, "state_str", state->state, 1, state->service_description ? 1:0);
 	payload_new_integer(ret, "acknowledgement_type", state->acknowledgement_type);
 	payload_new_string(ret, "author_name", state->author_name);
 	payload_new_string(ret, "comment_data", state->comment_data);
@@ -217,18 +230,24 @@ static struct payload * parse_statechange(nebstruct_statechange_data * state) {
 	payload_new_string(ret, "output", state->output);
 	if(service_target) {
 		payload_new_integer(ret, "last_state", service_target->last_state);
+		payload_new_statestr(ret, "last_state_str", service_target->last_state, service_target->has_been_checked, 1);
+		payload_new_statestr(ret, "last_hard_state_str", service_target->last_hard_state, service_target->has_been_checked, 1);
 		payload_new_integer(ret, "last_hard_state", service_target->last_hard_state);
 		payload_new_integer(ret, "last_check", service_target->last_check);
 		payload_new_integer(ret, "last_state_change", service_target->last_state_change);
 		payload_new_boolean(ret, "is_flapping", service_target->is_flapping);
 		payload_new_boolean(ret, "problem_has_been_acknowledged", service_target->problem_has_been_acknowledged);
+		payload_new_statestr(ret, "state_str", state->state, service_target->has_been_checked, 1);
 	} else {
 		payload_new_integer(ret, "last_state", host_target->last_state);
 		payload_new_integer(ret, "last_hard_state", host_target->last_hard_state);
+		payload_new_statestr(ret, "last_state_str", host_target->last_state, host_target->has_been_checked, 0);
+		payload_new_statestr(ret, "last_hard_state_str", host_target->last_hard_state, host_target->has_been_checked, 0);
 		payload_new_integer(ret, "last_check", host_target->last_check);
 		payload_new_integer(ret, "last_state_change", host_target->last_state_change);
 		payload_new_boolean(ret, "is_flapping", host_target->is_flapping);
 		payload_new_boolean(ret, "problem_has_been_acknowledged", host_target->problem_has_been_acknowledged);
+		payload_new_statestr(ret, "state_str", state->state, host_target->has_been_checked, 0);
 	}
 	return ret;
 }
@@ -316,9 +335,29 @@ static struct payload * parse_notification(nebstruct_notification_data * state) 
 	contactgroupsmember * cgtmp;
 	contactsmember * ctmp;
 	if(service_obj) {
+		payload_new_integer(ret, "current_notification_number", service_obj->current_notification_number);
+		payload_new_integer(ret, "current_notification_id", service_obj->current_notification_id);
+		payload_new_integer(ret, "last_state", service_obj->last_state);
+		payload_new_integer(ret, "last_hard_state", service_obj->last_hard_state);
+		payload_new_statestr(ret, "last_state_str", service_obj->last_state, service_obj->has_been_checked, 1);
+		payload_new_statestr(ret, "last_hard_state_str", service_obj->last_hard_state, service_obj->has_been_checked, 1);
+		payload_new_integer(ret, "last_check", service_obj->last_check);
+		payload_new_integer(ret, "last_state_change", service_obj->last_state_change);
+		payload_new_integer(ret, "last_notification", service_obj->last_notification);
+		payload_new_statestr(ret, "state_str", state->state, service_obj->has_been_checked, 1);
 		cgtmp = service_obj->contact_groups;
 		ctmp = service_obj->contacts;
 	} else {
+		payload_new_integer(ret, "current_notification_number", host_obj->current_notification_number);
+		payload_new_integer(ret, "current_notification_id", host_obj->current_notification_id);
+		payload_new_integer(ret, "last_state", host_obj->last_state);
+		payload_new_integer(ret, "last_hard_state", host_obj->last_hard_state);
+		payload_new_statestr(ret, "last_state_str", host_obj->last_state, host_obj->has_been_checked, 0);
+		payload_new_statestr(ret, "last_hard_state_str", host_obj->last_hard_state, host_obj->has_been_checked, 0);
+		payload_new_integer(ret, "last_check", host_obj->last_check);
+		payload_new_integer(ret, "last_state_change", host_obj->last_state_change);
+		payload_new_integer(ret, "last_notification", host_obj->last_host_notification);
+		payload_new_statestr(ret, "state_str", state->state, host_obj->has_been_checked, 1);
 		cgtmp = host_obj->contact_groups;
 		ctmp = host_obj->contacts;
 	}
@@ -336,24 +375,6 @@ static struct payload * parse_notification(nebstruct_notification_data * state) 
 		cgtmp = cgtmp->next;
 	}
 	payload_end_array(ret);
-
-	if(service_obj) {
-		payload_new_integer(ret, "current_notification_number", service_obj->current_notification_number);
-		payload_new_integer(ret, "current_notification_id", service_obj->current_notification_id);
-		payload_new_integer(ret, "last_state", service_obj->last_state);
-		payload_new_integer(ret, "last_hard_state", service_obj->last_hard_state);
-		payload_new_integer(ret, "last_check", service_obj->last_check);
-		payload_new_integer(ret, "last_state_change", service_obj->last_state_change);
-		payload_new_integer(ret, "last_notification", service_obj->last_notification);
-	} else {
-		payload_new_integer(ret, "current_notification_number", host_obj->current_notification_number);
-		payload_new_integer(ret, "current_notification_id", host_obj->current_notification_id);
-		payload_new_integer(ret, "last_state", host_obj->last_state);
-		payload_new_integer(ret, "last_hard_state", host_obj->last_hard_state);
-		payload_new_integer(ret, "last_check", host_obj->last_check);
-		payload_new_integer(ret, "last_state_change", host_obj->last_state_change);
-		payload_new_integer(ret, "last_notification", host_obj->last_host_notification);
-	}
 
 	return ret;
 }

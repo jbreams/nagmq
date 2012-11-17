@@ -19,6 +19,7 @@ void payload_new_integer(struct payload * po, char * key, long long val);
 void payload_new_double(struct payload * po, char * key, double val);
 void payload_new_timestamp(struct payload * po,
 	char* key, struct timeval * tv);
+void payload_new_statestr(struct payload * po, char * key, int state, int checked, int svc);
 void payload_new_boolean(struct payload * po, char * key, int val);
 void payload_finalize(struct payload * po);
 int payload_start_array(struct payload * po, char * key);
