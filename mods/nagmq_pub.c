@@ -396,6 +396,109 @@ static struct payload * parse_flapping(nebstruct_flapping_data * state) {
 	return ret;
 }
 
+static struct payload * parse_adaptivechange(nebstruct_adaptive_host_data * state) {
+	nebstruct_adaptive_service_data * svcstate = NULL;
+	service * svc = NULL;
+	host * hst = NULL;
+	if(state->type == NEBTYPE_ADAPTIVESERVICE_UPDATE)
+		svcstate = (nebstruct_adaptive_service_data *)state;
+	else if(state->type != NEBTYPE_ADAPTIVEHOST_UPDATE)
+		return NULL;
+
+	struct payload * ret = payload_new();
+	if(svcstate) {
+		svc = (service*)svcstate->object_ptr;
+		payload_new_string(ret, "type", "adaptiveservice_update");
+		if(svc) {
+			payload_new_string(ret, "host_name", svc->host_name);
+			payload_new_string(ret, "service_description", svc->description);
+		}
+	} else {
+		hst = (host*)state->object_ptr;
+		payload_new_string(ret, "type", "adaptivehost_update");
+		if(hst)
+			payload_new_string(ret, "host_name", hst->name);
+	}
+
+	switch(state->modified_attribute) {
+		case MODATTR_NOTIFICATIONS_ENABLED:
+			payload_new_string(ret, "attr", "notifications_enabled");
+			if(svc)
+				payload_new_boolean(ret, "notifications_enabled",
+					svc->notifications_enabled);
+			else if(hst)
+				payload_new_boolean(ret, "notifications_enabled",
+					hst->notifications_enabled);
+			break;
+		case MODATTR_ACTIVE_CHECKS_ENABLED:
+			payload_new_string(ret, "attr", "active_checks_enabled");
+			if(svc)
+				payload_new_boolean(ret, "checks_enabled",
+					svc->checks_enabled);
+			else if(hst)
+				payload_new_boolean(ret, "checks_enabled",
+					hst->checks_enabled);
+			break;
+		case MODATTR_PASSIVE_CHECKS_ENABLED:
+			payload_new_string(ret, "attr", "passive_checks_enabled");
+			if(svc)
+				payload_new_boolean(ret, "accept_passive_service_checks",
+					svc->accept_passive_service_checks);
+			else if(hst)
+				payload_new_boolean(ret, "accept_passive_host_checks",
+					hst->accept_passive_host_checks);
+			break;
+		case MODATTR_EVENT_HANDLER_ENABLED:
+			payload_new_string(ret, "attr", "event_handler_enabled");
+			if(svc)
+				payload_new_boolean(ret, "event_handler_enabled",
+					svc->event_handler_enabled);
+			else if(hst)
+				payload_new_boolean(ret, "event_handler_enabled",
+					hst->event_handler_enabled);
+			break;
+		case MODATTR_FLAP_DETECTION_ENABLED:
+			payload_new_string(ret, "attr", "flap_detection_enabled");
+			if(svc)
+				payload_new_boolean(ret, "flap_detection_enabled",
+					svc->flap_detection_enabled);
+			else if(hst)
+				payload_new_boolean(ret, "flap_detection_enabled",
+					hst->flap_detection_enabled);
+			break;
+		case MODATTR_OBSESSIVE_HANDLER_ENABLED:
+			payload_new_string(ret, "attr", "obsessive_handler_enabled");
+			if(svc)
+				payload_new_boolean(ret, "obsess_over_service",
+					svc->obsess_over_service);
+			else if(hst)
+				payload_new_boolean(ret, "obsess_over_host",
+					hst->obsess_over_host);
+			break;
+		case MODATTR_EVENT_HANDLER_COMMAND:
+			payload_new_string(ret, "attr", "event_handler_command");
+			break;
+		case MODATTR_CHECK_COMMAND:
+			payload_new_string(ret, "attr", "check_command");
+			break;
+		case MODATTR_NORMAL_CHECK_INTERVAL:
+			payload_new_string(ret, "attr", "normal_check_interval");
+			break;
+		case MODATTR_RETRY_CHECK_INTERVAL:
+			payload_new_string(ret, "attr", "retry_check_interval");
+			break;
+		case MODATTR_MAX_CHECK_ATTEMPTS:
+			payload_new_string(ret, "attr", "max_check_attempts");
+			break;
+			break;
+		case MODATTR_CHECK_TIMEPERIOD:
+			payload_new_string(ret, "attr", "check_timeperiod");
+			break;
+	}
+
+	return ret;
+}
+
 void free_cb(void * ptr, void * hint) {
 	free(ptr);
 }
@@ -515,6 +618,10 @@ int handle_nagdata(int which, void * obj) {
 	case NEBCALLBACK_FLAPPING_DATA:
 		payload = parse_flapping(obj);
 		break;
+	case NEBCALLBACK_ADAPTIVE_HOST_DATA:
+	case NEBCALLBACK_ADAPTIVE_SERVICE_DATA:
+		payload = parse_adaptivechange(obj);
+		break;
 	}
 
 	payload_new_timestamp(payload, "timestamp", &raw->timestamp);
@@ -577,6 +684,10 @@ int handle_pubstartup() {
 	neb_register_callback(NEBCALLBACK_STATE_CHANGE_DATA, handle,
 		0, handle_nagdata);
 	neb_register_callback(NEBCALLBACK_NOTIFICATION_DATA, handle,
+		0, handle_nagdata);
+	neb_register_callback(NEBCALLBACK_ADAPTIVE_HOST_DATA, handle,
+		0, handle_nagdata);
+	neb_register_callback(NEBCALLBACK_ADAPTIVE_SERVICE_DATA, handle,
 		0, handle_nagdata);
 	return 0;
 }
