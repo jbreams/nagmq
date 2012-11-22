@@ -17,7 +17,6 @@
 #include <zmq.h>
 #include <pthread.h>
 #include "jansson.h"
-#include "config.h"
 
 extern int errno;
 
@@ -109,7 +108,7 @@ static void process_bulkstate(json_t * payload) {
 		double latency, execution_time;
 
 		json_t * el = json_array_get(statedata, i);
-		if(json_unpack_ex(el, 
+		if(json_unpack(el, 
 			"{s:s s?:s s:s s?:o s?:o s:i s:i s:i s:b "
 			"s:b s:b s:b s:b s:b s?:b s?:b s:s s:i s:b s:i "
 			"s:f s:f s:i }",
@@ -447,6 +446,14 @@ static void process_cmd(json_t * payload) {
 		enable_passive_host_checks(host_target);
 	else if(strcmp(cmd_name, "disable_passive_host_checks") == 0 && host_target)
 		disable_passive_host_checks(host_target);
+	else if(strcmp(cmd_name, "enable_host_flap_detection") == 0 && host_target)
+		enable_host_flap_detection(host_target);
+	else if(strcmp(cmd_name, "disable_host_flap_detection") == 0 && host_target)
+		disable_host_flap_detection(host_target);
+	else if(strcmp(cmd_name, "enable_service_flap_detection") == 0 && service_target)
+		enable_service_flap_detection(service_target);
+	else if(strcmp(cmd_name, "disable_service_flap_detection") == 0 && service_target)
+		disable_service_flap_detection(service_target);
 	else if((strcmp(cmd_name, "schedule_host_check") == 0 && host_target) ||
 		(strcmp(cmd_name, "schedule_service_check") == 0&& service_target)) {
 		time_t next_check;
