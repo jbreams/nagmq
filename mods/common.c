@@ -15,6 +15,7 @@
 #include <zmq.h>
 #include "json.h"
 #include "jansson.h"
+#include "common.h"
 
 NEB_API_VERSION(CURRENT_NEB_API_VERSION)
 static void * nagmq_handle = NULL;
@@ -38,10 +39,23 @@ void process_payload(struct payload * payload);
 
 void * getsock(char * forwhat, int type) {
 	json_t *connect = NULL, *bind = NULL;
+#if ZMQ_VERSION_MAJOR < 3
 	int hwm = 0;
+#else
+	int sndhwm = 0, rcvhwm = 0, backlog = 0, maxmsgsize = 0;
+	json_t * accept_filters = NULL;
+#endif
 
+#if ZMQ_VERSION_MAJOR < 3
 	if(json_unpack(config, "{ s?: { s?:o s?:o s?:i } }",
 		forwhat, "connect", &connect, "bind", &bind, "hwm", &hwm) != 0) {
+#else
+	if(json_unpack(config, "{ s?: { s?:o s?:o s?:i s?:i s?:i s?:i s?:o } }",
+		forwhat, "connect", &connect, "bind", &bind, "sndhwm", &hwm,
+		"rcvhwm", &rcvhwm, "backlog", &backlog, "maxmsgsize", &maxmsgsize,
+		"tcpacceptfilters", &accept_filters ) != 0) {
+	
+#endif
 		syslog(LOG_ERR, "Parameter error while creating socket for %s",
 			forwhat);
 		return NULL;
@@ -57,6 +71,7 @@ void * getsock(char * forwhat, int type) {
 		return NULL;
 	}
 
+#if ZMQ_VERSION_MAJOR < 3
 	if(hwm > 0 &&
 		zmq_setsockopt(sock, ZMQ_HWM, &hwm, sizeof(hwm)) != 0) {
 		syslog(LOG_ERR, "Error setting HWM for %s: %s",
@@ -64,6 +79,59 @@ void * getsock(char * forwhat, int type) {
 		zmq_close(sock);
 		return NULL;
 	}
+#else
+	if(sndhwm > 0 &&
+		zmq_setsockopt(sock, ZMQ_SNDHWM, &sndhwm, sizeof(sndhwm)) != 0) {
+		syslog(LOG_ERR, "Error setting send HWM for %s: %s",
+			forwhat, zmq_strerror(errno));
+		zmq_close(sock);
+		return NULL;
+	}
+
+	if(rcvhwm > 0 &&
+		zmq_setsockopt(sock, ZMQ_RCVHWM, &rcvhwm, sizeof(sndhwm)) != 0) {
+		syslog(LOG_ERR, "Error setting receive HWM for %s: %s",
+			forwhat, zmq_strerror(errno));
+		zmq_close(sock);
+		return NULL;
+	}
+
+	if(backlog > 0 &&
+		zmq_setsockopt(sock, ZMQ_BACKLOG, &backlog, sizeof(backlog)) != 0) {
+		syslog(LOG_ERR, "Error setting connection backlog for %s: %s",
+			forwhat, zmq_strerror(errno));
+		zmq_close(sock);
+		return NULL;
+	}
+
+	if(maxmsgsize > 0 &&
+		zmq_setsockopt(sock, ZMQ_MAXMSGSIZE, &maxmsgsize, sizeof(maxmsgsize)) != 0) {
+		syslog(LOG_ERR, "Error setting maximum message size for %s: %s",
+			forwhat, zmq_strerror(errno));
+		zmq_close(sock);
+		return NULL;
+	}
+
+	if(accept_filters != NULL && json_is_array(accept_filters)) {
+		size_t i, len = json_array_size(accept_filters);
+		for(i = 0; i < len; i++) {
+			json_t * filterj = json_array_get(accept_filters, i);
+			const char * filter = json_string_value(filterj);
+			if(!filter) {
+				syslog(LOG_ERR, "Filter %i for %s is not a string", i, forwhat);
+				zmq_close(sock);
+				return NULL;
+			}
+			size_t flen = strlen(filter);
+			if(zmq_setsockopt(sock, ZMQ_TCP_ACCEPT_FILTER, filter, flen) != 0) {
+				syslog(LOG_ERR, "Error setting TCP filter %s for %s: %s",
+					filter, forwhat, zmq_strerror(errno));
+				zmq_close(sock);
+				return NULL;
+			}
+		}
+	}
+#endif
 
 	if(connect) {
 		if(json_is_string(connect) && zmq_connect(sock,
@@ -110,12 +178,7 @@ void * getsock(char * forwhat, int type) {
 	return sock;
 }
 
-void process_req_msg(zmq_msg_t * payload, void * sock);
-void process_pull_msg(zmq_msg_t * payload, void * ressock);
 extern void * crpullsock;
-void * pull_thread(void * arg);
-void * req_thread(void * arg);
-
 void * recv_loop(void * parg) {
 	void * pullsock, * reqsock, *intpullbus = NULL, *intreqbus = NULL;
 	int enablepull = 0, enablereq = 0, n = 0;
@@ -169,7 +232,7 @@ void * recv_loop(void * parg) {
 			i = 0;
 
 			for(i = 0; i < npullthreads; i++) {
-				if(pthread_create(&threads[n++], NULL, pull_thread, NULL) != 0) {
+				if(pthread_create(&threads[n++], NULL, pull_thread, zmq_ctx) != 0) {
 					syslog(LOG_ERR, "Error creating pull thread #%d %m", i);
 					return NULL;
 				}
@@ -192,7 +255,7 @@ void * recv_loop(void * parg) {
 
 			zmq_bind(intreqbus, "inproc://nagmq_req_bus");
 			for(i = 0; i < nreqthreads; i++) {
-				if(pthread_create(&threads[n++], NULL, req_thread, NULL) != 0) {
+				if(pthread_create(&threads[n++], NULL, req_thread, zmq_ctx) != 0) {
 					syslog(LOG_ERR, "Error creating req thread #%d %m", i);
 					return NULL;
 				}
@@ -217,7 +280,11 @@ void * recv_loop(void * parg) {
 	pthread_mutex_unlock(&recv_loop_mutex);
 
 	while(1) {
+#if #if ZMQ_VERSION_MAJOR < 3
 		int64_t more;
+#else
+		int more;
+#endif;
 		size_t moresize = sizeof(more);
 		zmq_msg_t tmpmsg;
 
@@ -373,9 +440,9 @@ int handle_timedevent(int which, void * data);
 
 int nebmodule_init(int flags, char * localargs, nebmodule * lhandle) {
 	json_error_t loaderr;
-	neb_set_module_info(handle, NEBMODULE_MODINFO_TITLE, "nagmq subscriber");
+	neb_set_module_info(handle, NEBMODULE_MODINFO_TITLE, "NagMQ");
 	neb_set_module_info(handle, NEBMODULE_MODINFO_AUTHOR, "Jonathan Reams");
-	neb_set_module_info(handle, NEBMODULE_MODINFO_VERSION, "0.8");
+	neb_set_module_info(handle, NEBMODULE_MODINFO_VERSION, "1.3");
 	neb_set_module_info(handle, NEBMODULE_MODINFO_LICENSE, "Apache v2");
 	neb_set_module_info(handle, NEBMODULE_MODINFO_DESC,
 		"Subscribes to Nagios data on 0MQ");

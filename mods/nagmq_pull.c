@@ -17,6 +17,7 @@
 #include <zmq.h>
 #include <pthread.h>
 #include "jansson.h"
+#include "common.h"
 
 extern int errno;
 
@@ -29,23 +30,19 @@ void * crpullsock = NULL;
 
 int handle_timedevent(int which, void * obj) {
 	nebstruct_timed_event_data * data = obj;
+	static int reaper_locked = 0;
+
 	if(which != NEBCALLBACK_TIMED_EVENT_DATA)
 		return ERROR;
-	if(data->event_type != EVENT_CHECK_REAPER)
-		return 0;
-#ifdef HAVE_TIMEDEVENT_END
-	if(data->type == NEBTYPE_TIMEDEVENT_END) {
-		pthread_mutex_unlock(&reaper_mutex);
-		return 0;
-	}
-	else if(data->type != NEBTYPE_TIMEDEVENT_EXECUTE)
-		return 0;
-
-	pthread_mutex_lock(&reaper_mutex);
-#else
 	if(data->type != NEBTYPE_TIMEDEVENT_EXECUTE)
 		return 0;
-#endif
+	if(data->event_type == EVENT_CHECK_REAPER) {
+		pthread_mutex_lock(&reaper_mutex);
+		reaper_locked = 1;
+	} else if(reaper_locked) {
+		pthread_mutex_unlock(&reaper_mutex);
+		reaper_locked = 0;
+	}
 
 	int rc;
 	if(crpullsock) {
@@ -84,9 +81,7 @@ static void process_bulkstate(json_t * payload) {
 	size_t max, i;
 	json_t * statedata;
 
-#ifdef HAVE_TIMEDEVENT_END
 	pthread_mutex_lock(&reaper_mutex);
-#endif
 
 	statedata = json_object_get(payload, "data");
 	if(!statedata || !json_is_array(statedata)) {
@@ -210,9 +205,7 @@ static void process_bulkstate(json_t * payload) {
 		}
 	}
 
-#ifdef HAVE_TIMEDEVENT_END
 	pthread_mutex_unlock(&reaper_mutex);
-#endif
 
 	json_decref(payload);
 }
@@ -533,8 +526,7 @@ void process_pull_msg(zmq_msg_t * payload_msg, void * outsock) {
 	return;
 }
 
-extern void * zmq_ctx;
-void * pull_thread(void * arg) {
+void * pull_thread(void * zmq_ctx) {
 	int rc;
 	sigset_t signal_set;
 	sigfillset(&signal_set);

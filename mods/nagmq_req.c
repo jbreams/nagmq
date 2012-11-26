@@ -18,6 +18,7 @@
 #include <pthread.h>
 #include "json.h"
 #include "jansson.h"
+#include "common.h"
 
 extern int errno;
 extern pthread_mutex_t reaper_mutex;
@@ -323,15 +324,11 @@ static void parse_host(host * state, struct payload * ret,
 
 	if(payload_has_keys(ret, "plugin_output",
 		"long_plugin_output", "perf_data", NULL) > 0) {
-#ifdef HAVE_TIMEDEVENT_END
 		pthread_mutex_lock(&reaper_mutex);
-#endif
 		payload_new_string(ret, "plugin_output", state->plugin_output);
 		payload_new_string(ret, "long_plugin_output", state->long_plugin_output);
 		payload_new_string(ret, "perf_data", state->perf_data);
-#ifdef HAVE_TIMEDEVENT_END
 		pthread_mutex_unlock(&reaper_mutex);
-#endif
 	}
 	payload_new_integer(ret, "state_type", state->state_type);
 	payload_new_integer(ret, "current_attempt", state->current_attempt);
@@ -499,15 +496,11 @@ static void parse_service(service * state, struct payload * ret,
 	
 	if(payload_has_keys(ret, "plugin_output",
 		"long_plugin_output", "perf_data", NULL) > 0) {
-#ifdef HAVE_TIMEDEVENT_END
 		pthread_mutex_lock(&reaper_mutex);
-#endif
 		payload_new_string(ret, "plugin_output", state->plugin_output);
 		payload_new_string(ret, "long_plugin_output", state->long_plugin_output);
 		payload_new_string(ret, "perf_data", state->perf_data);
-#ifdef HAVE_TIMEDEVENT_END
 		pthread_mutex_unlock(&reaper_mutex);
-#endif
 	}
 	payload_new_integer(ret, "state_type", state->state_type);
 	payload_new_integer(ret, "next_check", state->next_check);
@@ -807,7 +800,7 @@ static void parse_comment(comment * state, struct payload * ret) {
 }
 
 extern scheduled_downtime *scheduled_downtime_list;
-void do_list_downtimes(struct payload * po, host * hst, service * svc, contact * auth_user) {
+static void do_list_downtimes(struct payload * po, host * hst, service * svc, contact * auth_user) {
 	scheduled_downtime * sdlck = scheduled_downtime_list;
 	while(sdlck) {
 		if(svc && sdlck->service_description &&
@@ -834,7 +827,7 @@ void do_list_downtimes(struct payload * po, host * hst, service * svc, contact *
 }
 
 extern comment *comment_list;
-void do_list_comments(struct payload * po, host * hst, service * svc, contact * auth_user) {
+static void do_list_comments(struct payload * po, host * hst, service * svc, contact * auth_user) {
 	comment * clck = comment_list;
 	while(clck) {
 		if(svc && clck->service_description &&
@@ -860,9 +853,7 @@ void do_list_comments(struct payload * po, host * hst, service * svc, contact * 
 	}
 }
 
-void free_cb(void * ptr, void * hint);
-
-void send_msg(void * sock, struct payload * po) {
+static void send_msg(void * sock, struct payload * po) {
 	payload_finalize(po);
 	zmq_msg_t outmsg;
 	zmq_msg_init_data(&outmsg, po->json_buf, po->bufused, free_cb, NULL);
@@ -877,7 +868,7 @@ void send_msg(void * sock, struct payload * po) {
 	free(po);
 }
 
-void do_list_hosts(struct payload * po, int expand_lists,
+static void do_list_hosts(struct payload * po, int expand_lists,
 	int include_services, int include_contacts, contact *auth_user) {
 	if(!expand_lists) {
 		payload_start_object(po, NULL);
@@ -902,7 +893,7 @@ void do_list_hosts(struct payload * po, int expand_lists,
 	}
 }
 
-void do_list_hostgroups(struct payload * po, int expand_lists,
+static void do_list_hostgroups(struct payload * po, int expand_lists,
 	int include_hosts, contact * for_user) {
 	if(!expand_lists) {
 		payload_start_object(po, NULL);
@@ -923,7 +914,7 @@ void do_list_hostgroups(struct payload * po, int expand_lists,
 	}
 }
 
-void do_list_services(struct payload * po, int expand_lists,
+static void do_list_services(struct payload * po, int expand_lists,
 	int include_hosts, int include_contacts, const char * tolist,
 	contact * auth_user) {
 	if(!expand_lists) {
@@ -957,7 +948,7 @@ void do_list_services(struct payload * po, int expand_lists,
 	}
 }
 
-void do_list_servicegroups(struct payload * po, int expand_lists,
+static void do_list_servicegroups(struct payload * po, int expand_lists,
 	int include_services, contact * for_user) {
 	if(!expand_lists) {
 		payload_start_object(po, NULL);
@@ -979,7 +970,7 @@ void do_list_servicegroups(struct payload * po, int expand_lists,
 }
 
 
-void err_msg(struct payload * po, char * msg, ...) {
+static void err_msg(struct payload * po, char * msg, ...) {
 	payload_start_object(po, NULL);
 	po->use_hash = 0;
 	payload_new_string(po, "type", "error");
@@ -1162,8 +1153,7 @@ end:
 	send_msg(sock, po);
 }
 
-extern void * zmq_ctx;
-void * req_thread(void * arg) {
+void * req_thread(void * zmq_ctx) {
 	int rc;
 	sigset_t signal_set;
 	sigfillset(&signal_set);
