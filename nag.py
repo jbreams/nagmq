@@ -54,7 +54,7 @@ pasttenses = {
 }
 
 keys = ['host_name', 'services', 'hosts', 'service_description',
-	'current_state', 'members', 'type', 'name', 
+	'current_state_str', 'members', 'type', 'name', 
 	'problem_has_been_acknowledged', 'plugin_output', 'checks_enabled',
 	'notifications_enabled', 'event_handler_enabled' ]
 myverb = None
@@ -140,7 +140,7 @@ def handle_acknowledgement(verb, obj):
 	if('service_description' in obj):
 		name = obj['service_description'] + '@' + name
 	if(verb == 'add'):
-		if(obj['current_state'] == 0):
+		if(obj['current_state_str'] == 'OK'):
 			print "[{0}]: No problem found".format(name)
 			return
 		elif(obj['problem_has_been_acknowledged']):
@@ -334,38 +334,47 @@ if(len(services) == 0 and len(hosts) == 0):
 	print "No services or hosts matched the target criteria"
 	exit(2)
 
-def status_to_string(val, ishost):
-	if(ishost):
-		if(val < 2):
-			return "OK"
-		else:
-			return "CRITICAL"
-	else:
-		if(val == 0):
-			return "OK"
-		elif(val == 1):
-			return "WARNING"
-		elif(val == 2):
-			return "CRITICAL"
-		elif(val == 3):
-			return "UNKNOWN"
 hosts_printed = { }
+
+def flags_to_str(o):
+	out = '('
+	keymap = {
+		'checks_enabled': 'C',
+		'event_handler_enabled': 'E',
+		'notifications_enabled': 'N'
+	}	
+
+	if o['problem_has_been_acknowledged']:
+		out += 'A'
+	else
+		out += '-'
+	for k in keymap:
+		if not o[k]:
+			out += keymap[k]
+		else:
+			out += '-'
+	out += ')'
+	return out
+
 for s in sorted(services.keys()):
 	so = services[s]
 	if(so['host_name'] not in hosts_printed and
 		so['host_name'] in hosts):
 		h = hosts[so['host_name']]
 		if(myverb == 'status'):
-			print "[{0}]: {1} {2}".format(
+			print "[{0}] {1}: {2} {3}".format(
 				h['host_name'],
-				status_to_string(h['current_state'], True),
+				flags_to_str(h)
+				h['current_state_str'),
 				h['plugin_output'])
 		hosts_printed[h['host_name']] = True
 		if(mynoun):
 			nounmap[mynoun](myverb, h)
 	if(myverb == 'status'):
-		print "[{0}]: {1} {2}".format(
-			s, status_to_string(so['current_state'], False),
+		print "[{0}] {1}: {1} {2}".format(
+			s,
+			flags_to_str(so)
+			so['current_state_str'],
 			so['plugin_output'])
 	if(mynoun):
 		nounmap[mynoun](myverb, services[s])
@@ -376,9 +385,10 @@ if(len(services.keys()) > 0):
 for h in sorted(hosts.keys()):
 	ho = hosts[h]
 	if myverb == 'status':
-		print "[{0}]: {1} {2}".format(
+		print "[{0}] {1}: {2} {3}".format(
 			ho['host_name'],
-			status_to_string(ho['current_state'], True),
+			flags_to_str(ho)
+			ho['current_state'],
 			ho['plugin_output'])
 	elif mynoun:
 		nounmap[mynoun](myverb, ho)

@@ -445,7 +445,7 @@ int nebmodule_init(int flags, char * localargs, nebmodule * lhandle) {
 	neb_set_module_info(handle, NEBMODULE_MODINFO_VERSION, "1.3");
 	neb_set_module_info(handle, NEBMODULE_MODINFO_LICENSE, "Apache v2");
 	neb_set_module_info(handle, NEBMODULE_MODINFO_DESC,
-		"Subscribes to Nagios data on 0MQ");
+		"Provides interface into Nagios via ZeroMQ");
 
 	config = json_load_file(localargs, 0, &loaderr);
 	if(config == NULL) {
