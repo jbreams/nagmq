@@ -30,6 +30,7 @@ Compilation and Installation
 
 Compile this from the Git repo by running::
 
+        $ git checkout v1.2.9
 	$ autoreconf -i
 	$ ./configure
 	$ make
