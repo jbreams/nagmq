@@ -23,9 +23,7 @@ extern int errno;
 
 static check_result * crhead = NULL;
 pthread_mutex_t cr_mutex = PTHREAD_MUTEX_INITIALIZER;
-#ifdef HAVE_TIMEDEVENT_END
 pthread_mutex_t reaper_mutex = PTHREAD_MUTEX_INITIALIZER;
-#endif
 void * crpullsock = NULL;
 
 int handle_timedevent(int which, void * obj) {
