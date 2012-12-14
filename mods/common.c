@@ -280,7 +280,7 @@ void * recv_loop(void * parg) {
 	pthread_mutex_unlock(&recv_loop_mutex);
 
 	while(1) {
-#if #if ZMQ_VERSION_MAJOR < 3
+#if ZMQ_VERSION_MAJOR < 3
 		int64_t more;
 #else
 		int more;
