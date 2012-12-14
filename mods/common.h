@@ -1,9 +1,7 @@
-void process_pull_msg(zmq_msg_t * payload_msg, void * outsock);
-void * pull_thread(void * zmq_ctx);
+void process_pull_msg(zmq_msg_t * payload_msg);
 int handle_timedevent(int which, void * obj);
 void free_cb(void * ptr, void * hint);
 void process_req_msg(zmq_msg_t * reqmsg, void * sock);
-void * req_thread(void * zmq_ctx);
 
 #ifndef ZMQ_DONTWAIT
 #   define ZMQ_DONTWAIT     ZMQ_NOBLOCK

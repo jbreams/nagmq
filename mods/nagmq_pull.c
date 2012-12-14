@@ -21,67 +21,9 @@
 
 extern int errno;
 
-static check_result * crhead = NULL;
-pthread_mutex_t cr_mutex = PTHREAD_MUTEX_INITIALIZER;
-#ifdef HAVE_TIMEDEVENT_END
-pthread_mutex_t reaper_mutex = PTHREAD_MUTEX_INITIALIZER;
-#endif
-void * crpullsock = NULL;
-
-int handle_timedevent(int which, void * obj) {
-	nebstruct_timed_event_data * data = obj;
-	static int reaper_locked = 0;
-
-	if(which != NEBCALLBACK_TIMED_EVENT_DATA)
-		return ERROR;
-	if(data->type != NEBTYPE_TIMEDEVENT_EXECUTE)
-		return 0;
-	if(data->event_type == EVENT_CHECK_REAPER) {
-		pthread_mutex_lock(&reaper_mutex);
-		reaper_locked = 1;
-	} else if(reaper_locked) {
-		pthread_mutex_unlock(&reaper_mutex);
-		reaper_locked = 0;
-	}
-
-	int rc;
-	if(crpullsock) {
-		uint32_t events = 0;
-		size_t evsize = sizeof(events);
-		while(zmq_getsockopt(crpullsock, ZMQ_EVENTS, &events, &evsize) == 0 &&
-			events & ZMQ_POLLIN) {
-			zmq_msg_t crm;
-			check_result ** cr = NULL;
-			zmq_msg_init(&crm);
-			if(zmq_recv(crpullsock, &crm, 0) != 0) {
-				if(errno != EINTR)
-					break;
-			}
-			cr = zmq_msg_data(&crm);
-			add_check_result_to_list(*cr);
-			zmq_msg_close(&crm);
-		}
-	} else {
-		pthread_mutex_lock(&cr_mutex);
-		check_result *crsave = crhead;
-		crhead = NULL;
-		pthread_mutex_unlock(&cr_mutex);
-		while(crsave) {
-			check_result *tmp = crsave->next;
-			crsave->next = NULL;
-			add_check_result_to_list(crsave);
-			crsave = tmp;
-		}
-	}
-
-	return 0;
-}
-
 static void process_bulkstate(json_t * payload) {
 	size_t max, i;
 	json_t * statedata;
-
-	pthread_mutex_lock(&reaper_mutex);
 
 	statedata = json_object_get(payload, "data");
 	if(!statedata || !json_is_array(statedata)) {
@@ -205,12 +147,10 @@ static void process_bulkstate(json_t * payload) {
 		}
 	}
 
-	pthread_mutex_unlock(&reaper_mutex);
-
 	json_decref(payload);
 }
 
-static void process_status(json_t * payload, void * ressock) {
+static void process_status(json_t * payload) {
 	char * host_name, *service_description = NULL, *output = NULL;
 	check_result * newcr = NULL, t;
 	struct timeval start, finish;
@@ -256,19 +196,7 @@ static void process_status(json_t * payload, void * ressock) {
 	newcr->output = strdup(output);
 	json_decref(payload);
 
-	if(ressock) {
-		zmq_msg_t rmsg;
-		zmq_msg_init_size(&rmsg, sizeof(check_result*));
-		check_result ** crout = zmq_msg_data(&rmsg);
-		*crout = newcr;
-		zmq_send(ressock, &rmsg, 0);
-		zmq_msg_close(&rmsg);
-	} else {
-		pthread_mutex_lock(&cr_mutex);
-		newcr->next = crhead;
-		crhead = newcr;
-		pthread_mutex_unlock(&cr_mutex);
-	}
+	add_check_result_to_list(newcr);
 }
 
 static void process_acknowledgement(json_t * payload) {
@@ -496,7 +424,7 @@ static void process_cmd(json_t * payload) {
 	json_decref(payload);
 }
 
-void process_pull_msg(zmq_msg_t * payload_msg, void * outsock) {
+void process_pull_msg(zmq_msg_t * payload_msg) {
 	char * type = NULL;
 
 	json_t * payload = json_loadb(zmq_msg_data(payload_msg),
@@ -514,7 +442,7 @@ void process_pull_msg(zmq_msg_t * payload_msg, void * outsock) {
 		process_cmd(payload);
 	else if(strncmp(type, "host_check_processed", typelen) == 0 ||
 		strncmp(type, "service_check_processed", typelen) == 0)
-		process_status(payload, outsock);
+		process_status(payload);
 	else if(strncmp(type, "acknowledgement", typelen) == 0)
 		process_acknowledgement(payload);
 	else if(strncmp(type, "comment_add", typelen) == 0)
@@ -524,42 +452,4 @@ void process_pull_msg(zmq_msg_t * payload_msg, void * outsock) {
 	else if(strncmp(type, "state_data", typelen) == 0)
 		process_bulkstate(payload);
 	return;
-}
-
-void * pull_thread(void * zmq_ctx) {
-	int rc;
-	sigset_t signal_set;
-	sigfillset(&signal_set);
-	pthread_sigmask(SIG_BLOCK, &signal_set, NULL);
-	void * intsock = zmq_socket(zmq_ctx, ZMQ_PULL);
-	if(intsock == NULL)
-		return NULL;
-	zmq_connect(intsock, "inproc://nagmq_pull_bus");
-
-	void * intresult = zmq_socket(zmq_ctx, ZMQ_PUSH);
-	if(intresult == NULL)
-		return NULL;
-	zmq_connect(intresult, "inproc://nagmq_cr_bus");
-
-	while(1) {
-		zmq_msg_t payload;
-		zmq_msg_init(&payload);
-		
-		if((rc = zmq_recv(intsock, &payload, 0)) != 0) {
-			rc = errno;
-			if(rc == ETERM)
-				break;
-			else if(rc == EINTR)
-				continue;
-			else
-				syslog(LOG_ERR, "Error receiving for pull events! %s", zmq_strerror(rc));
-				break;
-		}
-
-		process_pull_msg(&payload, intresult);
-		zmq_msg_close(&payload);
-	}
-
-	zmq_close(intresult);
-	zmq_close(intsock);
 }

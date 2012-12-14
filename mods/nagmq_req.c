@@ -21,7 +21,6 @@
 #include "common.h"
 
 extern int errno;
-extern pthread_mutex_t reaper_mutex;
 extern host * host_list;
 extern service * service_list;
 extern hostgroup * hostgroup_list;
@@ -321,15 +320,9 @@ static void parse_host(host * state, struct payload * ret,
 	payload_new_statestr(ret, "last_state_str", state->current_state, state->has_been_checked, 0);
 	payload_new_integer(ret, "last_hard_state", state->last_hard_state);
 	payload_new_statestr(ret, "last_hard_state_str", state->last_hard_state, state->has_been_checked, 0);
-
-	if(payload_has_keys(ret, "plugin_output",
-		"long_plugin_output", "perf_data", NULL) > 0) {
-		pthread_mutex_lock(&reaper_mutex);
-		payload_new_string(ret, "plugin_output", state->plugin_output);
-		payload_new_string(ret, "long_plugin_output", state->long_plugin_output);
-		payload_new_string(ret, "perf_data", state->perf_data);
-		pthread_mutex_unlock(&reaper_mutex);
-	}
+	payload_new_string(ret, "plugin_output", state->plugin_output);
+	payload_new_string(ret, "long_plugin_output", state->long_plugin_output);
+	payload_new_string(ret, "perf_data", state->perf_data);
 	payload_new_integer(ret, "state_type", state->state_type);
 	payload_new_integer(ret, "current_attempt", state->current_attempt);
 	payload_new_integer(ret, "current_event_id", state->current_event_id);
@@ -493,15 +486,9 @@ static void parse_service(service * state, struct payload * ret,
 	payload_new_statestr(ret, "last_state_str", state->last_state, state->has_been_checked, 1);
 	payload_new_integer(ret, "last_hard_state", state->last_hard_state);
 	payload_new_statestr(ret, "last_hard_state_str", state->last_hard_state, state->has_been_checked, 1);
-	
-	if(payload_has_keys(ret, "plugin_output",
-		"long_plugin_output", "perf_data", NULL) > 0) {
-		pthread_mutex_lock(&reaper_mutex);
-		payload_new_string(ret, "plugin_output", state->plugin_output);
-		payload_new_string(ret, "long_plugin_output", state->long_plugin_output);
-		payload_new_string(ret, "perf_data", state->perf_data);
-		pthread_mutex_unlock(&reaper_mutex);
-	}
+	payload_new_string(ret, "plugin_output", state->plugin_output);
+	payload_new_string(ret, "long_plugin_output", state->long_plugin_output);
+	payload_new_string(ret, "perf_data", state->perf_data);
 	payload_new_integer(ret, "state_type", state->state_type);
 	payload_new_integer(ret, "next_check", state->next_check);
 	payload_new_boolean(ret, "should_be_scheduled", state->should_be_scheduled);
@@ -1151,37 +1138,4 @@ void process_req_msg(zmq_msg_t * reqmsg, void * sock) {
 end:
 	json_decref(req);
 	send_msg(sock, po);
-}
-
-void * req_thread(void * zmq_ctx) {
-	int rc;
-	sigset_t signal_set;
-	sigfillset(&signal_set);
-	pthread_sigmask(SIG_BLOCK, &signal_set, NULL);
-	void * intsock = zmq_socket(zmq_ctx, ZMQ_REP);
-	if(intsock == NULL)
-		return NULL;
-	zmq_connect(intsock, "inproc://nagmq_req_bus");
-
-	while(1) {
-		zmq_msg_t payload;
-		zmq_msg_init(&payload);
-		
-		if((rc = zmq_recv(intsock, &payload, 0)) != 0) {
-			rc = errno;
-			if(rc == ETERM)
-				break;
-			else if(rc == EINTR)
-				continue;
-			else
-				syslog(LOG_ERR, "Error receiving for req events! %s",
-					zmq_strerror(rc));
-				break;
-		}
-
-		process_req_msg(&payload, intsock);
-		zmq_msg_close(&payload);
-	}
-
-	zmq_close(intsock);
 }

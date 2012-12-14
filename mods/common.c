@@ -34,7 +34,6 @@ int nebmodule_deinit(int flags, int reason) {
 }
 
 int handle_pubstartup();
-int handle_pullstartup();
 void process_payload(struct payload * payload);
 
 void * getsock(char * forwhat, int type) {
@@ -178,199 +177,47 @@ void * getsock(char * forwhat, int type) {
 	return sock;
 }
 
-extern void * crpullsock;
-void * recv_loop(void * parg) {
-	void * pullsock, * reqsock, *intpullbus = NULL, *intreqbus = NULL;
-	int enablepull = 0, enablereq = 0, n = 0;
-	zmq_pollitem_t pollables[3];
-	int rc, npullthreads = 0, nreqthreads = 0;
-	pthread_t * threads = NULL;
+void * pullsock = NULL, * reqsock = NULL;
+int handle_timedevent(int which, void * obj) {
+	nebstruct_timed_event_data * data = obj;
 
-	sigset_t signal_set;
-	sigfillset(&signal_set);
-	pthread_sigmask(SIG_BLOCK, &signal_set, NULL);
+	if(which != NEBCALLBACK_TIMED_EVENT_DATA)
+		return ERROR;
+	if(data->type != NEBTYPE_TIMEDEVENT_EXECUTE)
+		return 0;
 
-	pthread_mutex_lock(&recv_loop_mutex);
-
-	if(json_unpack(config, "{ s?:{ s:b s?:i } s?:{ s:b s?:i } }",
-		"pull", "enable", &enablepull, "threads", &npullthreads,
-		"reply", "enable", &enablereq, "threads", &nreqthreads) != 0) {
-		syslog(LOG_ERR, "Parameter error while starting NagMQ");
-		return NULL;
-	}
-	
-	if(npullthreads > 0 || nreqthreads > 0) {
-		int nthreads = npullthreads + nreqthreads;
-		threads = malloc(sizeof(pthread_t) * nthreads);
-		memset(threads, 0, sizeof(pthread_t) * nthreads);
-	}
-
-	memset(pollables, 0, sizeof(pollables));
-
-	if(enablepull) {
-		pullsock = getsock("pull", ZMQ_PULL);
-		if(!pullsock)
-			return NULL;
+	zmq_pollitem_t pollables[2];
+	int pollable_count = 0, rc;
+	if(pullsock) {
 		pollables[0].socket = pullsock;
 		pollables[0].events = ZMQ_POLLIN;
-
-		if(npullthreads > 0) {
-			int i;
-			intpullbus = zmq_socket(zmq_ctx, ZMQ_PUSH);
-			if(intpullbus == NULL) {
-				syslog(LOG_ERR, "Error creating internal pull bus");
-				return NULL;
-			}
-			zmq_bind(intpullbus, "inproc://nagmq_pull_bus");
-
-			crpullsock = zmq_socket(zmq_ctx, ZMQ_PULL);
-			if(crpullsock == NULL) {
-				syslog(LOG_ERR, "Error creating internal check result bus");
-				return NULL;
-			}
-			zmq_bind(crpullsock, "inproc://nagmq_cr_bus");
-			i = 0;
-
-			for(i = 0; i < npullthreads; i++) {
-				if(pthread_create(&threads[n++], NULL, pull_thread, zmq_ctx) != 0) {
-					syslog(LOG_ERR, "Error creating pull thread #%d %m", i);
-					return NULL;
-				}
-			}
-		}
+		pollable_count++;
 	}
 
-	if(enablereq) {
-		if(nreqthreads > 0) {
-			int i;
-			reqsock = getsock("reply", ZMQ_ROUTER);
-			if(!reqsock)
-				return NULL;
-			
-			intreqbus = zmq_socket(zmq_ctx, ZMQ_DEALER);
-			if(!intreqbus) {
-				syslog(LOG_ERR, "Error creating internal req bus");
-				return NULL;
-			}
-
-			zmq_bind(intreqbus, "inproc://nagmq_req_bus");
-			for(i = 0; i < nreqthreads; i++) {
-				if(pthread_create(&threads[n++], NULL, req_thread, zmq_ctx) != 0) {
-					syslog(LOG_ERR, "Error creating req thread #%d %m", i);
-					return NULL;
-				}
-			}
-
-			pollables[2].socket = intreqbus;
-			pollables[2].events = ZMQ_POLLIN;
-		} else {
-			reqsock = getsock("reply", ZMQ_REP);
-			if(!reqsock) {
-				if(pullsock)
-					zmq_close(pullsock);
-				return NULL;
-			}
-		}
-
-		pollables[1].socket = reqsock;
-		pollables[1].events = ZMQ_POLLIN;
+	if(reqsock) {
+		pollables[pollable_count].socket = reqsock;
+		pollables[pollable_count].events = ZMQ_POLLIN;
+		pollable_count++;
 	}
 
-	pthread_cond_signal(&init_cond);
-	pthread_mutex_unlock(&recv_loop_mutex);
-
-	while(1) {
-#if #if ZMQ_VERSION_MAJOR < 3
-		int64_t more;
-#else
-		int more;
-#endif;
-		size_t moresize = sizeof(more);
-		zmq_msg_t tmpmsg;
-
-		if((rc = zmq_poll(pollables, 3, -1)) < 0) {
-			rc = errno;
-			if(rc == ETERM)
-				break;
-			else if(rc == EINTR)
+	while(zmq_poll(pollables, pollable_count, 0) > 0) {
+		int j;
+		for(j = -1; j < pollable_count; j++) {
+			int rj = j + 1;
+			if(!(pollables[rj].revents & ZMQ_POLLIN))
 				continue;
-			else {
-				syslog(LOG_ERR, "Error polling for events: %s",
-					zmq_strerror(rc));
+			zmq_msg_t payload;
+			zmq_msg_init(&payload);
+			if(zmq_recv(pollables[rj].socket, &payload, 0) != 0)
 				continue;
-			}
-		}
 
-		if(enablepull && pollables[0].revents & ZMQ_POLLIN) {
-			zmq_msg_init(&tmpmsg);
-			if((rc = zmq_recv(pullsock, &tmpmsg, 0)) != 0) {
-				zmq_msg_close(&tmpmsg);
-				continue;
-			}
-			if(npullthreads == 0)
-				process_pull_msg(&tmpmsg, NULL);
-			else {
-				zmq_msg_t outmsg;
-				zmq_msg_init(&outmsg);
-				zmq_msg_copy(&outmsg, &tmpmsg);
-				zmq_send(intpullbus, &outmsg, 0);
-				zmq_msg_close(&outmsg);
-			}
-			zmq_msg_close(&tmpmsg);
-		}
-		if(enablereq && pollables[1].revents & ZMQ_POLLIN) {
-			do {
-				zmq_msg_init(&tmpmsg);
-				if((rc = zmq_recv(reqsock, &tmpmsg, 0)) != 0) {
-					zmq_msg_close(&tmpmsg);
-					continue;
-				}
-				if(nreqthreads == 0)
-					process_req_msg(&tmpmsg, reqsock);
-				else {
-					zmq_msg_t outmsg;
-					zmq_msg_init(&outmsg);
-					zmq_msg_copy(&outmsg, &tmpmsg);
-					zmq_getsockopt(reqsock, ZMQ_RCVMORE, &more, &moresize); 
-					zmq_send(intreqbus, &outmsg, more ? ZMQ_SNDMORE : 0);
-					zmq_msg_close(&outmsg);
-				}
-				zmq_msg_close(&tmpmsg);
-			} while(nreqthreads > 0 && more);
-		}
-		if(nreqthreads > 0 && pollables[2].revents & ZMQ_POLLIN) {
-			do {
-				zmq_msg_init(&tmpmsg);
-				if((rc = zmq_recv(intreqbus, &tmpmsg, 0)) != 0) {
-					zmq_msg_close(&tmpmsg);
-					continue;
-				}
-				zmq_msg_t outmsg;
-				zmq_msg_init(&outmsg);
-				zmq_msg_copy(&outmsg, &tmpmsg);
-				zmq_getsockopt(intreqbus, ZMQ_RCVMORE, &more, &moresize);
-				zmq_send(reqsock, &outmsg, more ? ZMQ_SNDMORE : 0);
-				zmq_msg_close(&outmsg);
-				zmq_msg_close(&tmpmsg);
-			} while(more);
+			if(pollables[rj].socket == pullsock)
+				process_pull_msg(&payload);
+			else if(pollables[rj].socket == reqsock)
+				process_req_msg(&payload, reqsock);
+			zmq_msg_close(&payload);
 		}
 	}
-
-	while(n > 0)
-		pthread_join(threads[--n], NULL);
-
-	if(enablereq)
-		zmq_close(reqsock);
-	if(enablepull)
-		zmq_close(pullsock);
-	if(intpullbus)
-		zmq_close(intpullbus);
-	if(intreqbus)
-		zmq_close(intreqbus);
-	if(crpullsock)
-		zmq_close(crpullsock);
-
-	return NULL;
 }
 
 extern void * pubext;
@@ -401,16 +248,11 @@ int handle_startup(int which, void * obj) {
 		if(enablepub && handle_pubstartup() < 0)
 			return -1;
 
-		if(!enablepull && !enablereq)
-			return 0;
+		if(enablepull)
+			pullsock = getsock("pull", ZMQ_PULL);
 
-		pthread_mutex_lock(&recv_loop_mutex);
-		if(pthread_create(&threadid, NULL, recv_loop, NULL) < 0) {
-			syslog(LOG_ERR, "Error creating ZMQ recv loop: %m");
-			return -1;
-		}
-		pthread_cond_wait(&init_cond, &recv_loop_mutex);
-		pthread_detach(threadid);
+		if(enablereq)
+			reqsock = getsock("req", ZMQ_REP);
 
 		if(enablepub) {
 			payload = payload_new();
@@ -426,17 +268,17 @@ int handle_startup(int which, void * obj) {
 			payload_new_timestamp(payload, "timestamp", &ps->timestamp);
 			payload_finalize(payload);
 			process_payload(payload);
+			zmq_close(pubext);
 		}
 
-		zmq_close(pubext);
+		if(enablepull)
+			zmq_close(pullsock);
+		if(enablereq)
+			zmq_close(reqsock);
 		zmq_term(zmq_ctx);
-		if(enablereq || enablepull)
-			pthread_join(threadid, NULL);
 	}
 	return 0;
 }
-
-int handle_timedevent(int which, void * data);
 
 int nebmodule_init(int flags, char * localargs, nebmodule * lhandle) {
 	json_error_t loaderr;
