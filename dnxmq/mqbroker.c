@@ -157,7 +157,7 @@ void do_forward(void * in, void *out, void *mon, int noblock, int monnoblock) {
 	int flags = 0;
 
 	zmq_msg_init(&tmpmsg);
-	if(zmq_recv(in, &tmpmsg, 0) != 0) {
+	if(zmq_msg_recv(in, &tmpmsg, 0) != 0) {
 		rc = errno;
 		zmq_msg_close(&tmpmsg);
 		logit(WARN, "Error receiving message: %s", zmq_strerror(rc));
@@ -170,11 +170,11 @@ void do_forward(void * in, void *out, void *mon, int noblock, int monnoblock) {
 		zmq_msg_t monmsg;
 		zmq_msg_init(&monmsg);
 		zmq_msg_copy(&monmsg, &tmpmsg);
-		zmq_send(mon, &monmsg, flags);
+		zmq_msg_send(mon, &monmsg, flags);
 		zmq_msg_close(&monmsg);
 	}
 	flags = (rcvmore ? ZMQ_SNDMORE : 0) | (noblock ? ZMQ_NOBLOCK : 0);
-	zmq_send(out, &tmpmsg, flags);
+	zmq_msg_send(out, &tmpmsg, flags);
 	zmq_msg_close(&tmpmsg);
 }
 
