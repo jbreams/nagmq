@@ -6,6 +6,7 @@
 #include <syslog.h>
 #include <signal.h>
 #include <unistd.h>
+#include <pthread.h>
 #include "zmq3compat.h"
 
 void * zmqctx;
@@ -426,7 +427,7 @@ int main(int argc, char ** argv) {
 		broker_loop(firstobj);
 
 		for(i =0; i < nbrokers - 1; i++)
-			pthread_join(&threads[i]);
+			pthread_join(threads[i], NULL);
 	}
 
 	zmq_term(zmqctx);
