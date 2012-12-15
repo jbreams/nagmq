@@ -19,9 +19,6 @@
 
 NEB_API_VERSION(CURRENT_NEB_API_VERSION)
 static void * nagmq_handle = NULL;
-static pthread_t threadid;
-static pthread_cond_t init_cond = PTHREAD_COND_INITIALIZER;
-static pthread_mutex_t recv_loop_mutex = PTHREAD_MUTEX_INITIALIZER;
 void * zmq_ctx;
 nebmodule * handle;
 json_t * config;
@@ -187,7 +184,7 @@ int handle_timedevent(int which, void * obj) {
 		return 0;
 
 	zmq_pollitem_t pollables[2];
-	int pollable_count = 0, rc;
+	int pollable_count = 0;
 	if(pullsock) {
 		pollables[0].socket = pullsock;
 		pollables[0].events = ZMQ_POLLIN;
@@ -210,7 +207,7 @@ int handle_timedevent(int which, void * obj) {
 				continue;
 			zmq_msg_t payload;
 			zmq_msg_init(&payload);
-			if(zmq_msg_recv(pollables[j].socket, &payload, 0) == -1)
+			if(zmq_msg_recv(&payload, pollables[j].socket, 0) == -1)
 				continue;
 
 			if(pollables[j].socket == pullsock)

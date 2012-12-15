@@ -154,7 +154,6 @@ static void process_status(json_t * payload) {
 	char * host_name, *service_description = NULL, *output = NULL;
 	check_result * newcr = NULL, t;
 	struct timeval start, finish;
-	time_t timestamp;
 
 	init_check_result(&t);
 	t.output_file = NULL;

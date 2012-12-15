@@ -844,7 +844,7 @@ static void send_msg(void * sock, struct payload * po) {
 	payload_finalize(po);
 	zmq_msg_t outmsg;
 	zmq_msg_init_data(&outmsg, po->json_buf, po->bufused, free_cb, NULL);
-	zmq_msg_send(sock, &outmsg, 0);
+	zmq_msg_send(&outmsg, sock, 0);
 	zmq_msg_close(&outmsg);
 	if(po->type)
 		free(po->type);

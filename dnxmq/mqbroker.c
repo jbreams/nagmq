@@ -88,13 +88,25 @@ int parse_connect(void * sock, json_t * val, int bind, json_t * subscribe) {
 void parse_sock_directive(json_t * arg, zmq_pollitem_t * pollable, int * noblock) {
 	int ntype = -1;
 	char *type;
+#if ZMQ_VERSION_MAJOR == 2
 	int64_t hwm = 0, swap = 0, affinity = 0;
+#elif ZMQ_VERSION_MAJOR == 3
+	int sndhwm = 1000, rcvhwm = 1000;
+	int64_t affinity = 0;
+#endif
 	json_t * subscribe = NULL, *connect = NULL, *bind = NULL;
 	void * sock;
+#if ZMQ_VERSION_MAJOR == 2
 	if(json_unpack(arg, "{s:s s?:o s?:o s?:o s?i s?i s?i s?b}", 
 		"type", &type, "connect", &connect, "bind", &bind,
 		"subscribe", &subscribe, "hwm", &hwm, "swap", &swap,
 		"affinity", &affinity, "noblock", noblock) != 0)
+#elif ZMQ_VERSION_MAJOR == 3
+	if(json_unpack(arg, "{s:s s?:o s?:o s?:o s?i s?i s?i s?b}", 
+		"type", &type, "connect", &connect, "bind", &bind,
+		"subscribe", &subscribe, "sndhwm", &sndhwm, "rcvhwm", &rcvhwm,
+		"affinity", &affinity, "noblock", noblock) != 0)
+#endif
 		return;
 	if(strcasecmp(type, "dealer") == 0)
 		ntype = ZMQ_DEALER;
@@ -133,8 +145,13 @@ void parse_sock_directive(json_t * arg, zmq_pollitem_t * pollable, int * noblock
 	if(connect && parse_connect(sock, connect, 0, subscribe) < 0)
 		exit(1);
 		
+#if ZMQ_VERSION_MAJOR == 2
 	zmq_setsockopt(sock, ZMQ_HWM, &hwm, sizeof(hwm));
 	zmq_setsockopt(sock, ZMQ_SWAP, &swap, sizeof(swap));
+#elif ZMQ_VERSION_MAJOR == 3
+	zmq_setsockopt(sock, ZMQ_SNDHWM, &sndhwm, sizeof(sndhwm));
+	zmq_setsockopt(sock, ZMQ_RCVHWM, &rcvhwm, sizeof(rcvhwm));
+#endif
 	zmq_setsockopt(sock, ZMQ_AFFINITY, &affinity, sizeof(affinity));
 
 	pollable->socket = sock;
@@ -152,12 +169,16 @@ void parse_sock_directive(json_t * arg, zmq_pollitem_t * pollable, int * noblock
 void do_forward(void * in, void *out, void *mon, int noblock, int monnoblock) {
 	zmq_msg_t tmpmsg;
 	int rc;
+#if ZMQ_VERSION_MAJOR == 2
 	int64_t rcvmore;
+#elif ZMQ_VERSION_MAJOR == 3
+	int rcvmore;
+#endif
 	size_t size = sizeof(rcvmore);
 	int flags = 0;
 
 	zmq_msg_init(&tmpmsg);
-	if(zmq_msg_recv(in, &tmpmsg, 0) != 0) {
+	if(zmq_msg_recv(&tmpmsg, in, 0) == -1) {
 		rc = errno;
 		zmq_msg_close(&tmpmsg);
 		logit(WARN, "Error receiving message: %s", zmq_strerror(rc));
@@ -170,11 +191,11 @@ void do_forward(void * in, void *out, void *mon, int noblock, int monnoblock) {
 		zmq_msg_t monmsg;
 		zmq_msg_init(&monmsg);
 		zmq_msg_copy(&monmsg, &tmpmsg);
-		zmq_msg_send(mon, &monmsg, flags);
+		zmq_msg_send(&monmsg, mon, flags);
 		zmq_msg_close(&monmsg);
 	}
 	flags = (rcvmore ? ZMQ_SNDMORE : 0) | (noblock ? ZMQ_NOBLOCK : 0);
-	zmq_msg_send(out, &tmpmsg, flags);
+	zmq_msg_send(&tmpmsg, out, flags);
 	zmq_msg_close(&tmpmsg);
 }
 
@@ -310,7 +331,7 @@ void * broker_loop(void * param) {
 int main(int argc, char ** argv) {
 	json_error_t config_err;
 	json_t * config, *confarray = NULL;
-	int rc, daemonize = 0, iothreads = 1;
+	int daemonize = 0, iothreads = 1;
 	char ch, * configname = "devices";
 	pthread_t * threads = NULL;
 
