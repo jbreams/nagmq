@@ -230,7 +230,7 @@ void obj_for_ending(struct child_job * j, const char * output,
 	json_decref(jout);
 
 	zmq_msg_init_data(&outmsg, strout, strlen(strout), free_cb, NULL);
-	zmq_msg_send(pushsock, &outmsg, 0);
+	zmq_msg_send(&outmsg, pushsock, 0);
 	zmq_msg_close(&outmsg);
 }
 
@@ -410,12 +410,15 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 }
 
 void recv_job_cb(struct ev_loop * loop, ev_io * i, int event) {
+#if ZMQ_VERSION_MAJOR == 2
 	uint32_t events = ZMQ_POLLIN;
+#elif ZMQ_VERSION_MAJOR == 3
+	int events = ZMQ_POLLIN;
+#endif
 	size_t evs = sizeof(events);
 
 	while(1) {
-		int rc = zmq_getsockopt(pullsock, ZMQ_EVENTS, &events, &evs);
-		if(rc < 0) {
+		if(zmq_getsockopt(pullsock, ZMQ_EVENTS, &events, &evs) == -1) {
 			if(errno == EINTR)
 				continue;
 			else if(errno == ETERM)
@@ -430,11 +433,15 @@ void recv_job_cb(struct ev_loop * loop, ev_io * i, int event) {
 			break;
 
 		zmq_msg_t inmsg;
+#if ZMQ_VERSION_MAJOR == 2
 		int64_t rcvmore = 0;
+#elif ZMQ_VERSION_MAJOR == 3
+		int rcvmore = 0;
+#endif
 		size_t rms = sizeof(rcvmore);
 
 		zmq_msg_init(&inmsg);
-		if(zmq_msg_recv(i->data, &inmsg, 0) == -1) {
+		if(zmq_msg_recv(&inmsg, i->data, 0) == -1) {
 			logit(ERR, "Error receiving message from broker %s",
 				zmq_strerror(errno));
 			continue;
@@ -444,7 +451,7 @@ void recv_job_cb(struct ev_loop * loop, ev_io * i, int event) {
 		if(rcvmore) {
 			zmq_msg_close(&inmsg);
 			zmq_msg_init(&inmsg);
-			if(zmq_msg_recv(i->data, &inmsg, 0) == -1) {
+			if(zmq_msg_recv(&inmsg, i->data, 0) == -1) {
 				logit(ERR, "Error receiving message from broker %s",
 					zmq_strerror(errno));
 				continue;

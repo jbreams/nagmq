@@ -210,7 +210,7 @@ int handle_timedevent(int which, void * obj) {
 				continue;
 			zmq_msg_t payload;
 			zmq_msg_init(&payload);
-			if(zmq_msg_recv(pollables[j].socket, &payload, 0) == -1)
+			if(zmq_msg_recv(&payload, pollables[j].socket, 0) == -1)
 				continue;
 
 			if(pollables[j].socket == pullsock)
