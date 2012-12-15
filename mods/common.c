@@ -200,20 +200,22 @@ int handle_timedevent(int which, void * obj) {
 		pollable_count++;
 	}
 
+	if(pollable_count == 0)
+		return 0;
+
 	while(zmq_poll(pollables, pollable_count, 0) > 0) {
 		int j;
-		for(j = -1; j < pollable_count; j++) {
-			int rj = j + 1;
-			if(!(pollables[rj].revents & ZMQ_POLLIN))
+		for(j = 0; j < pollable_count; j++) {
+			if(!(pollables[j].revents & ZMQ_POLLIN))
 				continue;
 			zmq_msg_t payload;
 			zmq_msg_init(&payload);
-			if(zmq_recv(pollables[rj].socket, &payload, 0) != 0)
+			if(zmq_recv(pollables[j].socket, &payload, 0) != 0)
 				continue;
 
-			if(pollables[rj].socket == pullsock)
+			if(pollables[j].socket == pullsock)
 				process_pull_msg(&payload);
-			else if(pollables[rj].socket == reqsock)
+			else if(pollables[j].socket == reqsock)
 				process_req_msg(&payload, reqsock);
 			zmq_msg_close(&payload);
 		}
@@ -252,7 +254,7 @@ int handle_startup(int which, void * obj) {
 			pullsock = getsock("pull", ZMQ_PULL);
 
 		if(enablereq)
-			reqsock = getsock("req", ZMQ_REP);
+			reqsock = getsock("reply", ZMQ_REP);
 
 		if(enablepub) {
 			payload = payload_new();
