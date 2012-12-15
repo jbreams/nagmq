@@ -331,7 +331,7 @@ void * broker_loop(void * param) {
 int main(int argc, char ** argv) {
 	json_error_t config_err;
 	json_t * config, *confarray = NULL;
-	int rc, daemonize = 0, iothreads = 1;
+	int daemonize = 0, iothreads = 1;
 	char ch, * configname = "devices";
 	pthread_t * threads = NULL;
 
