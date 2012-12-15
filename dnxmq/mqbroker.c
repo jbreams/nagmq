@@ -6,6 +6,7 @@
 #include <syslog.h>
 #include <signal.h>
 #include <unistd.h>
+#include "zmq3compat.h"
 
 void * zmqctx;
 int usesyslog = 0, verbose = 0;

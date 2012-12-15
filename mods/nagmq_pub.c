@@ -15,6 +15,7 @@
 #include <zmq.h>
 #include "json.h"
 #include "jansson.h"
+#include "common.h"
 
 extern int errno;
 extern nebmodule * handle;

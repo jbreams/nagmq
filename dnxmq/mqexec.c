@@ -16,6 +16,7 @@
 #else
 #include <regex.h>
 #endif
+#include "zmq3compat.h"
 
 #ifndef MAX_PLUGIN_OUTPUT_LENGTH
 #define MAX_PLUGIN_OUTPUT_LENGTH 8192
