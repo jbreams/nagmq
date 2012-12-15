@@ -230,7 +230,7 @@ void obj_for_ending(struct child_job * j, const char * output,
 	json_decref(jout);
 
 	zmq_msg_init_data(&outmsg, strout, strlen(strout), free_cb, NULL);
-	zmq_send(pushsock, &outmsg, 0);
+	zmq_msg_send(pushsock, &outmsg, 0);
 	zmq_msg_close(&outmsg);
 }
 
@@ -434,7 +434,7 @@ void recv_job_cb(struct ev_loop * loop, ev_io * i, int event) {
 		size_t rms = sizeof(rcvmore);
 
 		zmq_msg_init(&inmsg);
-		if(zmq_recv(i->data, &inmsg, 0) != 0) {
+		if(zmq_msg_recv(i->data, &inmsg, 0) == -1) {
 			logit(ERR, "Error receiving message from broker %s",
 				zmq_strerror(errno));
 			continue;
@@ -444,7 +444,7 @@ void recv_job_cb(struct ev_loop * loop, ev_io * i, int event) {
 		if(rcvmore) {
 			zmq_msg_close(&inmsg);
 			zmq_msg_init(&inmsg);
-			if(zmq_recv(i->data, &inmsg, 0) != 0) {
+			if(zmq_msg_recv(i->data, &inmsg, 0) == -1) {
 				logit(ERR, "Error receiving message from broker %s",
 					zmq_strerror(errno));
 				continue;

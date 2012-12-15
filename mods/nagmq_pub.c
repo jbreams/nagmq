@@ -530,7 +530,7 @@ void process_payload(struct payload * payload) {
 		header = payload->type;
 
 	zmq_msg_init_data(&type, header, headerlen, free_cb, NULL);
-	rc = (zmq_send(pubext, &type, ZMQ_SNDMORE|ZMQ_NOBLOCK) == 0) ? 0 : errno;
+	rc = (zmq_msg_send(pubext, &type, ZMQ_SNDMORE|ZMQ_NOBLOCK) == 0) ? 0 : errno;
 	zmq_msg_close(&type);
 	if(rc != 0) {
 	//	syslog(LOG_ERR, "Error sending type header: %s",
@@ -542,7 +542,7 @@ void process_payload(struct payload * payload) {
 
 	zmq_msg_init_data(&dump, payload->json_buf, payload->bufused, 
 		free_cb, NULL);
-	if((rc = zmq_send(pubext, &dump, ZMQ_NOBLOCK)) != 0)
+	if((rc = zmq_msg_send(pubext, &dump, ZMQ_NOBLOCK)) == -1)
 		syslog(LOG_ERR, "Error sending payload: %s",
 			zmq_strerror(errno));
 	zmq_msg_close(&dump);
