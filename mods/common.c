@@ -176,11 +176,12 @@ void * getsock(char * forwhat, int type) {
 }
 
 void * pullsock = NULL, * reqsock = NULL;
+
 int handle_timedevent(int which, void * obj) {
 	nebstruct_timed_event_data * data = obj;
 	struct timespec * delay = (struct timespec*)data->event_data;
-	struct timeval start, end;
-	unsigned int timeout;
+	struct timeval start;
+	long timeout;
 
 	if(which != NEBCALLBACK_TIMED_EVENT_DATA)
 		return ERROR;
@@ -209,7 +210,7 @@ int handle_timedevent(int which, void * obj) {
 	gettimeofday(&start, NULL);
 	while(zmq_poll(pollables, pollable_count, timeout) > 0 && timeout > 0) {
 		int j;
-		struct timeval delaydiff, polldiff;
+		struct timeval end;
 		for(j = 0; j < pollable_count; j++) {
 			if(!(pollables[j].revents & ZMQ_POLLIN))
 				continue;
@@ -224,14 +225,24 @@ int handle_timedevent(int which, void * obj) {
 				process_req_msg(&payload, reqsock);
 			zmq_msg_close(&payload);
 		}
+
 		gettimeofday(&end, NULL);
-		timesub(&end, &start, &polldiff);
-		TIMESPEC_TO_TIMEVAL(&delaydiff, delay);
-		timesub(&delaydiff, &polldiff, &delaydiff);
-		TIMEVAL_TO_TIMESPEC(&delaydiff, delay);
-		gettimeofday(&start, NULL);
-		timeout = (delay->tv_sec * ZMQ_POLL_MSEC * 1000) + 
-			((delay->tv_nsec / 1000000) * ZMQ_POLL_MSEC);
+
+		end.tv_sec -= start.tv_sec;
+		end.tv_usec -= start.tv_usec;
+		if(end.tv_usec < 0) {
+			end.tv_sec--;
+			end.tv_usec += 1000000;
+		}
+
+		delay->tv_sec -= end.tv_sec;
+		delay->tv_nsec -= end.tv_usec * 1000;
+		if(delay->tv_sec < 0)
+			delay->tv_sec = 0;
+		if(delay->tv_nsec < 0)
+			delay->tv_nsec = 0;
+		timeout = (long)(delay->tv_sec * ZMQ_POLL_MSEC * 1000) + 
+				((delay->tv_nsec / 1000000) * ZMQ_POLL_MSEC);
 	}
 
 	return 0;
