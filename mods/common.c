@@ -1,4 +1,5 @@
 #include <sys/types.h>
+#include <sys/time.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
@@ -177,10 +178,13 @@ void * getsock(char * forwhat, int type) {
 void * pullsock = NULL, * reqsock = NULL;
 int handle_timedevent(int which, void * obj) {
 	nebstruct_timed_event_data * data = obj;
+	struct timespec * delay = (struct timespec*)data->event_data;
+	struct timeval start, end;
+	unsigned int timeout;
 
 	if(which != NEBCALLBACK_TIMED_EVENT_DATA)
 		return ERROR;
-	if(data->type != NEBTYPE_TIMEDEVENT_EXECUTE)
+	if(data->type != NEBTYPE_TIMEDEVENT_SLEEP)
 		return 0;
 
 	zmq_pollitem_t pollables[2];
@@ -200,8 +204,12 @@ int handle_timedevent(int which, void * obj) {
 	if(pollable_count == 0)
 		return 0;
 
-	while(zmq_poll(pollables, pollable_count, 0) > 0) {
+	timeout = (delay->tv_sec * ZMQ_POLL_MSEC * 1000) + 
+		((delay->tv_nsec / 1000000) * ZMQ_POLL_MSEC);
+	gettimeofday(&start, NULL);
+	while(zmq_poll(pollables, pollable_count, timeout) > 0 && timeout > 0) {
 		int j;
+		struct timeval delaydiff, polldiff;
 		for(j = 0; j < pollable_count; j++) {
 			if(!(pollables[j].revents & ZMQ_POLLIN))
 				continue;
@@ -216,7 +224,17 @@ int handle_timedevent(int which, void * obj) {
 				process_req_msg(&payload, reqsock);
 			zmq_msg_close(&payload);
 		}
+		gettimeofday(&end, NULL);
+		timesub(&end, &start, &polldiff);
+		TIMESPEC_TO_TIMEVAL(&delaydiff, delay);
+		timesub(&delaydiff, &polldiff, &delaydiff);
+		TIMEVAL_TO_TIMESPEC(&delaydiff, delay);
+		gettimeofday(&start, NULL);
+		timeout = (delay->tv_sec * ZMQ_POLL_MSEC * 1000) + 
+			((delay->tv_nsec / 1000000) * ZMQ_POLL_MSEC);
 	}
+
+	return 0;
 }
 
 extern void * pubext;
