@@ -92,8 +92,9 @@ void parse_sock_directive(json_t * arg, zmq_pollitem_t * pollable, int * noblock
 #if ZMQ_VERSION_MAJOR == 2
 	int64_t hwm = 0, swap = 0, affinity = 0;
 #elif ZMQ_VERSION_MAJOR == 3
-	int sndhwm = 1000, rcvhwm = 1000;
+	int sndhwm = 0, rcvhwm = 0, maxmsgsize = 0, backlog = 0;
 	int64_t affinity = 0;
+	json_t * accept_filters = NULL;
 #endif
 	json_t * subscribe = NULL, *connect = NULL, *bind = NULL;
 	void * sock;
@@ -103,10 +104,11 @@ void parse_sock_directive(json_t * arg, zmq_pollitem_t * pollable, int * noblock
 		"subscribe", &subscribe, "hwm", &hwm, "swap", &swap,
 		"affinity", &affinity, "noblock", noblock) != 0)
 #elif ZMQ_VERSION_MAJOR == 3
-	if(json_unpack(arg, "{s:s s?:o s?:o s?:o s?i s?i s?i s?b}", 
+	if(json_unpack(arg, "{s:s s?:o s?:o s?:o s?i s?i s?i s?b s?o s?i s?i}", 
 		"type", &type, "connect", &connect, "bind", &bind,
 		"subscribe", &subscribe, "sndhwm", &sndhwm, "rcvhwm", &rcvhwm,
-		"affinity", &affinity, "noblock", noblock) != 0)
+		"affinity", &affinity, "noblock", noblock, "backlog", &backlog,
+		"tcpacceptfilters", &accept_filters, "maxmsgsize", &maxmsgsize) != 0)
 #endif
 		return;
 	if(strcasecmp(type, "dealer") == 0)
@@ -147,11 +149,51 @@ void parse_sock_directive(json_t * arg, zmq_pollitem_t * pollable, int * noblock
 		exit(1);
 		
 #if ZMQ_VERSION_MAJOR == 2
-	zmq_setsockopt(sock, ZMQ_HWM, &hwm, sizeof(hwm));
-	zmq_setsockopt(sock, ZMQ_SWAP, &swap, sizeof(swap));
+	if(hwm > 0)
+		zmq_setsockopt(sock, ZMQ_HWM, &hwm, sizeof(hwm));
+	if(swap > 0)
+		zmq_setsockopt(sock, ZMQ_SWAP, &swap, sizeof(swap));
 #elif ZMQ_VERSION_MAJOR == 3
-	zmq_setsockopt(sock, ZMQ_SNDHWM, &sndhwm, sizeof(sndhwm));
-	zmq_setsockopt(sock, ZMQ_RCVHWM, &rcvhwm, sizeof(rcvhwm));
+	if(sndhwm > 0)
+		zmq_setsockopt(sock, ZMQ_SNDHWM, &sndhwm, sizeof(sndhwm));
+	if(rcvhwm > 0)
+		zmq_setsockopt(sock, ZMQ_RCVHWM, &rcvhwm, sizeof(rcvhwm));
+
+	if(backlog > 0 &&
+		zmq_setsockopt(sock, ZMQ_BACKLOG, &backlog, sizeof(backlog)) != 0) {
+		syslog(LOG_ERR, "Error setting connection backlog for %s: %s",
+			forwhat, zmq_strerror(errno));
+		zmq_close(sock);
+		return NULL;
+	}
+
+	if(maxmsgsize > 0 &&
+		zmq_setsockopt(sock, ZMQ_MAXMSGSIZE, &maxmsgsize, sizeof(maxmsgsize)) != 0) {
+		syslog(LOG_ERR, "Error setting maximum message size for %s: %s",
+			forwhat, zmq_strerror(errno));
+		zmq_close(sock);
+		return NULL;
+	}
+
+	if(accept_filters != NULL && json_is_array(accept_filters)) {
+		size_t i, len = json_array_size(accept_filters);
+		for(i = 0; i < len; i++) {
+			json_t * filterj = json_array_get(accept_filters, i);
+			const char * filter = json_string_value(filterj);
+			if(!filter) {
+				syslog(LOG_ERR, "Filter %i for %s is not a string", i, forwhat);
+				zmq_close(sock);
+				return NULL;
+			}
+			size_t flen = strlen(filter);
+			if(zmq_setsockopt(sock, ZMQ_TCP_ACCEPT_FILTER, filter, flen) != 0) {
+				syslog(LOG_ERR, "Error setting TCP filter %s for %s: %s",
+					filter, forwhat, zmq_strerror(errno));
+				zmq_close(sock);
+				return NULL;
+			}
+		}
+	}
 #endif
 	zmq_setsockopt(sock, ZMQ_AFFINITY, &affinity, sizeof(affinity));
 
