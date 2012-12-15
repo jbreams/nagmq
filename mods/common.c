@@ -38,19 +38,19 @@ void process_payload(struct payload * payload);
 
 void * getsock(char * forwhat, int type) {
 	json_t *connect = NULL, *bind = NULL;
-#if ZMQ_VERSION_MAJOR < 3
+#if ZMQ_VERSION_MAJOR == 2
 	int hwm = 0;
 #else
 	int sndhwm = 0, rcvhwm = 0, backlog = 0, maxmsgsize = 0;
 	json_t * accept_filters = NULL;
 #endif
 
-#if ZMQ_VERSION_MAJOR < 3
+#if ZMQ_VERSION_MAJOR == 2
 	if(json_unpack(config, "{ s?: { s?:o s?:o s?:i } }",
 		forwhat, "connect", &connect, "bind", &bind, "hwm", &hwm) != 0) {
 #else
 	if(json_unpack(config, "{ s?: { s?:o s?:o s?:i s?:i s?:i s?:i s?:o } }",
-		forwhat, "connect", &connect, "bind", &bind, "sndhwm", &hwm,
+		forwhat, "connect", &connect, "bind", &bind, "sndhwm", &sndhwm,
 		"rcvhwm", &rcvhwm, "backlog", &backlog, "maxmsgsize", &maxmsgsize,
 		"tcpacceptfilters", &accept_filters ) != 0) {
 	
@@ -70,7 +70,7 @@ void * getsock(char * forwhat, int type) {
 		return NULL;
 	}
 
-#if ZMQ_VERSION_MAJOR < 3
+#if ZMQ_VERSION_MAJOR == 2
 	if(hwm > 0 &&
 		zmq_setsockopt(sock, ZMQ_HWM, &hwm, sizeof(hwm)) != 0) {
 		syslog(LOG_ERR, "Error setting HWM for %s: %s",
