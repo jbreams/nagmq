@@ -115,7 +115,7 @@ void * getsock(char * forwhat, int type) {
 			json_t * filterj = json_array_get(accept_filters, i);
 			const char * filter = json_string_value(filterj);
 			if(!filter) {
-				syslog(LOG_ERR, "Filter %i for %s is not a string", i, forwhat);
+				syslog(LOG_ERR, "Filter %d for %s is not a string", i, forwhat);
 				zmq_close(sock);
 				return NULL;
 			}
@@ -179,13 +179,15 @@ void * pullsock = NULL, * reqsock = NULL;
 
 int handle_timedevent(int which, void * obj) {
 	nebstruct_timed_event_data * data = obj;
-	struct timespec * delay = (struct timespec*)data->event_data;
-	struct timeval start;
-	long timeout;
+	struct timespec * delay = NULL;
+	struct timeval start, end;
+	int nevents = 0;
+	long timeout = 0, diff;
+	//static long max_timeout = 0;
 
 	if(which != NEBCALLBACK_TIMED_EVENT_DATA)
 		return ERROR;
-	if(data->type != NEBTYPE_TIMEDEVENT_SLEEP)
+	if(data->type != NEBTYPE_TIMEDEVENT_SLEEP && data->type != NEBTYPE_TIMEDEVENT_EXECUTE)
 		return 0;
 
 	zmq_pollitem_t pollables[2];
@@ -205,14 +207,29 @@ int handle_timedevent(int which, void * obj) {
 	if(pollable_count == 0)
 		return 0;
 
-	timeout = (delay->tv_sec * ZMQ_POLL_MSEC * 1000) + 
-		((delay->tv_nsec / 1000000) * ZMQ_POLL_MSEC);
-	gettimeofday(&start, NULL);
-	while(zmq_poll(pollables, pollable_count, timeout) > 0 && timeout > 0) {
+	if(data->type == NEBTYPE_TIMEDEVENT_SLEEP) {
+		delay = (struct timespec*)data->event_data;
+		timeout = (delay->tv_sec * 1000 * ZMQ_POLL_MSEC) +
+			((delay->tv_nsec / 1000000) * ZMQ_POLL_MSEC);
+		gettimeofday(&start, NULL);
+	}
+
+	if(zmq_poll(pollables, pollable_count, timeout) < 1) {
+		if(delay) {
+			delay->tv_sec = 0;
+			delay->tv_nsec = 0;
+		}
+		return 0;
+	}
+	
+	do {
 		int j;
-		struct timeval end;
+		nevents = 0;
 		for(j = 0; j < pollable_count; j++) {
-			if(!(pollables[j].revents & ZMQ_POLLIN))
+			int events = 0;
+			size_t evsize = sizeof(events);
+			zmq_getsockopt(pollables[j].socket, ZMQ_EVENTS, &events, &evsize);
+			if(!(events & ZMQ_POLLIN))
 				continue;
 			zmq_msg_t payload;
 			zmq_msg_init(&payload);
@@ -224,27 +241,30 @@ int handle_timedevent(int which, void * obj) {
 			else if(pollables[j].socket == reqsock)
 				process_req_msg(&payload, reqsock);
 			zmq_msg_close(&payload);
+			nevents++;
 		}
 
-		gettimeofday(&end, NULL);
-
-		end.tv_sec -= start.tv_sec;
-		end.tv_usec -= start.tv_usec;
-		if(end.tv_usec < 0) {
-			end.tv_sec--;
-			end.tv_usec += 1000000;
+		if(delay) {
+			gettimeofday(&end, NULL);
+			diff = ((end.tv_sec - start.tv_sec) * 1000000) +
+				(end.tv_usec - start.tv_usec);
+			if(diff / 1000 >= timeout)
+				break;
 		}
+	} while(nevents > 0);
 
-		delay->tv_sec -= end.tv_sec;
-		delay->tv_nsec -= end.tv_usec * 1000;
-		if(delay->tv_sec < 0)
+	if(delay) {
+		if(diff / 1000 >= timeout) {
 			delay->tv_sec = 0;
-		if(delay->tv_nsec < 0)
 			delay->tv_nsec = 0;
-		timeout = (long)(delay->tv_sec * ZMQ_POLL_MSEC * 1000) + 
-				((delay->tv_nsec / 1000000) * ZMQ_POLL_MSEC);
+		} else {
+			delay->tv_sec = diff / 1000000;
+			diff -= delay->tv_sec * 1000000;
+			delay->tv_nsec = diff > 1 ? diff * 1000 : 0;
+		}
 	}
 
+	//max_timeout = timeout > max_timeout ? timeout : max_timeout;
 	return 0;
 }
 

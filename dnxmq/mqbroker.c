@@ -158,39 +158,24 @@ void parse_sock_directive(json_t * arg, zmq_pollitem_t * pollable, int * noblock
 		zmq_setsockopt(sock, ZMQ_SNDHWM, &sndhwm, sizeof(sndhwm));
 	if(rcvhwm > 0)
 		zmq_setsockopt(sock, ZMQ_RCVHWM, &rcvhwm, sizeof(rcvhwm));
-
-	if(backlog > 0 &&
-		zmq_setsockopt(sock, ZMQ_BACKLOG, &backlog, sizeof(backlog)) != 0) {
-		syslog(LOG_ERR, "Error setting connection backlog for %s: %s",
-			forwhat, zmq_strerror(errno));
-		zmq_close(sock);
-		return NULL;
-	}
-
-	if(maxmsgsize > 0 &&
-		zmq_setsockopt(sock, ZMQ_MAXMSGSIZE, &maxmsgsize, sizeof(maxmsgsize)) != 0) {
-		syslog(LOG_ERR, "Error setting maximum message size for %s: %s",
-			forwhat, zmq_strerror(errno));
-		zmq_close(sock);
-		return NULL;
-	}
-
+	if(backlog > 0)
+		zmq_setsockopt(sock, ZMQ_BACKLOG, &backlog, sizeof(backlog));
+	if(maxmsgsize > 0)
+		zmq_setsockopt(sock, ZMQ_MAXMSGSIZE, &maxmsgsize, sizeof(maxmsgsize));
 	if(accept_filters != NULL && json_is_array(accept_filters)) {
 		size_t i, len = json_array_size(accept_filters);
 		for(i = 0; i < len; i++) {
 			json_t * filterj = json_array_get(accept_filters, i);
 			const char * filter = json_string_value(filterj);
 			if(!filter) {
-				syslog(LOG_ERR, "Filter %i for %s is not a string", i, forwhat);
-				zmq_close(sock);
-				return NULL;
+				syslog(LOG_ERR, "Filter %i is not a string", i);
+				exit(1);
 			}
 			size_t flen = strlen(filter);
 			if(zmq_setsockopt(sock, ZMQ_TCP_ACCEPT_FILTER, filter, flen) != 0) {
-				syslog(LOG_ERR, "Error setting TCP filter %s for %s: %s",
-					filter, forwhat, zmq_strerror(errno));
-				zmq_close(sock);
-				return NULL;
+				syslog(LOG_ERR, "Error setting TCP filter %s: %s",
+					filter, zmq_strerror(errno));
+				exit(1);
 			}
 		}
 	}
