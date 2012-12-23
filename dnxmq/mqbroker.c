@@ -92,7 +92,7 @@ void parse_sock_directive(json_t * arg, zmq_pollitem_t * pollable, int * noblock
 #if ZMQ_VERSION_MAJOR == 2
 	int64_t hwm = 0, swap = 0, affinity = 0;
 #elif ZMQ_VERSION_MAJOR == 3
-	int sndhwm = 0, rcvhwm = 0, maxmsgsize = 0, backlog = 0;
+	int sndhwm = -1, rcvhwm = -1, maxmsgsize = 0, backlog = 0;
 	int64_t affinity = 0;
 	json_t * accept_filters = NULL;
 #endif
@@ -104,7 +104,7 @@ void parse_sock_directive(json_t * arg, zmq_pollitem_t * pollable, int * noblock
 		"subscribe", &subscribe, "hwm", &hwm, "swap", &swap,
 		"affinity", &affinity, "noblock", noblock) != 0)
 #elif ZMQ_VERSION_MAJOR == 3
-	if(json_unpack(arg, "{s:s s?:o s?:o s?:o s?i s?i s?i s?b s?o s?i s?i}", 
+	if(json_unpack(arg, "{s:s s?:o s?:o s?:o s?i s?i s?i s?b s?i s?o s?i}", 
 		"type", &type, "connect", &connect, "bind", &bind,
 		"subscribe", &subscribe, "sndhwm", &sndhwm, "rcvhwm", &rcvhwm,
 		"affinity", &affinity, "noblock", noblock, "backlog", &backlog,
@@ -154,9 +154,9 @@ void parse_sock_directive(json_t * arg, zmq_pollitem_t * pollable, int * noblock
 	if(swap > 0)
 		zmq_setsockopt(sock, ZMQ_SWAP, &swap, sizeof(swap));
 #elif ZMQ_VERSION_MAJOR == 3
-	if(sndhwm > 0)
+	if(sndhwm > -1)
 		zmq_setsockopt(sock, ZMQ_SNDHWM, &sndhwm, sizeof(sndhwm));
-	if(rcvhwm > 0)
+	if(rcvhwm > -1)
 		zmq_setsockopt(sock, ZMQ_RCVHWM, &rcvhwm, sizeof(rcvhwm));
 	if(backlog > 0)
 		zmq_setsockopt(sock, ZMQ_BACKLOG, &backlog, sizeof(backlog));
@@ -219,11 +219,19 @@ void do_forward(void * in, void *out, void *mon, int noblock, int monnoblock) {
 		zmq_msg_t monmsg;
 		zmq_msg_init(&monmsg);
 		zmq_msg_copy(&monmsg, &tmpmsg);
-		zmq_msg_send(&monmsg, mon, flags);
+		if(zmq_msg_send(&monmsg, mon, flags) == -1) {
+			logit(WARN, "Error receiving message: %s", zmq_strerror(errno));
+			zmq_msg_close(&tmpmsg);
+			return;
+		}
 		zmq_msg_close(&monmsg);
 	}
 	flags = (rcvmore ? ZMQ_SNDMORE : 0) | (noblock ? ZMQ_NOBLOCK : 0);
-	zmq_msg_send(&tmpmsg, out, flags);
+	if(zmq_msg_send(&tmpmsg, out, flags) == -1) {
+		logit(WARN, "Error sending message: %s", zmq_strerror(errno));
+		zmq_msg_close(&tmpmsg);
+		return;
+	}
 	zmq_msg_close(&tmpmsg);
 }
 

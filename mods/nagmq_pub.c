@@ -504,6 +504,17 @@ void free_cb(void * ptr, void * hint) {
 	free(ptr);
 }
 
+static int safe_msg_send(zmq_msg_t * msg, void * sock, int flags) {
+	int rc;
+	do {
+		if((rc = zmq_msg_send(msg, sock, flags)) == -1 && errno != EINTR) {
+			syslog(LOG_ERR, "Error publishing event: %s", zmq_strerror(errno));
+			return -1;
+		}
+	} while(rc != 0);
+	return 0;
+}
+
 void process_payload(struct payload * payload) {
 	zmq_msg_t type, dump;
 	int rc;
@@ -530,11 +541,9 @@ void process_payload(struct payload * payload) {
 		header = payload->type;
 
 	zmq_msg_init_data(&type, header, headerlen, free_cb, NULL);
-	rc = (zmq_msg_send(&type, pubext, ZMQ_SNDMORE|ZMQ_NOBLOCK) == -1) ? errno : 0;
+	rc = safe_msg_send(&type, pubext, ZMQ_SNDMORE);
 	zmq_msg_close(&type);
-	if(rc != 0) {
-	//	syslog(LOG_ERR, "Error sending type header: %s",
-	//		zmq_strerror(rc));
+	if(rc == -1) {
 		free(payload->json_buf);
 		free(payload);
 		return;
@@ -542,9 +551,7 @@ void process_payload(struct payload * payload) {
 
 	zmq_msg_init_data(&dump, payload->json_buf, payload->bufused, 
 		free_cb, NULL);
-	if((rc = zmq_msg_send(&dump, pubext, ZMQ_NOBLOCK)) == -1)
-		syslog(LOG_ERR, "Error sending payload: %s",
-			zmq_strerror(errno));
+	safe_msg_send(&dump, pubext, 0);
 	zmq_msg_close(&dump);
 	free(payload);
 }

@@ -176,108 +176,117 @@ void * getsock(char * forwhat, int type) {
 }
 
 void * pullsock = NULL, * reqsock = NULL;
+extern void * pubext;
 
 int handle_timedevent(int which, void * obj) {
 	nebstruct_timed_event_data * data = obj;
 	struct timespec * delay = NULL;
-	struct timeval start, end;
+	struct timeval start;
 	int nevents = 0;
 	long timeout = 0, diff;
-	//static long max_timeout = 0;
 
 	if(which != NEBCALLBACK_TIMED_EVENT_DATA)
 		return ERROR;
-	if(data->type != NEBTYPE_TIMEDEVENT_SLEEP && data->type != NEBTYPE_TIMEDEVENT_EXECUTE)
+	if(data->type != NEBTYPE_TIMEDEVENT_SLEEP)
 		return 0;
 
 	zmq_pollitem_t pollables[2];
-	int pollable_count = 0;
+	memset(pollables, 0, sizeof(pollables));
 	if(pullsock) {
 		pollables[0].socket = pullsock;
 		pollables[0].events = ZMQ_POLLIN;
-		pollable_count++;
 	}
 
 	if(reqsock) {
-		pollables[pollable_count].socket = reqsock;
-		pollables[pollable_count].events = ZMQ_POLLIN;
-		pollable_count++;
+		pollables[1].socket = reqsock;
+		pollables[1].events = ZMQ_POLLIN;
 	}
 
-	if(pollable_count == 0)
-		return 0;
 
-	if(data->type == NEBTYPE_TIMEDEVENT_SLEEP) {
-		delay = (struct timespec*)data->event_data;
-		timeout = (delay->tv_sec * 1000 * ZMQ_POLL_MSEC) +
-			((delay->tv_nsec / 1000000) * ZMQ_POLL_MSEC);
-		gettimeofday(&start, NULL);
-	}
+	delay = (struct timespec*)data->event_data;
+	timeout = (delay->tv_sec * 1000 * ZMQ_POLL_MSEC) +
+		((delay->tv_nsec / 1000000) * ZMQ_POLL_MSEC);
+	gettimeofday(&start, NULL);
 
-	if(zmq_poll(pollables, pollable_count, timeout) < 1) {
-		if(delay) {
-			delay->tv_sec = 0;
-			delay->tv_nsec = 0;
-		}
+	if(zmq_poll(pollables, 2, timeout) < 1) {
+		delay->tv_sec = 0;
+		delay->tv_nsec = 0;
 		return 0;
 	}
-	
+
 	do {
+		struct timeval end;
 		int j;
-		nevents = 0;
-		for(j = 0; j < pollable_count; j++) {
-			int events = 0;
-			size_t evsize = sizeof(events);
-			zmq_getsockopt(pollables[j].socket, ZMQ_EVENTS, &events, &evsize);
-			if(!(events & ZMQ_POLLIN))
+		for(j = 0; j < 2; j++) {
+			if(!(pollables[j].revents & ZMQ_POLLIN))
 				continue;
-			zmq_msg_t payload;
-			zmq_msg_init(&payload);
-			if(zmq_msg_recv(&payload, pollables[j].socket, 0) == -1)
+			zmq_msg_t input;
+			zmq_msg_init(&input);
+			if(zmq_msg_recv(&input, pollables[j].socket, 0) == -1) {
+                		syslog(LOG_ERR, "Error receiving message in sleep handler: %s",
+					zmq_strerror(errno));
 				continue;
+			}
 
 			if(pollables[j].socket == pullsock)
-				process_pull_msg(&payload);
+				process_pull_msg(&input);
 			else if(pollables[j].socket == reqsock)
-				process_req_msg(&payload, reqsock);
-			zmq_msg_close(&payload);
-			nevents++;
+				process_req_msg(&input, reqsock);
+			zmq_msg_close(&input);
 		}
 
-		if(delay) {
-			gettimeofday(&end, NULL);
-			diff = ((end.tv_sec - start.tv_sec) * 1000000) +
-				(end.tv_usec - start.tv_usec);
-			if(diff / 1000 >= timeout)
-				break;
-		}
+		gettimeofday(&end, NULL);
+		diff = ((end.tv_sec - start.tv_sec) * 1000000) +
+			(end.tv_usec - start.tv_usec);
+		if(diff / 1000 >= timeout)
+			break;
 	} while(nevents > 0);
 
-	if(delay) {
-		if(diff / 1000 >= timeout) {
-			delay->tv_sec = 0;
-			delay->tv_nsec = 0;
-		} else {
-			delay->tv_sec = diff / 1000000;
-			diff -= delay->tv_sec * 1000000;
-			delay->tv_nsec = diff > 1 ? diff * 1000 : 0;
-		}
+	if(diff / 1000 >= timeout) {
+		delay->tv_sec = 0;
+		delay->tv_nsec = 0;
+	} else {
+		delay->tv_sec = diff / 1000000;
+		diff -= delay->tv_sec * 1000000;
+		delay->tv_nsec = diff > 1 ? diff * 1000 : 0;
 	}
 
-	//max_timeout = timeout > max_timeout ? timeout : max_timeout;
 	return 0;
 }
 
-extern void * pubext;
+void input_reaper(void * insock) {
+	while(1) {
+		zmq_msg_t input;
+		zmq_msg_init(&input);
+
+		if(zmq_msg_recv(&input, insock, ZMQ_DONTWAIT) == -1) {
+			if(errno == EAGAIN)
+				break;
+			syslog(LOG_ERR, "Error receiving message from command interface: %s",
+				zmq_strerror(errno));
+			continue;
+		}
+
+		if(insock == pullsock)
+			process_pull_msg(&input);
+		else if(insock == reqsock)
+			process_req_msg(&input, reqsock);
+
+		zmq_msg_close(&input);
+	}
+}
 
 int handle_startup(int which, void * obj) {
 	struct nebstruct_process_struct *ps = (struct nebstruct_process_struct *)obj;
 	struct payload * payload;
 	int numthreads = 1, enablepub = 0, enablepull = 0, enablereq = 0;
+	time_t now = ps->timestamp.tv_sec;
+	unsigned long pullinterval = 2, reqinterval = 2;
 
-	if(json_unpack(config, "{ s?:i, s?:{ s:b } s?:{ s:b } s?:{ s:b } }",
+	if(json_unpack(config, "{ s?:i, s?:{ s:b } s?:{ s:b s?i } s?:{ s:b s?i } }",
 		"iothreads", &numthreads, "publish", "enable", &enablepub,
-		"pull", "enable", &enablepull, "reply", "enable", &enablereq) != 0) {
+		"pull", "enable", &enablepull, "interval", &pullinterval,
+		"reply", "enable", &enablereq, "interval", &reqinterval) != 0) {
 		syslog(LOG_ERR, "Parameter error while starting NagMQ");
 		return -1;
 	}
@@ -296,11 +305,20 @@ int handle_startup(int which, void * obj) {
 		if(enablepub && handle_pubstartup() < 0)
 			return -1;
 
-		if(enablepull)
+		if(enablepull) {
 			pullsock = getsock("pull", ZMQ_PULL);
+			schedule_new_event(EVENT_USER_FUNCTION, 1, now, 1, pullinterval,
+				NULL, 1, input_reaper, pullsock, 0);
+		}
 
-		if(enablereq)
+		if(enablereq) {
 			reqsock = getsock("reply", ZMQ_REP);
+			schedule_new_event(EVENT_USER_FUNCTION, 1, now, 1, reqinterval,
+				NULL, 1, input_reaper, reqsock, 0);
+		}
+
+		if(enablepull || enablereq)
+			neb_register_callback(NEBCALLBACK_TIMED_EVENT_DATA, handle, 0, handle_timedevent);
 
 		if(enablepub) {
 			payload = payload_new();
@@ -347,8 +365,6 @@ int nebmodule_init(int flags, char * localargs, nebmodule * lhandle) {
 	handle = lhandle;
 	neb_register_callback(NEBCALLBACK_PROCESS_DATA, lhandle,
 		0, handle_startup);
-	neb_register_callback(NEBCALLBACK_TIMED_EVENT_DATA, lhandle,
-		0, handle_timedevent);
 
 	return 0;
 }
