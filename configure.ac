@@ -10,19 +10,13 @@ AC_ARG_WITH([zmq-headers],
 	[AC_HELP_STRING([--with-zmq-headers],
 		[Override default path to ZMQ headers])],
 	[]
-	[with_zmq_headers=default])
+	[with_zmq_headers=$withval])
 
 AC_ARG_WITH([pcre-config],
 	[AC_HELP_STRING([--with-pcre-config],
 		[Path to PCRE configuration for mqexec filtering])],
 	[pcre_config_prog=$withval])
 AC_PATH_PROG(PCRE_CONFIG, [pcre-config], $pcre_config_prog)
-
-AC_ARG_WITH([timedevent-end],
-	[AC_HELP_STRING([--with-timedevent-end],
-		[Nagios Core is patched to broker end of timed events])],
-	[AC_DEFINE([HAVE_TIMEDEVENT_END], [],
-		[Nagios is patched to broker end of timed events])])
 
 AC_PROG_CC
 AM_PROG_CC_C_O
@@ -31,8 +25,6 @@ AC_PROG_LIBTOOL
 
 AC_CHECK_LIB([zmq], [zmq_socket], [],
 	[AC_MSG_FAILURE([Could not find usable ZMQ library])], [])
-AC_CHECK_LIB([pthread], [pthread_create],[],
-	[AC_MSG_FAILURE([Could not find pthread_create])], [])
 
 AC_HEADER_STDC
 AC_CHECK_HEADERS([ctype.h fcntl.h float.h pthread.h signal.h stdarg.h \

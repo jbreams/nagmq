@@ -652,14 +652,15 @@ static void override_string(const char * in) {
 }
 
 int handle_pubstartup() {
+	double sleeptime = 0.0;
 	pubext = getsock("publish", ZMQ_PUB);
 	if(pubext == NULL)
 		return -1;
 
 	json_t * override = NULL;
 
-	json_unpack(config, "{s:{s?:o}}",
-		"publish", "override", &override);
+	json_unpack(config, "{s:{s?:o s?:f}",
+		"publish", "override", &override, "startupdelay", &sleeptime);
 
 	memset(overrides, 0, sizeof(overrides));
 	if(override) {
@@ -697,6 +698,15 @@ int handle_pubstartup() {
 		0, handle_nagdata);
 	neb_register_callback(NEBCALLBACK_ADAPTIVE_SERVICE_DATA, handle,
 		0, handle_nagdata);
+
+	if(sleeptime > 0) {
+		double integral;
+		struct timespec realsleeptime;
+		double fractional = modf(sleeptime, &integral);
+		realsleeptime.tv_sec = integral;
+		realsleeptime.tv_nsec = fractional * 100000000;
+		nanosleep(&realsleeptime, NULL);
+	}
 	return 0;
 }
 

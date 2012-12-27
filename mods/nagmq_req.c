@@ -866,7 +866,10 @@ static void do_list_hosts(struct payload * po, int expand_lists,
 	if(!expand_lists) {
 		payload_start_object(po, NULL);
 		payload_new_string(po, "type", "host_list");
-		payload_start_array(po, "hosts");
+		if(!payload_start_array(po, "hosts")) {
+			payload_end_object(po);
+			return;
+		}
 	}
 	host * tmp_host = host_list;
 	while(tmp_host) {
@@ -891,7 +894,10 @@ static void do_list_hostgroups(struct payload * po, int expand_lists,
 	if(!expand_lists) {
 		payload_start_object(po, NULL);
 		payload_new_string(po, "type", "hostgroup_list");
-		payload_start_array(po, "hostgroups");
+		if(!payload_start_array(po, "hostgroups")) {
+			payload_end_object(po);
+			return;
+		}
 	}
 	hostgroup * tmp_hostgroup = hostgroup_list;
 	while(tmp_hostgroup) {
@@ -913,7 +919,10 @@ static void do_list_services(struct payload * po, int expand_lists,
 	if(!expand_lists) {
 		payload_start_object(po, NULL);
 		payload_new_string(po, "type", "service_list");
-		payload_start_array(po, "services");
+		if(!payload_start_array(po, "services")) {
+			payload_end_object(po);
+			return;
+		}
 	}
 	service * tmp_svc = service_list;
 	while(tmp_svc) {
@@ -946,7 +955,10 @@ static void do_list_servicegroups(struct payload * po, int expand_lists,
 	if(!expand_lists) {
 		payload_start_object(po, NULL);
 		payload_new_string(po, "type", "servicegroup_list");
-		payload_start_array(po, "servicegroups");
+		if(!payload_start_array(po, "servicegroups")) {
+			payload_end_object(po);
+			return;
+		}
 	}
 	servicegroup * tmp_servicegroup = servicegroup_list;
 	while(tmp_servicegroup) {
