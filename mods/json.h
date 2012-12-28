@@ -1,10 +1,11 @@
+#include <stdint.h>
 
 struct payload {
 	char * type;
 	char * host_name;
 	char * service_description;
 	char * json_buf;
-	char hashed_keys[457];
+	uint32_t hashed_keys[30];
 	char use_hash;
 	size_t buflen, bufused;
 	char keep_auxdata;
