@@ -2,6 +2,7 @@ void process_pull_msg(zmq_msg_t * payload_msg);
 int handle_timedevent(int which, void * obj);
 void free_cb(void * ptr, void * hint);
 void process_req_msg(zmq_msg_t * reqmsg, void * sock);
+void * getsock(char * what, int type, json_t * def);
 
 #ifndef ZMQ_DONTWAIT
 #   define ZMQ_DONTWAIT     ZMQ_NOBLOCK
@@ -13,3 +14,4 @@ void process_req_msg(zmq_msg_t * reqmsg, void * sock);
 #elif ZMQ_VERSION_MAJOR == 3
 #   define ZMQ_POLL_MSEC    1           //  zmq_poll is msec
 #endif
+

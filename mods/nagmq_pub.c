@@ -13,14 +13,12 @@
 #include "naginclude/broker.h"
 #include "naginclude/neberrors.h"
 #include <zmq.h>
+#include <errno.h>
 #include "json.h"
-#include "jansson.h"
 #include "common.h"
 
-extern int errno;
 extern nebmodule * handle;
 void * pubext;
-extern json_t *  config;
 #define OR_HOSTCHECK_INITIATE 0
 #define OR_SERVICECHECK_INITIATE 1
 #define OR_EVENTHANDLER_START 2
@@ -638,8 +636,6 @@ int handle_nagdata(int which, void * obj) {
 	return rc;
 }
 
-void * getsock(char * what, int type);
-
 static void override_string(const char * in) {
 	if(strcasecmp(in, "service_check_initiate") == 0)
 		overrides[OR_SERVICECHECK_INITIATE] = 1;
@@ -651,28 +647,29 @@ static void override_string(const char * in) {
 		overrides[OR_NOTIFICATION_START] = 1;	
 }
 
-int handle_pubstartup() {
-	double sleeptime = 0.0;
-	pubext = getsock("publish", ZMQ_PUB);
+int handle_pubstartup(json_t * def) {
+	pubext = getsock("publish", ZMQ_PUB, def);
 	if(pubext == NULL)
 		return -1;
 
 	json_t * override = NULL;
+	double sleeptime = 0.0;
 
-	json_unpack(config, "{s:{s?:o s?:f}",
-		"publish", "override", &override, "startupdelay", &sleeptime);
+	if(get_values(def,
+		"override", JSON_ARRAY, 0, &override,
+		"startupdelay", JSON_REAL, 0, &sleeptime,
+		NULL) != 0) {
+		syslog(LOG_ERR, "Parameter error during publisher startup");
+		return -1;
+	}
 
 	memset(overrides, 0, sizeof(overrides));
 	if(override) {
-		if(json_is_string(override))
-			override_string(json_string_value(override));
-		else if(json_is_array(override)) {
-			int i;
-			for(i = 0; i < json_array_size(override); i++) {
-				json_t * val = json_array_get(override, i);
-				if(json_is_string(val))
-					override_string(json_string_value(val));
-			}
+		int i;
+		for(i = 0; i < json_array_size(override); i++) {
+			json_t * val = json_array_get(override, i);
+			if(json_is_string(val))
+				override_string(json_string_value(val));
 		}
 	}
 

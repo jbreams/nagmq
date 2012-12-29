@@ -22,6 +22,7 @@ NEB_API_VERSION(CURRENT_NEB_API_VERSION)
 static void * nagmq_handle = NULL;
 void * zmq_ctx;
 nebmodule * handle;
+extern void * pubext;
 json_t * config;
 
 int nebmodule_deinit(int flags, int reason) {
@@ -34,8 +35,9 @@ int nebmodule_deinit(int flags, int reason) {
 int handle_pubstartup();
 void process_payload(struct payload * payload);
 
-void * getsock(char * forwhat, int type) {
-	json_t *connect = NULL, *bind = NULL;
+void * getsock(char * forwhat, int type, json_t * def) {
+	char * connect = NULL, *bind = NULL;
+	json_t *connect_array = NULL, *bind_array = NULL;
 #if ZMQ_VERSION_MAJOR == 2
 	int hwm = 0;
 #else
@@ -43,16 +45,21 @@ void * getsock(char * forwhat, int type) {
 	json_t * accept_filters = NULL;
 #endif
 
+	if(get_values(def,
+		"connect", JSON_STRING, 0, &connect,
+		"connect", JSON_ARRAY, 0, &connect_array,
+		"bind", JSON_STRING, 0, &bind,
+		"bind", JSON_ARRAY, 0, &bind_array,
 #if ZMQ_VERSION_MAJOR == 2
-	if(json_unpack(config, "{ s?: { s?:o s?:o s?:i } }",
-		forwhat, "connect", &connect, "bind", &bind, "hwm", &hwm) != 0) {
+		"hwm", JSON_INTEGER, 0, &hwm,
 #else
-	if(json_unpack(config, "{ s?: { s?:o s?:o s?:i s?:i s?:i s?:i s?:o } }",
-		forwhat, "connect", &connect, "bind", &bind, "sndhwm", &sndhwm,
-		"rcvhwm", &rcvhwm, "backlog", &backlog, "maxmsgsize", &maxmsgsize,
-		"tcpacceptfilters", &accept_filters ) != 0) {
-	
+		"sndhwm", JSON_INTEGER, 0, &sndhwm,
+		"rcvhwm", JSON_INTEGER, 0, &rcvhwm,
+		"backlog", JSON_INTEGER, 0, &backlog,
+		"maxmsgsize", JSON_INTEGER, 0, &maxmsgsize,
+		"tcpacceptfilters", JSON_ARRAY, 0, &accept_filters,	
 #endif
+		NULL) != 0) {
 		syslog(LOG_ERR, "Parameter error while creating socket for %s",
 			forwhat);
 		return NULL;
@@ -109,7 +116,7 @@ void * getsock(char * forwhat, int type) {
 		return NULL;
 	}
 
-	if(accept_filters != NULL && json_is_array(accept_filters)) {
+	if(accept_filters) {
 		size_t i, len = json_array_size(accept_filters);
 		for(i = 0; i < len; i++) {
 			json_t * filterj = json_array_get(accept_filters, i);
@@ -130,44 +137,38 @@ void * getsock(char * forwhat, int type) {
 	}
 #endif
 
-	if(connect) {
-		if(json_is_string(connect) && zmq_connect(sock,
-			json_string_value(connect)) != 0) {
-			syslog(LOG_ERR, "Error connecting %s to %s: %s",
-				forwhat, json_string_value(connect), zmq_strerror(errno));
-			zmq_close(sock);
-			return NULL;
-		} else if(json_is_array(connect)) {
-			size_t i;
-			for(i = 0; i < json_array_size(connect); i++) {
-				json_t * target = json_array_get(connect, i);
-				if(zmq_connect(sock, json_string_value(target)) != 0) {
-					syslog(LOG_ERR, "Error connecting %s to %s: %s",
-						forwhat, json_string_value(target), zmq_strerror(errno));
-					zmq_close(sock);
-					return NULL;
-				}
+	if(connect && zmq_connect(sock, connect) != 0) {
+		syslog(LOG_ERR, "Error connecting %s to %s: %s",
+			forwhat, connect, zmq_strerror(errno));
+		zmq_close(sock);
+		return NULL;
+	} else if(connect_array && !connect) {
+		size_t i;
+		for(i = 0; i < json_array_size(connect_array); i++) {
+			json_t * target = json_array_get(connect_array, i);
+			if(zmq_connect(sock, json_string_value(target)) != 0) {
+				syslog(LOG_ERR, "Error connecting %s to %s: %s",
+					forwhat, json_string_value(target), zmq_strerror(errno));
+				zmq_close(sock);
+				return NULL;
 			}
 		}
 	}
 
-	if(bind) {
-		if(json_is_string(bind) && zmq_bind(sock,
-			json_string_value(bind)) != 0) {
-			syslog(LOG_ERR, "Error binding %s to %s: %s",
-				forwhat, json_string_value(bind), zmq_strerror(errno));
-			zmq_close(sock);
-			return NULL;
-		} else if(json_is_array(bind)) {
-			size_t i;
-			for(i = 0; i < json_array_size(bind); i++) {
-				json_t * target = json_array_get(bind, i);
-				if(zmq_bind(sock, json_string_value(target)) != 0) {
-					syslog(LOG_ERR, "Error binding %s to %s: %s",
-						forwhat, json_string_value(target), zmq_strerror(errno));
-					zmq_close(sock);
-					return NULL;
-				}
+	if(bind && zmq_bind(sock, bind) != 0) {
+		syslog(LOG_ERR, "Error binding %s to %s: %s",
+			forwhat, bind, zmq_strerror(errno));
+		zmq_close(sock);
+		return NULL;
+	} else if(bind_array && !bind) {
+		size_t i;
+		for(i = 0; i < json_array_size(bind_array); i++) {
+			json_t * target = json_array_get(bind_array, i);
+			if(zmq_bind(sock, json_string_value(target)) != 0) {
+				syslog(LOG_ERR, "Error binding %s to %s: %s",
+					forwhat, json_string_value(target), zmq_strerror(errno));
+				zmq_close(sock);
+				return NULL;
 			}
 		}
 	}
@@ -279,20 +280,23 @@ void input_reaper(void * insock) {
 int handle_startup(int which, void * obj) {
 	struct nebstruct_process_struct *ps = (struct nebstruct_process_struct *)obj;
 	struct payload * payload;
-	int numthreads = 1, enablepub = 0, enablepull = 0, enablereq = 0;
 	time_t now = ps->timestamp.tv_sec;
-	unsigned long pullinterval = 2, reqinterval = 2;
-
-	if(json_unpack(config, "{ s?:i, s?:{ s:b } s?:{ s:b s?i } s?:{ s:b s?i } }",
-		"iothreads", &numthreads, "publish", "enable", &enablepub,
-		"pull", "enable", &enablepull, "interval", &pullinterval,
-		"reply", "enable", &enablereq, "interval", &reqinterval) != 0) {
-		syslog(LOG_ERR, "Parameter error while starting NagMQ");
-		return -1;
-	}
 
 	if (ps->type == NEBTYPE_PROCESS_EVENTLOOPSTART) {
-		if(!enablepub && !enablepull && !enablereq)
+		json_t * pubdef = NULL, *pulldef = NULL, *reqdef = NULL;
+		int numthreads = 1;
+
+		if(get_values(config,
+			"iothreads", JSON_INTEGER, 0, &numthreads,
+			"publish", JSON_OBJECT, 0, &pubdef,
+			"pull", JSON_OBJECT, 0, &pulldef,
+			"reply", JSON_OBJECT, 0, &reqdef,
+			NULL) != 0) {
+			syslog(LOG_ERR, "Parameter error while starting NagMQ");
+			return -1;
+		}
+	
+		if(!pubdef && !pulldef && !reqdef)
 			return 0;
 		
 		zmq_ctx = zmq_init(numthreads);
@@ -302,25 +306,35 @@ int handle_startup(int which, void * obj) {
 			return -1;
 		}
 
-		if(enablepub && handle_pubstartup() < 0)
+		if(pubdef && handle_pubstartup(pubdef) < 0)
 			return -1;
 
-		if(enablepull) {
-			pullsock = getsock("pull", ZMQ_PULL);
-			schedule_new_event(EVENT_USER_FUNCTION, 1, now, 1, pullinterval,
+		if(pulldef) {
+			unsigned long interval = 2;
+			get_values(pulldef,
+				"interval", JSON_INTEGER, 0, &interval,
+				NULL);
+			if((pullsock = getsock("pull", ZMQ_PULL, pulldef)) == NULL)
+				return -1;
+			schedule_new_event(EVENT_USER_FUNCTION, 1, now, 1, interval,
 				NULL, 1, input_reaper, pullsock, 0);
 		}
 
-		if(enablereq) {
-			reqsock = getsock("reply", ZMQ_REP);
-			schedule_new_event(EVENT_USER_FUNCTION, 1, now, 1, reqinterval,
+		if(reqdef) {
+			unsigned long interval = 2;
+			get_values(reqdef,
+				"interval", JSON_INTEGER, 0, &interval,
+				NULL);
+			if((reqsock = getsock("reply", ZMQ_REP, reqdef)) == NULL)
+				return -1;
+			schedule_new_event(EVENT_USER_FUNCTION, 1, now, 1, interval,
 				NULL, 1, input_reaper, reqsock, 0);
 		}
 
-		if(enablepull || enablereq)
+		if(pulldef || reqdef)
 			neb_register_callback(NEBCALLBACK_TIMED_EVENT_DATA, handle, 0, handle_timedevent);
 
-		if(enablepub) {
+		if(pubext) { 
 			payload = payload_new();
 			payload_new_string(payload, "type", "eventloopstart");
 			payload_new_timestamp(payload, "timestamp", &ps->timestamp);
@@ -328,7 +342,7 @@ int handle_startup(int which, void * obj) {
 			process_payload(payload);
 		}
 	} else if(ps->type == NEBTYPE_PROCESS_EVENTLOOPEND) {
-		if(enablepub) {
+		if(pubext) {
 			payload = payload_new();
 			payload_new_string(payload, "type", "eventloopend");
 			payload_new_timestamp(payload, "timestamp", &ps->timestamp);
@@ -337,9 +351,9 @@ int handle_startup(int which, void * obj) {
 			zmq_close(pubext);
 		}
 
-		if(enablepull)
+		if(pullsock)
 			zmq_close(pullsock);
-		if(enablereq)
+		if(reqsock)
 			zmq_close(reqsock);
 		zmq_term(zmq_ctx);
 	}

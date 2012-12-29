@@ -3,7 +3,6 @@
 #include <stdio.h>
 #include <time.h>
 #include <syslog.h>
-#include <signal.h>
 #define NSCORE 1
 #include "naginclude/nebstructs.h"
 #include "naginclude/nebcallbacks.h"
@@ -15,8 +14,7 @@
 #include "naginclude/comments.h"
 #include "naginclude/downtime.h"
 #include <zmq.h>
-#include <pthread.h>
-#include "jansson.h"
+#include "json.h"
 #include "common.h"
 
 extern int errno;
@@ -25,8 +23,9 @@ static void process_bulkstate(json_t * payload) {
 	size_t max, i;
 	json_t * statedata;
 
-	statedata = json_object_get(payload, "data");
-	if(!statedata || !json_is_array(statedata)) {
+	if(get_values(payload,
+		"data", JSON_ARRAY, 1, &statedata,
+		NULL) != 0) {
 		json_decref(payload);
 		return;
 	}
@@ -41,37 +40,33 @@ static void process_bulkstate(json_t * payload) {
 		int passive_checks_enabled = -1, event_handler_enabled;
 		int flap_detection_enabled, has_been_checked;
 		time_t last_check, last_state_change, last_notification;
-		json_t *jlong_output = NULL, *jperf_data = NULL;
 		double latency, execution_time;
 
 		json_t * el = json_array_get(statedata, i);
-		if(json_unpack(el, 
-			"{s:s s?:s s:s s?:o s?:o s:i s:i s:i s:b "
-			"s:b s:b s:b s:b s:b s?:b s?:b s:s s:i s:b s:i "
-			"s:f s:f s:i }",
-			"host_name", &host_name,
-			"service_description", &service_description,
-			"plugin_output", &plugin_output,
-			"long_output", &jlong_output,
-			"perf_data", &perf_data,
-			"current_state", &state,
-			"current_attempt", &current_attempt,
-			"state_type", &state_type,
-			"is_flapping", &is_flapping,
-			"notifications_enabled", &notifications_enabled,
-			"checks_enabled", &checks_enabled,
-			"event_handler_enabled", &event_handler_enabled,
-			"flap_detection_enabled", &flap_detection_enabled,
-			"problem_has_been_acknowledged", &acknowledged,
-			"accept_passive_service_checks", &passive_checks_enabled,
-			"accept_passive_host_checks", &passive_checks_enabled,
-			"type", &type,
-			"last_check", &last_check,
-			"has_been_checked", &has_been_checked,
-			"last_state_change", &last_state_change,
-			"latency", &latency,
-			"execution_time", &execution_time,
-			"last_notification", &last_notification) < 0)
+		if(get_values(json_array_get(statedata, i),
+			"host_name", JSON_STRING, 1, &host_name,
+			"service_description", JSON_STRING, 0, &service_description,
+			"plugin_output", JSON_STRING, 1, &plugin_output,
+			"long_output", JSON_STRING, 0, &long_output,
+			"perf_data", JSON_STRING, 0, &perf_data,
+			"current_state", JSON_INTEGER, 1, &state,
+			"current_attempt", JSON_INTEGER, 1, &current_attempt,
+			"state_type", JSON_INTEGER, 1, &state_type,
+			"is_flapping", JSON_TRUE, 1, &is_flapping,
+			"notifications_enabled", JSON_TRUE, 1, &notifications_enabled,
+			"checks_enabled", JSON_TRUE, 1, &checks_enabled,
+			"event_handler_enabled", JSON_TRUE, 1, &event_handler_enabled,
+			"flap_detection_enabled", JSON_TRUE, 1, &flap_detection_enabled,
+			"problem_has_been_acknowledged", JSON_TRUE, 1, &acknowledged,
+			"accept_passive_service_checks", JSON_TRUE, 0, &passive_checks_enabled,
+			"accept_passive_host_checks", JSON_TRUE, 0, &passive_checks_enabled,
+			"type", JSON_STRING, 1, &type,
+			"last_check", JSON_INTEGER, 1, &last_check,
+			"has_been_checked", JSON_TRUE, 1, &has_been_checked,
+			"latency", JSON_REAL, 1, &latency,
+			"execution_time", JSON_REAL, 1, &execution_time,
+			"last_notification", JSON_INTEGER, 1, &last_notification,
+			NULL) != 0)
 			continue;
 
 		if(passive_checks_enabled < 0)
@@ -79,11 +74,6 @@ static void process_bulkstate(json_t * payload) {
 
 		if(strcmp(type, "host") != 0 && strcmp(type, "service") != 0)
 			continue;
-
-		if(jlong_output && json_is_string(jlong_output))
-			long_output = json_string_value(jlong_output);
-		if(jperf_data && json_is_string(jperf_data))
-			perf_data = json_string_value(jperf_data);
 
 		if(service_description) {
 			service * svctarget = find_service(host_name, service_description);
@@ -153,23 +143,25 @@ static void process_bulkstate(json_t * payload) {
 static void process_status(json_t * payload) {
 	char * host_name, *service_description = NULL, *output = NULL;
 	check_result * newcr = NULL, t;
-	struct timeval start, finish;
 
 	init_check_result(&t);
 	t.output_file = NULL;
 	t.output_file_fp = NULL;
-	memset(&start, 0, sizeof(struct timeval));
-	memset(&finish, 0, sizeof(struct timeval));
-	if(json_unpack(payload, "{s:s s:s s?:s s:i s?:{s:i s?:i} s:{s:i s?:i}"
-		"s:i s?:i s?:i s?:i, s?:f, s?:i s?:i *}",
-		"host_name", &host_name, "output", &output, "service_description",
-		&service_description, "return_code", &t.return_code, "start_time",
-		"tv_sec", &start.tv_sec, "tv_usec", &start.tv_usec, "finish_time", 
-		"tv_sec", &finish.tv_sec, "tv_usec", &finish.tv_usec, "check_type",
-		&t.check_type, "check_options", &t.check_options, "scheduled_check",
-		&t.scheduled_check, "reschedule_check", &t.reschedule_check,
-		"latency", &t.latency, "early_timeout", &t.early_timeout,
-		"exited_ok", &t.exited_ok) != 0) {
+	if(get_values(payload,
+		"host_name", JSON_STRING, 1, &host_name,
+		"service_description", JSON_STRING, 0, &service_description,
+		"output", JSON_STRING, 1, &output,
+		"return_code", JSON_INTEGER, 1, &t.return_code,
+		"start_time", JSON_TIMEVAL, 0, &t.start_time,
+		"finish_time", JSON_TIMEVAL, 1, &t.finish_time,
+		"check_type", JSON_INTEGER, 1, &t.check_type,
+		"check_options", JSON_INTEGER, 0, &t.check_options,
+		"scheduled_check", JSON_INTEGER, 0, &t.scheduled_check,
+		"reschedule_check", JSON_INTEGER, 0, &t.reschedule_check,
+		"latency", JSON_REAL, 0, &t.latency,
+		"early_timeout", JSON_INTEGER, 0, &t.early_timeout,
+		"exited_ok", JSON_INTEGER, 0, &t.exited_ok,
+		NULL) != 0) {
 		json_decref(payload);
 		return;
 	}
@@ -185,8 +177,6 @@ static void process_status(json_t * payload) {
 
 	newcr = malloc(sizeof(check_result));
 	memcpy(newcr, &t, sizeof(check_result));
-	memcpy(&newcr->start_time, &start, sizeof(struct timeval));
-	memcpy(&newcr->finish_time, &finish, sizeof(struct timeval));
 	newcr->host_name = strdup(host_name);
 	if(service_target) {
 		newcr->service_description = strdup(service_description);
@@ -206,11 +196,15 @@ static void process_acknowledgement(json_t * payload) {
 	host * host_target = NULL;
 	service * service_target = NULL;
 	json_error_t err;
-	if(json_unpack_ex(payload, &err, 0, "{s:s s?:s s:s s:s s?:i s?:b s?:b}",
-		"host_name", &host_name, "service_description", &service_description,
-		"author_name", &author_name, "comment_data", &comment_data,
-		"acknowledgement_type", &acknowledgement_type, "notify_contacts",
-		&notify_contacts, "persistent_comment", &persistent_comment) != 0) {
+	if(get_values(payload,
+		"host_name", JSON_STRING, 1, &host_name,
+		"service_description", JSON_STRING, 0, &service_description,
+		"author_name", JSON_STRING, 1, &author_name,
+		"comment_data", JSON_STRING, 1, &comment_data,
+		"acknowledgement_type", JSON_INTEGER, 0, &acknowledgement_type,
+		"notify_contacts", JSON_TRUE, 0, &notify_contacts,
+		"persistent_comment", JSON_TRUE, 0, &persistent_comment,
+		NULL) != 0) {
 		json_decref(payload);
 		return;
 	}
@@ -230,19 +224,25 @@ static void process_acknowledgement(json_t * payload) {
 
 static void process_comment(json_t * payload) {
 	char * host_name, *service_description = NULL, *comment_data, *author_name;
-	time_t entry_time = 0, expire_time = 0;
+	time_t expire_time = 0;
 	int persistent = 0, expires = 0;
-	if(json_unpack(payload, "{s:s s?:s s:s s:{s:i} s:b s:b s:i s:s}",
-		"host_name", &host_name, "service_description", &service_description,
-		"comment_data", &comment_data, "timestamp", "tv_sec", &entry_time,
-		"persistent", &persistent, "expires", &expires, "expire_time",
-		&expire_time, "author_name", &author_name) != 0) {
+	struct timeval entry_time;
+	if(get_values(payload,
+		"host_name", JSON_STRING, 1, &host_name,
+		"service_description", JSON_STRING, 0, &service_description,
+		"comment_data", JSON_STRING, 1, &comment_data,
+		"author_name", JSON_STRING, 1, &author_name,
+		"timestampe", JSON_TIMEVAL, 1, &entry_time,
+		"persistent", JSON_TRUE, 1, &persistent,
+		"expires", JSON_TRUE, 1, &expires,
+		"expire_time", JSON_INTEGER, 0, &expire_time,
+		NULL) != 0) {
 		json_decref(payload);
 		return;
 	}
 
 	add_new_comment((service_description==NULL) ? HOST_COMMENT:SERVICE_COMMENT,
-		USER_COMMENT, host_name, service_description, entry_time, author_name,
+		USER_COMMENT, host_name, service_description, entry_time.tv_sec, author_name,
 		comment_data, persistent, COMMENTSOURCE_EXTERNAL, expires, expire_time,
 		NULL);
 	json_decref(payload);
@@ -255,12 +255,18 @@ static void process_downtime(json_t * payload) {
 	int fixed;
 	unsigned long duration = 0, triggered_by = 0, downtimeid;
 
-	if(json_unpack(payload, "{s:s s?:s s:i s:s s:s s:i s:i s:b s:i s:i}",
-		"host_name", &host_name, "service_description", &service_description,
-		"entry_time", &entry_time, "author_name", &author_name, "comment_data",
-		&comment_data, "start_time", &start_time, "end_time", &end_time,
-		"fixed", &fixed, "duration", &duration, "triggered_by",
-		&triggered_by) != 0) {
+	if(get_values(payload,
+		"host_name", JSON_STRING, 1, &host_name,
+		"service_description", JSON_STRING, 0, &service_description,
+		"entry_time", JSON_INTEGER, 1, &entry_time,
+		"author_name", JSON_STRING, 1, &author_name,
+		"comment_data", JSON_STRING, 1, &comment_data,
+		"start_time", JSON_INTEGER, 1, &start_time,
+		"end_time", JSON_INTEGER, 1, &end_time,
+		"fixed", JSON_TRUE, 1, &fixed,
+		"duration", JSON_INTEGER, 1, &duration,
+		"triggered_by", JSON_INTEGER, 0, &triggered_by,
+		NULL) != 0) {
 		json_decref(payload);
 		return;
 	}
@@ -276,13 +282,12 @@ static void process_cmd(json_t * payload) {
 	host * host_target = NULL;
 	service * service_target = NULL;
 	char * host_name = NULL, *service_description = NULL, *cmd_name;
-	char * comment = NULL;
-	time_t start_time = 0;
 
-	if(json_unpack(payload, "{s?:s s:?s s:s s?:s s?:i}",
-		"host_name", &host_name, "service_description", &service_description,
-		"command_name", &cmd_name, "comment", &comment, "start_time",
-		&start_time) != 0) {
+	if(get_values(payload,
+		"host_name", JSON_STRING, 1, &host_name,
+		"service_description", JSON_STRING, 0, &service_description,
+		"command_name", JSON_STRING, 1, &cmd_name,
+		NULL) != 0) {
 		json_decref(payload);
 		return;
 	}
@@ -378,10 +383,12 @@ static void process_cmd(json_t * payload) {
 		(strcmp(cmd_name, "schedule_service_check") == 0&& service_target)) {
 		time_t next_check;
 		int force_execution = 0, freshness_check = 0, orphan_check = 0;
-		if(json_unpack(payload, "{ s:i s?:b s?:b s:?b }",
-			"next_check", &next_check, "force_execution", &force_execution,
-			"freshness_check", &freshness_check, "orphan_check",
-			&orphan_check) != 0) {
+		if(get_values(payload,
+			"next_check", JSON_INTEGER, 1, &next_check,
+			"force_execution", JSON_TRUE, 0, &force_execution,
+			"freshness_check", JSON_TRUE, 0, &freshness_check,
+			"orphan_check", JSON_TRUE, 0, &orphan_check,
+			NULL) != 0) {
 			json_decref(payload);
 			return;
 		}
@@ -402,10 +409,12 @@ static void process_cmd(json_t * payload) {
 		host_target) {
 		int affect_top_host = 0, affect_hosts = 0, affect_services = 0,
 			level = 0;
-		if(json_unpack(payload, "{ s?:b s?:b s?:b s?:i }",
-			"affect_top_host", &affect_top_host, "affect_hosts",
-			&affect_hosts, "affect_services", &affect_services,
-			"level", &level) != 0) {
+		if(get_values(payload,
+			"affect_top_host", JSON_TRUE, 0, &affect_top_host,
+			"affect_hosts", JSON_TRUE, 0, &affect_hosts,
+			"affect_services", JSON_TRUE, 0, &affect_services,
+			"level", JSON_INTEGER, 0, &level,
+			NULL) != 0) {
 			json_decref(payload);
 			return;
 		}
@@ -416,9 +425,16 @@ static void process_cmd(json_t * payload) {
 			enable_and_propagate_notifications(host_target, level,
 				affect_top_host, affect_hosts, affect_services);
 	}
-	else if(strcmp(cmd_name, "delete_downtime") == 0)
+	else if(strcmp(cmd_name, "delete_downtime") == 0) {
+		char * comment = NULL;
+		time_t start_time = 0;
+		get_values(payload,
+			"comment", JSON_STRING, 0, &comment,
+			"start_time", JSON_INTEGER, 0, &start_time,
+			NULL);
 		delete_downtime_by_hostname_service_description_start_time_comment(
 			host_name, service_description, start_time, comment);
+	}
 
 	json_decref(payload);
 }
@@ -429,26 +445,27 @@ void process_pull_msg(zmq_msg_t * payload_msg) {
 	json_t * payload = json_loadb(zmq_msg_data(payload_msg),
 		zmq_msg_size(payload_msg), 0, NULL);
 	if(payload == NULL)
-		return;		
-	
-	if(json_unpack(payload, "{ s:s }", "type", &type) != 0) {
+		return;
+
+	if(get_values(payload,
+		"type", JSON_STRING, 1, &type,
+		NULL) != 0) {
 		json_decref(payload);
 		return;
 	}
-	size_t typelen = strlen(type);
 
-	if(strncmp(type, "command", typelen) == 0)
+	if(strcmp(type, "command") == 0)
 		process_cmd(payload);
-	else if(strncmp(type, "host_check_processed", typelen) == 0 ||
-		strncmp(type, "service_check_processed", typelen) == 0)
+	else if(strcmp(type, "host_check_processed") == 0 ||
+		strcmp(type, "service_check_processed") == 0)
 		process_status(payload);
-	else if(strncmp(type, "acknowledgement", typelen) == 0)
+	else if(strcmp(type, "acknowledgement") == 0)
 		process_acknowledgement(payload);
-	else if(strncmp(type, "comment_add", typelen) == 0)
+	else if(strcmp(type, "comment_add") == 0)
 		process_comment(payload);
-	else if(strncmp(type, "downtime_add", typelen) == 0)
+	else if(strcmp(type, "downtime_add") == 0)
 		process_downtime(payload);
-	else if(strncmp(type, "state_data", typelen) == 0)
+	else if(strcmp(type, "state_data") == 0)
 		process_bulkstate(payload);
 	return;
 }
