@@ -23,6 +23,7 @@ static void * nagmq_handle = NULL;
 void * zmq_ctx;
 nebmodule * handle;
 extern void * pubext;
+extern int daemon_mode;
 json_t * config;
 
 int nebmodule_deinit(int flags, int reason) {
@@ -279,83 +280,92 @@ void input_reaper(void * insock) {
 
 int handle_startup(int which, void * obj) {
 	struct nebstruct_process_struct *ps = (struct nebstruct_process_struct *)obj;
-	struct payload * payload;
 	time_t now = ps->timestamp.tv_sec;
 
-	if (ps->type == NEBTYPE_PROCESS_EVENTLOOPSTART) {
-		json_t * pubdef = NULL, *pulldef = NULL, *reqdef = NULL;
-		int numthreads = 1;
+	switch(ps->type) {
+		case NEBTYPE_PROCESS_START:
+			if(daemon_mode)
+				return 0;
+		case NEBTYPE_PROCESS_DAEMONIZE: {
+			json_t * pubdef = NULL, *pulldef = NULL, *reqdef = NULL;
+			int numthreads = 1;
 
-		if(get_values(config,
-			"iothreads", JSON_INTEGER, 0, &numthreads,
-			"publish", JSON_OBJECT, 0, &pubdef,
-			"pull", JSON_OBJECT, 0, &pulldef,
-			"reply", JSON_OBJECT, 0, &reqdef,
-			NULL) != 0) {
-			syslog(LOG_ERR, "Parameter error while starting NagMQ");
-			return -1;
-		}
-	
-		if(!pubdef && !pulldef && !reqdef)
-			return 0;
+			if(get_values(config,
+				"iothreads", JSON_INTEGER, 0, &numthreads,
+				"publish", JSON_OBJECT, 0, &pubdef,
+				"pull", JSON_OBJECT, 0, &pulldef,
+				"reply", JSON_OBJECT, 0, &reqdef,
+				NULL) != 0) {
+				syslog(LOG_ERR, "Parameter error while starting NagMQ");
+				return -1;
+			}
 		
-		zmq_ctx = zmq_init(numthreads);
-		if(zmq_ctx == NULL) {
-			syslog(LOG_ERR, "Error initialzing ZMQ: %s",
-				zmq_strerror(errno));
-			return -1;
-		}
-
-		if(pubdef && handle_pubstartup(pubdef) < 0)
-			return -1;
-
-		if(pulldef) {
-			unsigned long interval = 2;
-			get_values(pulldef,
-				"interval", JSON_INTEGER, 0, &interval,
-				NULL);
-			if((pullsock = getsock("pull", ZMQ_PULL, pulldef)) == NULL)
+			if(!pubdef && !pulldef && !reqdef)
+				return 0;
+			
+			zmq_ctx = zmq_init(numthreads);
+			if(zmq_ctx == NULL) {
+				syslog(LOG_ERR, "Error initialzing ZMQ: %s",
+					zmq_strerror(errno));
 				return -1;
-			schedule_new_event(EVENT_USER_FUNCTION, 1, now, 1, interval,
-				NULL, 1, input_reaper, pullsock, 0);
-		}
+			}
 
-		if(reqdef) {
-			unsigned long interval = 2;
-			get_values(reqdef,
-				"interval", JSON_INTEGER, 0, &interval,
-				NULL);
-			if((reqsock = getsock("reply", ZMQ_REP, reqdef)) == NULL)
+			if(pubdef && handle_pubstartup(pubdef) < 0)
 				return -1;
-			schedule_new_event(EVENT_USER_FUNCTION, 1, now, 1, interval,
-				NULL, 1, input_reaper, reqsock, 0);
-		}
 
-		if(pulldef || reqdef)
-			neb_register_callback(NEBCALLBACK_TIMED_EVENT_DATA, handle, 0, handle_timedevent);
+			if(pulldef) {
+				unsigned long interval = 2;
+				get_values(pulldef,
+					"interval", JSON_INTEGER, 0, &interval,
+					NULL);
+				if((pullsock = getsock("pull", ZMQ_PULL, pulldef)) == NULL)
+					return -1;
+				schedule_new_event(EVENT_USER_FUNCTION, 1, now, 1, interval,
+					NULL, 1, input_reaper, pullsock, 0);
+			}
 
-		if(pubext) { 
-			payload = payload_new();
-			payload_new_string(payload, "type", "eventloopstart");
-			payload_new_timestamp(payload, "timestamp", &ps->timestamp);
-			payload_finalize(payload);
-			process_payload(payload);
-		}
-	} else if(ps->type == NEBTYPE_PROCESS_EVENTLOOPEND) {
-		if(pubext) {
-			payload = payload_new();
-			payload_new_string(payload, "type", "eventloopend");
-			payload_new_timestamp(payload, "timestamp", &ps->timestamp);
-			payload_finalize(payload);
-			process_payload(payload);
-			zmq_close(pubext);
-		}
+			if(reqdef) {
+				unsigned long interval = 2;
+				get_values(reqdef,
+					"interval", JSON_INTEGER, 0, &interval,
+					NULL);
+				if((reqsock = getsock("reply", ZMQ_REP, reqdef)) == NULL)
+					return -1;
+				schedule_new_event(EVENT_USER_FUNCTION, 1, now, 1, interval,
+					NULL, 1, input_reaper, reqsock, 0);
+			}
 
-		if(pullsock)
-			zmq_close(pullsock);
-		if(reqsock)
-			zmq_close(reqsock);
-		zmq_term(zmq_ctx);
+			if(pulldef || reqdef)
+				neb_register_callback(NEBCALLBACK_TIMED_EVENT_DATA, handle, 0, handle_timedevent);
+			break;
+		}
+		case NEBTYPE_PROCESS_SHUTDOWN:
+			if(pullsock)
+				zmq_close(pullsock);
+			if(reqsock)
+				zmq_close(reqsock);
+			if(pubext)
+				zmq_close(pubext);
+			zmq_term(zmq_ctx);
+			break;
+		case NEBTYPE_PROCESS_EVENTLOOPSTART:
+		case NEBTYPE_PROCESS_EVENTLOOPEND:
+			if(pubext) {
+				struct payload * payload;
+				payload = payload_new();
+				switch(ps->type) {
+					case NEBTYPE_PROCESS_EVENTLOOPSTART:
+						payload_new_string(payload, "type", "eventloopstart");
+						break;
+					case NEBTYPE_PROCESS_EVENTLOOPEND:
+						payload_new_string(payload, "type", "eventloopend");
+						break;
+				}
+				payload_new_timestamp(payload, "timestamp", &ps->timestamp);
+				payload_finalize(payload);
+				process_payload(payload);
+			}
+			break;
 	}
 	return 0;
 }
