@@ -6,12 +6,6 @@ AC_CONFIG_SRCDIR([mods/nagmq_pub.c])
 AC_CONFIG_HEADERS([mods/config.h libev/config.h dnxmq/config.h])
 AC_CONFIG_MACRO_DIR([m4])
 
-AC_ARG_WITH([zmq-headers],
-	[AC_HELP_STRING([--with-zmq-headers],
-		[Override default path to ZMQ headers])],
-	[]
-	[with_zmq_headers=$withval])
-
 AC_ARG_WITH([pcre-config],
 	[AC_HELP_STRING([--with-pcre-config],
 		[Path to PCRE configuration for mqexec filtering])],

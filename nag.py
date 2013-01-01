@@ -346,7 +346,7 @@ def flags_to_str(o):
 
 	if o['problem_has_been_acknowledged']:
 		out += 'A'
-	else
+	else:
 		out += '-'
 	for k in keymap:
 		if not o[k]:
@@ -358,22 +358,21 @@ def flags_to_str(o):
 
 for s in sorted(services.keys()):
 	so = services[s]
-	if(so['host_name'] not in hosts_printed and
-		so['host_name'] in hosts):
+	if(so['host_name'] not in hosts_printed and so['host_name'] in hosts):
 		h = hosts[so['host_name']]
 		if(myverb == 'status'):
 			print "[{0}] {1}: {2} {3}".format(
 				h['host_name'],
-				flags_to_str(h)
-				h['current_state_str'),
+				flags_to_str(h),
+				h['current_state_str'],
 				h['plugin_output'])
 		hosts_printed[h['host_name']] = True
 		if(mynoun):
 			nounmap[mynoun](myverb, h)
 	if(myverb == 'status'):
-		print "[{0}] {1}: {1} {2}".format(
+		print "[{0}] {1}: {2} {3}".format(
 			s,
-			flags_to_str(so)
+			flags_to_str(so),
 			so['current_state_str'],
 			so['plugin_output'])
 	if(mynoun):
@@ -387,8 +386,8 @@ for h in sorted(hosts.keys()):
 	if myverb == 'status':
 		print "[{0}] {1}: {2} {3}".format(
 			ho['host_name'],
-			flags_to_str(ho)
-			ho['current_state'],
+			flags_to_str(ho),
+			ho['current_state_str'],
 			ho['plugin_output'])
 	elif mynoun:
 		nounmap[mynoun](myverb, ho)

@@ -31,14 +31,18 @@ int get_values(json_t * input, ...) {
 		}
 
 		foundtype = json_typeof(found);
-		if((type == JSON_TIMEVAL &&
-			foundtype != JSON_REAL && foundtype != JSON_OBJECT) ||
-			foundtype != type) {
+		if(type == JSON_TIMEVAL &&
+			foundtype != JSON_REAL && foundtype != JSON_OBJECT) {
 			if(required)
 				return -1;
 			key = va_arg(ap, char*);
 			continue;
-		}
+		} else if(type != JSON_TIMEVAL && type != foundtype) {
+			if(required)
+				return -1;
+			key = va_arg(ap, char*);
+			continue;
+		} 
 
 		switch(type) {
 			case JSON_STRING:
@@ -67,13 +71,13 @@ int get_values(json_t * input, ...) {
 				memset(tv, 0, sizeof(struct timeval));
 				double tv_usec;
 				int rc;
-				switch(type) {
+				switch(foundtype) {
 					case JSON_REAL:
 						tv->tv_sec = modf(json_real_value(found), &tv_usec);
 						tv->tv_usec = tv_usec * 100000;
 						break;
 					case JSON_OBJECT:
-						rc = json_unpack(found, "{ s:i s*:i }",
+						rc = json_unpack(found, "{ s:i s?:i }",
 							"tv_sec", &tv->tv_sec,
 							"tv_usec", &tv->tv_usec);
 						if(rc != 0 && required)
