@@ -15,13 +15,10 @@
 #include "naginclude/comments.h"
 #include "naginclude/downtime.h"
 #include <zmq.h>
-#include <pthread.h>
 #include "json.h"
-#include "jansson.h"
 #include "common.h"
 
 extern int errno;
-extern pthread_mutex_t reaper_mutex;
 extern host * host_list;
 extern service * service_list;
 extern hostgroup * hostgroup_list;
@@ -321,15 +318,9 @@ static void parse_host(host * state, struct payload * ret,
 	payload_new_statestr(ret, "last_state_str", state->current_state, state->has_been_checked, 0);
 	payload_new_integer(ret, "last_hard_state", state->last_hard_state);
 	payload_new_statestr(ret, "last_hard_state_str", state->last_hard_state, state->has_been_checked, 0);
-
-	if(payload_has_keys(ret, "plugin_output",
-		"long_plugin_output", "perf_data", NULL) > 0) {
-		pthread_mutex_lock(&reaper_mutex);
-		payload_new_string(ret, "plugin_output", state->plugin_output);
-		payload_new_string(ret, "long_plugin_output", state->long_plugin_output);
-		payload_new_string(ret, "perf_data", state->perf_data);
-		pthread_mutex_unlock(&reaper_mutex);
-	}
+	payload_new_string(ret, "plugin_output", state->plugin_output);
+	payload_new_string(ret, "long_plugin_output", state->long_plugin_output);
+	payload_new_string(ret, "perf_data", state->perf_data);
 	payload_new_integer(ret, "state_type", state->state_type);
 	payload_new_integer(ret, "current_attempt", state->current_attempt);
 	payload_new_integer(ret, "current_event_id", state->current_event_id);
@@ -493,15 +484,9 @@ static void parse_service(service * state, struct payload * ret,
 	payload_new_statestr(ret, "last_state_str", state->last_state, state->has_been_checked, 1);
 	payload_new_integer(ret, "last_hard_state", state->last_hard_state);
 	payload_new_statestr(ret, "last_hard_state_str", state->last_hard_state, state->has_been_checked, 1);
-	
-	if(payload_has_keys(ret, "plugin_output",
-		"long_plugin_output", "perf_data", NULL) > 0) {
-		pthread_mutex_lock(&reaper_mutex);
-		payload_new_string(ret, "plugin_output", state->plugin_output);
-		payload_new_string(ret, "long_plugin_output", state->long_plugin_output);
-		payload_new_string(ret, "perf_data", state->perf_data);
-		pthread_mutex_unlock(&reaper_mutex);
-	}
+	payload_new_string(ret, "plugin_output", state->plugin_output);
+	payload_new_string(ret, "long_plugin_output", state->long_plugin_output);
+	payload_new_string(ret, "perf_data", state->perf_data);
 	payload_new_integer(ret, "state_type", state->state_type);
 	payload_new_integer(ret, "next_check", state->next_check);
 	payload_new_boolean(ret, "should_be_scheduled", state->should_be_scheduled);
@@ -854,10 +839,16 @@ static void do_list_comments(struct payload * po, host * hst, service * svc, con
 }
 
 static void send_msg(void * sock, struct payload * po) {
+	int rc;
 	payload_finalize(po);
 	zmq_msg_t outmsg;
 	zmq_msg_init_data(&outmsg, po->json_buf, po->bufused, free_cb, NULL);
-	zmq_send(sock, &outmsg, 0);
+	do {
+		if((rc = zmq_msg_send(&outmsg, sock, 0)) == -1 && errno != EINTR) {
+			syslog(LOG_ERR, "Error sending state response: %s", zmq_strerror(errno));
+			break;
+		}
+	} while(rc != 0);
 	zmq_msg_close(&outmsg);
 	if(po->type)
 		free(po->type);
@@ -873,7 +864,10 @@ static void do_list_hosts(struct payload * po, int expand_lists,
 	if(!expand_lists) {
 		payload_start_object(po, NULL);
 		payload_new_string(po, "type", "host_list");
-		payload_start_array(po, "hosts");
+		if(!payload_start_array(po, "hosts")) {
+			payload_end_object(po);
+			return;
+		}
 	}
 	host * tmp_host = host_list;
 	while(tmp_host) {
@@ -898,7 +892,10 @@ static void do_list_hostgroups(struct payload * po, int expand_lists,
 	if(!expand_lists) {
 		payload_start_object(po, NULL);
 		payload_new_string(po, "type", "hostgroup_list");
-		payload_start_array(po, "hostgroups");
+		if(!payload_start_array(po, "hostgroups")) {
+			payload_end_object(po);
+			return;
+		}
 	}
 	hostgroup * tmp_hostgroup = hostgroup_list;
 	while(tmp_hostgroup) {
@@ -920,7 +917,10 @@ static void do_list_services(struct payload * po, int expand_lists,
 	if(!expand_lists) {
 		payload_start_object(po, NULL);
 		payload_new_string(po, "type", "service_list");
-		payload_start_array(po, "services");
+		if(!payload_start_array(po, "services")) {
+			payload_end_object(po);
+			return;
+		}
 	}
 	service * tmp_svc = service_list;
 	while(tmp_svc) {
@@ -953,7 +953,10 @@ static void do_list_servicegroups(struct payload * po, int expand_lists,
 	if(!expand_lists) {
 		payload_start_object(po, NULL);
 		payload_new_string(po, "type", "servicegroup_list");
-		payload_start_array(po, "servicegroups");
+		if(!payload_start_array(po, "servicegroups")) {
+			payload_end_object(po);
+			return;
+		}
 	}
 	servicegroup * tmp_servicegroup = servicegroup_list;
 	while(tmp_servicegroup) {
@@ -991,10 +994,12 @@ void process_req_msg(zmq_msg_t * reqmsg, void * sock) {
 	char * host_name = NULL, *service_description = NULL;
 	char * hostgroup_name = NULL, *servicegroup_name = NULL;
 	char * contact_name = NULL, *contactgroup_name = NULL;
-	char * timeperiod_name = NULL;
+	char * timeperiod_name = NULL, *list_services_str = NULL;
 	int include_services = 0, include_hosts = 0, include_contacts = 0;
-	int list_hosts = 0, expand_lists = 0, list_hostgroups = 0, list_servicegroups = 0;
-	json_t * list_services = NULL, *keys = NULL;
+	int list_hosts = 0, expand_lists = 0, list_hostgroups = 0;
+	int list_servicegroups = 0, list_services_bool = 0;
+	json_t *keys = NULL;
+	
 	json_error_t err;
 	struct payload * po;
 	contact * for_user = NULL;
@@ -1012,25 +1017,28 @@ void process_req_msg(zmq_msg_t * reqmsg, void * sock) {
 		return;
 	}
 
-	if(json_unpack_ex(req, &err, 0,
-		"{ s?:s s?:s s?:s s?:s s?:s s?:s s?:b s?:b"
-		" s?:b s?:b s?:o s?:b s?:o s?:s s?:s s?:b s?:b }",
-		"host_name", &host_name, "service_description",
-		&service_description, "hostgroup_name", &hostgroup_name,
-		"servicegroup_name", &servicegroup_name,
-		"contact_name", &contact_name, "contactgroup_name",
-		&contactgroup_name, "include_services", &include_services,
-		"include_hosts", &include_hosts, "include_contacts",
-		&include_contacts, "list_hosts", &list_hosts, 
-		"list_services", &list_services,
-		"expand_lists", &expand_lists, "keys", &keys,
-		"timeperiod_name", &timeperiod_name,
-		"for_user", &for_username,
-		"list_hostgroups", &list_hostgroups,
-		"list_servicegroups", &list_servicegroups) != 0) {
+	if(get_values(req,
+		"host_name", JSON_STRING, 0, &host_name,
+		"service_description", JSON_STRING, 0, &service_description,
+		"hostgroup_name", JSON_STRING, 0, &hostgroup_name,
+		"servicegroup_name", JSON_STRING, 0, &servicegroup_name,
+		"contact_name", JSON_STRING, 0, &contact_name,
+		"contactgroup_name", JSON_STRING, 0, &contactgroup_name,
+		"include_services", JSON_TRUE, 0, &include_services,
+		"include_hosts", JSON_TRUE, 0, &include_hosts,
+		"include_contacts", JSON_TRUE, 0, &include_contacts,
+		"list_hosts", JSON_TRUE, 0, &list_hosts,
+		"list_services", JSON_TRUE, 0, &list_services_bool,
+		"list_services", JSON_STRING, 0, &list_services_str,
+		"expand_lists", JSON_TRUE, 0, &expand_lists,
+		"keys", JSON_ARRAY, 0, &keys,
+		"timeperiod_name", JSON_STRING, 0, &timeperiod_name,
+		"for_user", JSON_STRING, 0, &for_username,
+		"list_hostgroups", JSON_TRUE, 0, &list_hostgroups,
+		"list_servicegroups", JSON_TRUE, 0, &list_servicegroups,
+		NULL) != 0) {
 		json_decref(req);
-		err_msg(po, "Error parsing request", "text", err.text, 
-			"source", err.source, NULL);
+		err_msg(po, "Error unpacking request", NULL);
 		send_msg(sock, po);
 		return;
 	}
@@ -1042,7 +1050,7 @@ void process_req_msg(zmq_msg_t * reqmsg, void * sock) {
 		return;
 	}
 
-	if(keys != NULL && json_is_array(keys)) {
+	if(keys) {
 		int i;
 		for(i = 0; i < json_array_size(keys); i++) {
 			json_t * keytmp = json_array_get(keys, i);
@@ -1055,10 +1063,9 @@ void process_req_msg(zmq_msg_t * reqmsg, void * sock) {
 	if(list_hosts)
 		do_list_hosts(po, expand_lists, include_services, include_contacts, for_user);
 
-	if(json_is_string(list_services) || json_is_true(list_services))
+	if(list_services_bool || list_services_str)
 		do_list_services(po, expand_lists, include_hosts, include_contacts,
-			json_is_string(list_services) ?
-			json_string_value(list_services) : NULL, for_user);
+			list_services_str, for_user);
 
 	if(list_hostgroups)
 		do_list_hostgroups(po, expand_lists, include_hosts, for_user);
@@ -1151,37 +1158,4 @@ void process_req_msg(zmq_msg_t * reqmsg, void * sock) {
 end:
 	json_decref(req);
 	send_msg(sock, po);
-}
-
-void * req_thread(void * zmq_ctx) {
-	int rc;
-	sigset_t signal_set;
-	sigfillset(&signal_set);
-	pthread_sigmask(SIG_BLOCK, &signal_set, NULL);
-	void * intsock = zmq_socket(zmq_ctx, ZMQ_REP);
-	if(intsock == NULL)
-		return NULL;
-	zmq_connect(intsock, "inproc://nagmq_req_bus");
-
-	while(1) {
-		zmq_msg_t payload;
-		zmq_msg_init(&payload);
-		
-		if((rc = zmq_recv(intsock, &payload, 0)) != 0) {
-			rc = errno;
-			if(rc == ETERM)
-				break;
-			else if(rc == EINTR)
-				continue;
-			else
-				syslog(LOG_ERR, "Error receiving for req events! %s",
-					zmq_strerror(rc));
-				break;
-		}
-
-		process_req_msg(&payload, intsock);
-		zmq_msg_close(&payload);
-	}
-
-	zmq_close(intsock);
 }

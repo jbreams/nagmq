@@ -1,14 +1,18 @@
+#include <stdint.h>
+#include "jansson.h"
 
 struct payload {
 	char * type;
 	char * host_name;
 	char * service_description;
 	char * json_buf;
-	char hashed_keys[457];
+	uint32_t hashed_keys[30];
 	char use_hash;
 	size_t buflen, bufused;
 	char keep_auxdata;
 };
+
+#define JSON_TIMEVAL (((int)JSON_NULL) + 1)
 
 struct payload * payload_new();
 void adjust_payload_len(struct payload * po, size_t len);
@@ -27,3 +31,4 @@ void payload_end_array(struct payload * po);
 int payload_start_object(struct payload * po, char * key);
 void payload_end_object(struct payload * po);
 int payload_has_keys(struct payload * po, ...);
+int get_values(json_t * input, ...);

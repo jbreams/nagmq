@@ -13,13 +13,12 @@
 #include "naginclude/broker.h"
 #include "naginclude/neberrors.h"
 #include <zmq.h>
+#include <errno.h>
 #include "json.h"
-#include "jansson.h"
+#include "common.h"
 
-extern int errno;
 extern nebmodule * handle;
 void * pubext;
-extern json_t *  config;
 #define OR_HOSTCHECK_INITIATE 0
 #define OR_SERVICECHECK_INITIATE 1
 #define OR_EVENTHANDLER_START 2
@@ -503,6 +502,17 @@ void free_cb(void * ptr, void * hint) {
 	free(ptr);
 }
 
+static int safe_msg_send(zmq_msg_t * msg, void * sock, int flags) {
+	int rc;
+	do {
+		if((rc = zmq_msg_send(msg, sock, flags)) == -1 && errno != EINTR) {
+			syslog(LOG_ERR, "Error publishing event: %s", zmq_strerror(errno));
+			return -1;
+		}
+	} while(rc != 0);
+	return 0;
+}
+
 void process_payload(struct payload * payload) {
 	zmq_msg_t type, dump;
 	int rc;
@@ -529,11 +539,9 @@ void process_payload(struct payload * payload) {
 		header = payload->type;
 
 	zmq_msg_init_data(&type, header, headerlen, free_cb, NULL);
-	rc = (zmq_send(pubext, &type, ZMQ_SNDMORE|ZMQ_NOBLOCK) == 0) ? 0 : errno;
+	rc = safe_msg_send(&type, pubext, ZMQ_SNDMORE);
 	zmq_msg_close(&type);
-	if(rc != 0) {
-	//	syslog(LOG_ERR, "Error sending type header: %s",
-	//		zmq_strerror(rc));
+	if(rc == -1) {
 		free(payload->json_buf);
 		free(payload);
 		return;
@@ -541,9 +549,7 @@ void process_payload(struct payload * payload) {
 
 	zmq_msg_init_data(&dump, payload->json_buf, payload->bufused, 
 		free_cb, NULL);
-	if((rc = zmq_send(pubext, &dump, ZMQ_NOBLOCK)) != 0)
-		syslog(LOG_ERR, "Error sending payload: %s",
-			zmq_strerror(errno));
+	safe_msg_send(&dump, pubext, 0);
 	zmq_msg_close(&dump);
 	free(payload);
 }
@@ -630,8 +636,6 @@ int handle_nagdata(int which, void * obj) {
 	return rc;
 }
 
-void * getsock(char * what, int type);
-
 static void override_string(const char * in) {
 	if(strcasecmp(in, "service_check_initiate") == 0)
 		overrides[OR_SERVICECHECK_INITIATE] = 1;
@@ -643,27 +647,29 @@ static void override_string(const char * in) {
 		overrides[OR_NOTIFICATION_START] = 1;	
 }
 
-int handle_pubstartup() {
-	pubext = getsock("publish", ZMQ_PUB);
+int handle_pubstartup(json_t * def) {
+	pubext = getsock("publish", ZMQ_PUB, def);
 	if(pubext == NULL)
 		return -1;
 
 	json_t * override = NULL;
+	double sleeptime = 0.0;
 
-	json_unpack(config, "{s:{s?:o}}",
-		"publish", "override", &override);
+	if(get_values(def,
+		"override", JSON_ARRAY, 0, &override,
+		"startupdelay", JSON_REAL, 0, &sleeptime,
+		NULL) != 0) {
+		syslog(LOG_ERR, "Parameter error during publisher startup");
+		return -1;
+	}
 
 	memset(overrides, 0, sizeof(overrides));
 	if(override) {
-		if(json_is_string(override))
-			override_string(json_string_value(override));
-		else if(json_is_array(override)) {
-			int i;
-			for(i = 0; i < json_array_size(override); i++) {
-				json_t * val = json_array_get(override, i);
-				if(json_is_string(val))
-					override_string(json_string_value(val));
-			}
+		int i;
+		for(i = 0; i < json_array_size(override); i++) {
+			json_t * val = json_array_get(override, i);
+			if(json_is_string(val))
+				override_string(json_string_value(val));
 		}
 	}
 
@@ -689,6 +695,15 @@ int handle_pubstartup() {
 		0, handle_nagdata);
 	neb_register_callback(NEBCALLBACK_ADAPTIVE_SERVICE_DATA, handle,
 		0, handle_nagdata);
+
+	if(sleeptime > 0) {
+		double integral;
+		struct timespec realsleeptime;
+		double fractional = modf(sleeptime, &integral);
+		realsleeptime.tv_sec = integral;
+		realsleeptime.tv_nsec = fractional * 100000000;
+		nanosleep(&realsleeptime, NULL);
+	}
 	return 0;
 }
 

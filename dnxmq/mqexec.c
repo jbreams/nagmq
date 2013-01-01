@@ -11,11 +11,13 @@
 #include <zmq.h>
 #include <jansson.h>
 #include <syslog.h>
+#include <sys/types.h>
 #ifdef HAVE_PCRE
 #include <pcre.h>
 #else
 #include <regex.h>
 #endif
+#include "zmq3compat.h"
 
 #ifndef MAX_PLUGIN_OUTPUT_LENGTH
 #define MAX_PLUGIN_OUTPUT_LENGTH 8192
@@ -39,10 +41,40 @@ struct child_job {
 	struct timeval start;
 	int service;
 	int timeout;
+	pid_t pid;
 	ev_io io;
-	ev_child child;
 	ev_timer timer;
+	struct child_job * next;
+	char * host_name;
+	char * service_description;
+	char * type;
 };
+
+struct child_job * runningtable[2048];
+
+void add_child(struct child_job * job) {
+	uint32_t hash = job->pid * 0x9e370001UL;
+	hash >>= 21;
+	job->next = runningtable[hash];
+	runningtable[hash] = job;
+}
+
+struct child_job * get_child(pid_t pid) {
+	uint32_t hash = pid * 0x9e370001UL;
+	hash >>= 21; //(32 bits - 11)
+	struct child_job * ret = runningtable[hash], *last = NULL;
+	while(ret && ret->pid != pid) {
+		last = ret;
+		ret = ret->next;
+	}
+	if(!ret)
+		return NULL;
+	if(last == NULL)
+		runningtable[hash] = ret->next;
+	else
+		last->next = ret->next;
+	return ret; 
+}
 
 struct filter {
 #ifdef HAVE_PCRE
@@ -205,7 +237,7 @@ void obj_for_ending(struct child_job * j, const char * output,
 		"check_options", "scheduled_check", "reschedule_check",
 		"latency", "early_timeout", "check_type", NULL };
 	struct timeval finish;
-	int i;
+	int i, rc;
 
 	if(j->start.tv_sec == 0)
 		gettimeofday(&j->start, NULL);
@@ -225,11 +257,18 @@ void obj_for_ending(struct child_job * j, const char * output,
 			json_object_set(jout, keys[i], val);
 	}
 
+	logit(DEBUG, "Sending result for %s %s: %s %i", j->host_name,
+		j->service_description, output, return_code);
 	char * strout= json_dumps(jout, JSON_COMPACT);
 	json_decref(jout);
-
 	zmq_msg_init_data(&outmsg, strout, strlen(strout), free_cb, NULL);
-	zmq_send(pushsock, &outmsg, 0);
+	do {
+		rc = zmq_msg_send(&outmsg, pushsock, 0);
+		if(rc == -1 && errno != EINTR) {
+			logit(ERR, "Error sending message: %s", zmq_strerror(errno));
+			break;
+		}
+	} while(rc != 0);
 	zmq_msg_close(&outmsg);
 }
 
@@ -258,19 +297,17 @@ void child_timeout_cb(struct ev_loop * loop, ev_timer * t, int event) {
 		ev_timer_stop(loop, t);
 	ev_io_stop(loop, &j->io);
 	close(j->io.fd);
-	if(ev_is_active(&j->child)) {
-		if(j->child.pid)
-			kill(j->child.pid, SIGKILL);
+	if(get_child(j->pid)) {
+		kill(j->pid, SIGKILL);
 	}
-	ev_child_stop(loop, &j->child);
 
 	if(j->service >= 0) {
 		obj_for_ending(j, "Check timed out", 3, 1, 1);
 		logit(DEBUG, "Child %d timed out. Sending timeout message upstream",
-			j->child.pid);
+			j->pid);
 	} else
 		logit(DEBUG, "Non-check child %d timed out",
-			j->child.pid, j->buffer);
+			j->pid, j->buffer);
 
 	json_decref(j->input);
 	free(j);
@@ -279,9 +316,10 @@ void child_timeout_cb(struct ev_loop * loop, ev_timer * t, int event) {
 }
 
 void child_end_cb(struct ev_loop * loop, ev_child * c, int event) {
-	struct child_job * j = (struct child_job*)c->data;
+	struct child_job * j = get_child(c->rpid);
+	if(!j)
+		return;
 
-	ev_child_stop(loop, c);
 	ev_timer_stop(loop, &j->timer);
 	if(ev_is_active(&j->io)) {
 		child_io_cb(loop, &j->io, EV_READ);
@@ -308,7 +346,7 @@ void child_end_cb(struct ev_loop * loop, ev_child * c, int event) {
 void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 	json_t * input;
 	struct child_job * j;
-	char * type, *command_line;
+	char * type, *command_line, *hostname = NULL, *svcdesc = NULL;
 	json_error_t err;
 	int fds[2];
 	pid_t pid;
@@ -322,9 +360,10 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 		return;
 	}
 
-	if(json_unpack(input, "{ s:s s:s s?:i }",
+	if(json_unpack(input, "{ s:s s:s s?:i s?:s s?:s }",
 		"type", &type, "command_line", &command_line,
-		"timeout", &timeout) != 0) {
+		"timeout", &timeout, "host_name", &hostname,
+		"service_description", &svcdesc) != 0) {
 		logit(ERR, "Error unpacking JSON payload during kickoff");
 		json_decref(input);
 		return;
@@ -334,6 +373,9 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 		json_decref(input);
 		return;
 	}
+
+	if(!svcdesc)
+		svcdesc = "(none)";
 
 	logit(DEBUG, "Received job from upstream: %s %s",
 		type, command_line);
@@ -347,6 +389,9 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 	else
 		j->service = -1;
 	j->input = input;
+	j->type = type;
+	j->host_name = hostname;
+	j->service_description = svcdesc;
 
 	if(pipe(fds) < 0) {
 		logit(ERR, "Error creating pipe for %s: %s",
@@ -392,6 +437,8 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 		free(j);
 		return;
 	}
+	j->pid = pid;
+	add_child(j);
 	close(fds[1]);
 
 	if(timeout > 0) {
@@ -401,39 +448,24 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 		j->timeout = timeout;
 	}
 	
-	logit(DEBUG, "Kicked off %d", pid);
-	ev_child_init(&j->child, child_end_cb, pid, 0);
-	j->child.data = j;
-	ev_child_start(loop, &j->child);
+	logit(DEBUG, "Kicked off %d for %s %s", pid, hostname, svcdesc);
 	runningjobs++;
 }
 
 void recv_job_cb(struct ev_loop * loop, ev_io * i, int event) {
-	uint32_t events = ZMQ_POLLIN;
-	size_t evs = sizeof(events);
-
 	while(1) {
-		int rc = zmq_getsockopt(pullsock, ZMQ_EVENTS, &events, &evs);
-		if(rc < 0) {
-			if(errno == EINTR)
-				continue;
-			else if(errno == ETERM)
-				break;
-			else {
-				logit(ERR, "Error getting events from message bus: %s",
-					zmq_strerror(errno));
-				break;
-			}
-		}
-		if(!(events & ZMQ_POLLIN))
-			break;
-
 		zmq_msg_t inmsg;
+#if ZMQ_VERSION_MAJOR == 2
 		int64_t rcvmore = 0;
+#elif ZMQ_VERSION_MAJOR == 3
+		int rcvmore = 0;
+#endif
 		size_t rms = sizeof(rcvmore);
 
 		zmq_msg_init(&inmsg);
-		if(zmq_recv(i->data, &inmsg, 0) != 0) {
+		if(zmq_msg_recv(&inmsg, i->data, ZMQ_DONTWAIT) == -1) {
+			if(errno == EAGAIN)
+				break;
 			logit(ERR, "Error receiving message from broker %s",
 				zmq_strerror(errno));
 			continue;
@@ -442,12 +474,7 @@ void recv_job_cb(struct ev_loop * loop, ev_io * i, int event) {
 		zmq_getsockopt(i->data, ZMQ_RCVMORE, &rcvmore, &rms);
 		if(rcvmore) {
 			zmq_msg_close(&inmsg);
-			zmq_msg_init(&inmsg);
-			if(zmq_recv(i->data, &inmsg, 0) != 0) {
-				logit(ERR, "Error receiving message from broker %s",
-					zmq_strerror(errno));
-				continue;
-			}
+			continue;
 		}
 
 		do_kickoff(loop, &inmsg);
@@ -515,6 +542,7 @@ void handle_end(struct ev_loop * loop, ev_signal * w, int revents) {
 
 int main(int argc, char ** argv) {
 	ev_signal termhandler, huphandler;
+	ev_child child_handler;
 	struct ev_loop * loop;
 	json_t * jobs = NULL, * results, *publisher = NULL;
 	int pullfd = -1, i, daemonize = 0, iothreads = 1;
@@ -638,7 +666,10 @@ int main(int argc, char ** argv) {
 	ev_signal_start(loop, &termhandler);
 	ev_signal_init(&huphandler, handle_end, SIGHUP);
 	ev_signal_start(loop, &huphandler);
+	ev_child_init(&child_handler, child_end_cb, 0, 0);
+	ev_child_start(loop, &child_handler); 
 
+	memset(runningtable, 0, sizeof(runningtable));
 	logit(INFO, "Starting DNXMQ event loop");
 	ev_run(loop, 0);
 	logit(INFO, "DNXMQ event loop terminated");
