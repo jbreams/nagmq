@@ -30,7 +30,6 @@ Compilation and Installation
 
 Compile this from the Git repo by running::
 
-        $ git checkout v1.2.9
 	$ autoreconf -i
 	$ ./configure
 	$ make
@@ -58,13 +57,11 @@ one address, list them as an array.::
 		},  
 		"pull": {
 			"enable": true,
-			"bind": "ipc:///var/nagios/nagmqcommands.sock",
-			"threads": 2
+			"bind": "ipc:///var/nagios/nagmqcommands.sock"
 		},  
 		"reply": {
 			"enable": true,
-			"bind": "ipc:///var/nagios/nagmqstate.sock",
-			"threads": 2
+			"bind": "ipc:///var/nagios/nagmqstate.sock"
 		},  
    		"executor": {
     			"filter": { 
