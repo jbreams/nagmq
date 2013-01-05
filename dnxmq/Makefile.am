@@ -1,3 +1,5 @@
+EXTRA_DIST = fakeworker.py zmq3compat.h
+
 sbin_PROGRAMS = mqexec mqbroker
 
 mqexec_SOURCES = mqexec.c ../libev/ev.c
