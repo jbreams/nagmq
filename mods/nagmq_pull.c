@@ -65,6 +65,7 @@ static void process_bulkstate(json_t * payload) {
 			"latency", JSON_REAL, 1, &latency,
 			"execution_time", JSON_REAL, 1, &execution_time,
 			"last_notification", JSON_INTEGER, 1, &last_notification,
+			"last_state_change", JSON_INTEGER, 1, &last_state_change,
 			NULL) != 0)
 			continue;
 
