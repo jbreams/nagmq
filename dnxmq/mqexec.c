@@ -117,13 +117,13 @@ void logit(int level, char * fmt, ...) {
 }
 
 int parse_filter(json_t * in, int or) {
-	struct filter * newfilt = malloc(sizeof(struct filter));
-	memset(newfilt, 0, sizeof(struct filter));
 	if(json_is_object(in)) {
 		char * field = NULL;
 		char * match = NULL;
 		int icase = 0, dotall = 0;
 		json_t * orobj = NULL;
+		struct filter * newfilt = malloc(sizeof(struct filter));
+		memset(newfilt, 0, sizeof(struct filter));
 		if(json_unpack(in, "{ s?:s s:s s?:o s?:b s?:b s?:b s?:b }",
 			"match", &match, "field", &field, "or", &orobj,
 			"caseless", &icase, "dotall", &dotall,
