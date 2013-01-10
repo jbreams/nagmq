@@ -53,11 +53,7 @@ int get_values(json_t * input, ...) {
 				*((json_t**)uncast) = found;
 				break;
 			case JSON_INTEGER:
-#if JSON_INTEGER_IS_LONG_LONG
-				*((long long*)uncast) = json_integer_value(found);
-#else
-				*((long*)uncast) = json_integer_value(found);
-#endif
+				*((int*)uncast) = json_integer_value(found);
 				break;
 			case JSON_REAL:
 				*((double*)uncast) = json_real_value(found);
