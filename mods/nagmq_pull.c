@@ -42,7 +42,6 @@ static void process_bulkstate(json_t * payload) {
 		time_t last_check, last_state_change, last_notification;
 		double latency, execution_time;
 
-		json_t * el = json_array_get(statedata, i);
 		if(get_values(json_array_get(statedata, i),
 			"host_name", JSON_STRING, 1, &host_name,
 			"service_description", JSON_STRING, 0, &service_description,
