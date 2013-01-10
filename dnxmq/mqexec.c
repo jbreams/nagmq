@@ -350,7 +350,7 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 	json_error_t err;
 	int fds[2];
 	pid_t pid;
-	int rc, timeout = 0;
+	int timeout = 0;
 
 	input = json_loadb(zmq_msg_data(inmsg), zmq_msg_size(inmsg), 0, &err);
 	zmq_msg_close(inmsg);
@@ -421,7 +421,6 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 		exit(0);
 #else
 		execl("/bin/sh", "sh", "-c", command_line, NULL);
-		rc = errno;
 		printf("Error executing shell for %s: %m", command_line);
 		exit(127);
 #endif
