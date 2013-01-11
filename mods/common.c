@@ -207,7 +207,6 @@ int handle_timedevent(int which, void * obj) {
 		pollables[1].events = ZMQ_POLLIN;
 	}
 
-
 	delay = (struct timespec*)data->event_data;
 	timeout = (delay->tv_sec * 1000 * ZMQ_POLL_MSEC) +
 		((delay->tv_nsec / 1000000) * ZMQ_POLL_MSEC);
@@ -236,7 +235,7 @@ int handle_timedevent(int which, void * obj) {
 			if(pollables[j].socket == pullsock)
 				process_pull_msg(&input);
 			else if(pollables[j].socket == reqsock)
-				process_req_msg(&input, reqsock);
+				process_req_msg(&input);
 			zmq_msg_close(&input);
 		}
 
@@ -277,7 +276,7 @@ void input_reaper(void * insock) {
 		if(insock == pullsock)
 			process_pull_msg(&input);
 		else if(insock == reqsock)
-			process_req_msg(&input, reqsock);
+			process_req_msg(&input);
 
 		zmq_msg_close(&input);
 	}

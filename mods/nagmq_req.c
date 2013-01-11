@@ -23,6 +23,7 @@ extern host * host_list;
 extern service * service_list;
 extern hostgroup * hostgroup_list;
 extern servicegroup * servicegroup_list;
+extern void * reqsock;
 
 static void parse_service(service * state, struct payload * ret,
 	int include_host, int include_contacts);
@@ -838,13 +839,13 @@ static void do_list_comments(struct payload * po, host * hst, service * svc, con
 	}
 }
 
-static void send_msg(void * sock, struct payload * po) {
+static void send_msg(struct payload * po) {
 	int rc;
 	payload_finalize(po);
 	zmq_msg_t outmsg;
 	zmq_msg_init_data(&outmsg, po->json_buf, po->bufused, free_cb, NULL);
 	do {
-		if((rc = zmq_msg_send(&outmsg, sock, 0)) == -1 && errno != EINTR) {
+		if((rc = zmq_msg_send(&outmsg, reqsock, 0)) == -1 && errno != EINTR) {
 			syslog(LOG_ERR, "Error sending state response: %s", zmq_strerror(errno));
 			break;
 		}
@@ -989,7 +990,7 @@ static void err_msg(struct payload * po, char * msg, ...) {
 	payload_end_object(po);
 }
 
-void process_req_msg(zmq_msg_t * reqmsg, void * sock) {
+void process_req_msg(zmq_msg_t * reqmsg) {
 	json_t * req;
 	char * host_name = NULL, *service_description = NULL;
 	char * hostgroup_name = NULL, *servicegroup_name = NULL;
@@ -1013,7 +1014,7 @@ void process_req_msg(zmq_msg_t * reqmsg, void * sock) {
 	if(req == NULL) {
 		err_msg(po, "Error loading json", "text",err.text,
 			"source", err.source, NULL);
-		send_msg(sock, po);
+		send_msg(po);
 		return;
 	}
 
@@ -1039,14 +1040,14 @@ void process_req_msg(zmq_msg_t * reqmsg, void * sock) {
 		NULL) != 0) {
 		json_decref(req);
 		err_msg(po, "Error unpacking request", NULL);
-		send_msg(sock, po);
+		send_msg(po);
 		return;
 	}
 
 	if(for_username && (for_user = find_contact(for_username)) == NULL) {
 		err_msg(po, "Error finding contact for authorization",
 			"contact_name", for_user);
-		send_msg(sock, po);
+		send_msg(po);
 		return;
 	}
 
@@ -1077,7 +1078,7 @@ void process_req_msg(zmq_msg_t * reqmsg, void * sock) {
 		if(!host_name) {
 			err_msg(po, "No host specified for service", "service_description",
 				service_description, NULL);
-			send_msg(sock, po);
+			send_msg(po);
 			json_decref(req);
 			return;
 		}
@@ -1157,5 +1158,5 @@ void process_req_msg(zmq_msg_t * reqmsg, void * sock) {
 
 end:
 	json_decref(req);
-	send_msg(sock, po);
+	send_msg(po);
 }
