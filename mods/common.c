@@ -66,8 +66,11 @@ void * getsock(char * forwhat, int type, json_t * def) {
 		return NULL;
 	}
 
-	if(!connect && !bind)
+	if(!connect && !bind && !connect_array && !bind_array) {
+		syslog(LOG_ERR, "Did not specify any connect or binds for %s",
+			forwhat);
 		return NULL;
+	}
 
 	void * sock = zmq_socket(zmq_ctx, type);
 	if(sock == NULL) {
