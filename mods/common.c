@@ -187,7 +187,7 @@ int handle_timedevent(int which, void * obj) {
 	nebstruct_timed_event_data * data = obj;
 	struct timespec * delay = NULL;
 	struct timeval start;
-	int nevents = 0;
+	int nevents;
 	long timeout = 0, diff;
 
 	if(which != NEBCALLBACK_TIMED_EVENT_DATA)
@@ -221,14 +221,14 @@ int handle_timedevent(int which, void * obj) {
 	do {
 		struct timeval end;
 		int j;
+		nevents = 0;
 		for(j = 0; j < 2; j++) {
-			if(!(pollables[j].revents & ZMQ_POLLIN))
-				continue;
 			zmq_msg_t input;
 			zmq_msg_init(&input);
-			if(zmq_msg_recv(&input, pollables[j].socket, 0) == -1) {
-                		syslog(LOG_ERR, "Error receiving message in sleep handler: %s",
-					zmq_strerror(errno));
+			if(zmq_msg_recv(&input, pollables[j].socket, ZMQ_DONTWAIT) == -1) {
+				if(errno != EAGAIN)
+					syslog(LOG_ERR, "Error receiving message in sleep handler: %s",
+						zmq_strerror(errno));
 				continue;
 			}
 
@@ -237,6 +237,7 @@ int handle_timedevent(int which, void * obj) {
 			else if(pollables[j].socket == reqsock)
 				process_req_msg(&input);
 			zmq_msg_close(&input);
+			nevents++;
 		}
 
 		gettimeofday(&end, NULL);
@@ -268,7 +269,7 @@ void input_reaper(void * insock) {
 				break;
 			else if(errno == EINTR)
 				continue;
-			syslog(LOG_ERR, "Error receiving message from command interface: %s",
+			syslog(LOG_ERR, "Error receiving message from interface: %s",
 				zmq_strerror(errno));
 			continue;
 		}
@@ -376,6 +377,8 @@ int handle_startup(int which, void * obj) {
 
 int nebmodule_init(int flags, char * localargs, nebmodule * lhandle) {
 	json_error_t loaderr;
+	handle = lhandle;
+
 	neb_set_module_info(handle, NEBMODULE_MODINFO_TITLE, "NagMQ");
 	neb_set_module_info(handle, NEBMODULE_MODINFO_AUTHOR, "Jonathan Reams");
 	neb_set_module_info(handle, NEBMODULE_MODINFO_VERSION, "1.3");
@@ -390,7 +393,6 @@ int nebmodule_init(int flags, char * localargs, nebmodule * lhandle) {
 		return -1;
 	}
 
-	handle = lhandle;
 	neb_register_callback(NEBCALLBACK_PROCESS_DATA, lhandle,
 		0, handle_startup);
 

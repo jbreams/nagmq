@@ -23,8 +23,8 @@ while True:
 			continue
 		out[k] = job[k]
 
-#	out['scheduled_check'] = 1
-#	out['reschedule_check'] = 1
+	out['scheduled_check'] = 1
+	out['reschedule_check'] = 1
 	out['output'] = "Test! Test! Test!\n"
 	out['return_code'] = 0
 	out['exited_ok'] = 1
