@@ -465,6 +465,10 @@ void recv_job_cb(struct ev_loop * loop, ev_io * i, int event) {
 		if(zmq_msg_recv(&inmsg, i->data, ZMQ_DONTWAIT) == -1) {
 			if(errno == EAGAIN)
 				break;
+			if(errno == EINTR) {
+				if(pullsock)
+					continue;
+			}
 			logit(ERR, "Error receiving message from broker %s",
 				zmq_strerror(errno));
 			continue;
