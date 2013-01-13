@@ -51,17 +51,14 @@ one address, list them as an array.::
 
 	{
 		"publish": {
-			"enable": true,
 			"bind": "ipc:///var/nagios/nagmqevents.sock",
 			"override": [ "service_check_initiate", "host_check_initiate" ]
 		},  
 		"pull": {
-			"enable": true,
 			"bind": [ "ipc:///var/nagios/nagmqcommands.sock", "tcp://*:5556" ],
 			"tcpacceptfilters": [ "localhost", "failoverhost" ]
 		},  
 		"reply": {
-			"enable": true,
 			"bind": [ "ipc:///var/nagios/nagmqstate.sock", "tcp://*:5557" ],
 			"tcpacceptfilters": [ "localhost", "failoverhost" ]
 		},  
