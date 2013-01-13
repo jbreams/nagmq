@@ -53,15 +53,17 @@ one address, list them as an array.::
 		"publish": {
 			"enable": true,
 			"bind": "ipc:///var/nagios/nagmqevents.sock",
-			"override": [ "service_check_initiate" ]
+			"override": [ "service_check_initiate", "host_check_initiate" ]
 		},  
 		"pull": {
 			"enable": true,
-			"bind": "ipc:///var/nagios/nagmqcommands.sock"
+			"bind": [ "ipc:///var/nagios/nagmqcommands.sock", "tcp://*:5556" ],
+			"tcpacceptfilters": [ "localhost", "failoverhost" ]
 		},  
 		"reply": {
 			"enable": true,
-			"bind": "ipc:///var/nagios/nagmqstate.sock"
+			"bind": [ "ipc:///var/nagios/nagmqstate.sock", "tcp://*:5557" ],
+			"tcpacceptfilters": [ "localhost", "failoverhost" ]
 		},  
    		"executor": {
     			"filter": { 
@@ -75,18 +77,14 @@ one address, list them as an array.::
 			"reply": "tcp://localhost:5557"
 		},  
 		"devices": [
-			[ { "backend": { "type": "push", "bind":"tcp://*:5558", "noblock":true },
-			"frontend": { "type": "sub", "connect":"ipc:///var/nagios/nagmqevents.sock",
-				"subscribe": [ "service_check_initiate" ] } },
-			{ "frontend": { "type": "pull", "bind":"tcp://*:5556" },
-			"backend": { "type": "push", "connect":"ipc:///var/nagios/nagmqcommands.sock" },
-			"monitor": { "type": "pub", "bind": "tcp://*:5559" } },
-			{ "frontend": { "type": "router", "bind":"tcp://127.0.0.1:5557" },
-			"backend": { "type": "dealer", "connect":"ipc:///var/nagios/nagmqstate.sock" } } ],
-			[ { "backend": { "type": "pull", "connect": "tcp://*:5558" },
-			"frontend": { "type": "push", "bind": "ipc:///var/nagios/mqexecjobs.sock" } },
-			{ "backend": { "type": "pull", "bind":  "ipc:///var/nagios/mqexecresults.sock" },
-			"frontend": { "type": "push", "connect": "tcp://*:5556" } } ] 
+			[ { "backend": { "type": "push", "bind":"tcp://*:5558", "noblock":true,
+				"tcpacceptfilters": [ "localhost", "failoverhost" ] },
+				"frontend": { "type": "sub", "connect":"ipc:///var/nagios/nagmqevents.sock",
+					"subscribe": [ "service_check_initiate", "host_check_initiate" ] } },
+			{ "backend": { "type": "pull", "connect":"tcp://masterhost:5558" },
+				"frontend": { "type":"push", "bind": "ipc:///var/nagios/mqexecjobs.sock" } },
+			{ "backend": { "type": "push", "connect":"tcp://masterhost:5556" },
+				"frontend": { "type":"pull", "bind": "ipc:///var/nagios/mqexecresults.sock" } } ]
 		]   
 	}
 
