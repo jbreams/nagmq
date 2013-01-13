@@ -232,7 +232,7 @@ static void process_comment(json_t * payload) {
 		"service_description", JSON_STRING, 0, &service_description,
 		"comment_data", JSON_STRING, 1, &comment_data,
 		"author_name", JSON_STRING, 1, &author_name,
-		"timestampe", JSON_TIMEVAL, 1, &entry_time,
+		"timestamp", JSON_TIMEVAL, 1, &entry_time,
 		"persistent", JSON_TRUE, 1, &persistent,
 		"expires", JSON_TRUE, 1, &expires,
 		"expire_time", JSON_INTEGER, 0, &expire_time,
