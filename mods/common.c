@@ -346,6 +346,7 @@ int handle_startup(int which, void * obj) {
 			break;
 		}
 		case NEBTYPE_PROCESS_SHUTDOWN:
+		case NEBTYPE_PROCESS_RESTART:
 			if(pullsock)
 				zmq_close(pullsock);
 			if(reqsock)
