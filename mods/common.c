@@ -126,7 +126,7 @@ void * getsock(char * forwhat, int type, json_t * def) {
 			json_t * filterj = json_array_get(accept_filters, i);
 			const char * filter = json_string_value(filterj);
 			if(!filter) {
-				syslog(LOG_ERR, "Filter %d for %s is not a string", i, forwhat);
+				syslog(LOG_ERR, "Filter %lu for %s is not a string", i, forwhat);
 				zmq_close(sock);
 				return NULL;
 			}
