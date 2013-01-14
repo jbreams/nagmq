@@ -168,7 +168,7 @@ void parse_sock_directive(json_t * arg, zmq_pollitem_t * pollable, int * noblock
 			json_t * filterj = json_array_get(accept_filters, i);
 			const char * filter = json_string_value(filterj);
 			if(!filter) {
-				syslog(LOG_ERR, "Filter %i is not a string", i);
+				syslog(LOG_ERR, "Filter %lu is not a string", i);
 				exit(1);
 			}
 			size_t flen = strlen(filter);
@@ -243,7 +243,8 @@ void * broker_loop(void * param) {
 	json_t * devarray = (json_t*)param;
 	zmq_pollitem_t * pollables;
 	size_t ndevices;
-	size_t i = 0, x = 0, rc;
+	size_t i = 0, x = 0;
+	int rc;
 
 	struct device {
 		void * frontend;
