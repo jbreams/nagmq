@@ -24,6 +24,7 @@ void * zmq_ctx;
 nebmodule * handle;
 extern void * pubext;
 extern int daemon_mode;
+extern int sigrestart;
 json_t * config;
 
 int nebmodule_deinit(int flags, int reason) {
@@ -289,7 +290,7 @@ int handle_startup(int which, void * obj) {
 
 	switch(ps->type) {
 		case NEBTYPE_PROCESS_START:
-			if(daemon_mode)
+			if(daemon_mode && !sigrestart)
 				return 0;
 		case NEBTYPE_PROCESS_DAEMONIZE: {
 			json_t * pubdef = NULL, *pulldef = NULL, *reqdef = NULL;
