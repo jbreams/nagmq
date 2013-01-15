@@ -25,6 +25,8 @@ for nsca, nrpe, and a handy CLI which talk to the bus instead of status.dat.
 NagMQ is licensed under the `Apache Version 2 license`_; see LICENSE in
 the source distribution for details.
 
+Visit https://groups.google.com/d/forum/nagmq for questions and announcements.
+
 Compilation and Installation
 ----------------------------
 
