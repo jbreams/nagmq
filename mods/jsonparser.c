@@ -37,6 +37,13 @@ int get_values(json_t * input, ...) {
 				return -1;
 			key = va_arg(ap, char*);
 			continue;
+		} else if(type == JSON_TRUE) {
+			if(!json_is_boolean(found)) {
+				if(required)
+					return -1;
+				key = va_arg(ap, char*);
+				continue;
+			}
 		} else if(type != JSON_TIMEVAL && type != foundtype) {
 			if(required)
 				return -1;

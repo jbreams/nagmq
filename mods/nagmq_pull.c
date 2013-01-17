@@ -250,7 +250,7 @@ static void process_comment(json_t * payload) {
 
 static void process_downtime(json_t * payload) {
 	char * host_name, * service_description = NULL;
-	char * author_name, *comment_data;
+	char * author_name = NULL, *comment_data = NULL;
 	time_t start_time = 0, end_time = 0, entry_time = 0;
 	int fixed;
 	unsigned long duration = 0, triggered_by = 0, downtimeid;
@@ -259,8 +259,8 @@ static void process_downtime(json_t * payload) {
 		"host_name", JSON_STRING, 1, &host_name,
 		"service_description", JSON_STRING, 0, &service_description,
 		"entry_time", JSON_INTEGER, 1, &entry_time,
-		"author_name", JSON_STRING, 1, &author_name,
-		"comment_data", JSON_STRING, 1, &comment_data,
+		"author_name", JSON_STRING, 0, &author_name,
+		"comment_data", JSON_STRING, 0, &comment_data,
 		"start_time", JSON_INTEGER, 1, &start_time,
 		"end_time", JSON_INTEGER, 1, &end_time,
 		"fixed", JSON_TRUE, 1, &fixed,
