@@ -1,5 +1,5 @@
 AC_PREREQ([2.60])
-AC_INIT([nagmq], [1.3], [jbreams@gmail.com])
+AC_INIT([nagmq], [1.3.1], [jbreams@gmail.com])
 AC_CONFIG_AUX_DIR([.])
 AM_INIT_AUTOMAKE([-Wall -Werror foreign])
 AC_CONFIG_SRCDIR([mods/nagmq_pub.c])
