@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset='utf-8'>
+    <meta http-equiv="X-UA-Compatible" content="chrome=1">
+    <link href='https://fonts.googleapis.com/css?family=Chivo:900' rel='stylesheet' type='text/css'>
+    <link rel="stylesheet" type="text/css" href="stylesheets/stylesheet.css" media="screen" />
+    <link rel="stylesheet" type="text/css" href="stylesheets/pygment_trac.css" media="screen" />
+    <link rel="stylesheet" type="text/css" href="stylesheets/print.css" media="print" />
+    <!--[if lt IE 9]>
+    <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <title>NagMQ by jbreams</title>
+  </head>
+
+  <body>
+    <div id="container">
+      <div class="inner">
+
+        <header>
+          <h1>NagMQ</h1>
+          <h2>Messaging API for Nagios over ZeroMQ</h2>
+        </header>
+
+        <section id="downloads" class="clearfix">
+          <a href="https://github.com/jbreams/nagmq/zipball/master" id="download-zip" class="button"><span>Download .zip</span></a>
+          <a href="https://github.com/jbreams/nagmq/tarball/master" id="download-tar-gz" class="button"><span>Download .tar.gz</span></a>
+          <a href="https://github.com/jbreams/nagmq" id="view-on-github" class="button"><span>View on GitHub</span></a>
+        </section>
+
+        <hr>
+
+        <section id="main_content">
+          <p>NagMQ is an event broker that exposes the internal state and events of
+Nagios to endpoings on a ZeroMQ message bus.</p>
+
+<p>Nagios objects and events are available as JSON. The broker exposes three
+sockets, all of which are optional:</p>
+
+<ul>
+<li><p>Publisher - Publishes events coming out of the event broker in real-time</p></li>
+<li><p>Pull - Receives passive checks and commands, like the Nagios command pipe</p></li>
+<li><p>Request - Sends state data on demand to clients</p></li>
+</ul><p>There is a distributed DNX-style executor (mqexec) designed to have as many
+workers (possibly at the edge as an NRPE-replacement) and job brokers as you
+want. It can also submit its results to more than one Nagios instance. Each
+worker can filter what checks it runs based on any field in the service/host
+check and event handler initiate messages from the publisher.</p>
+
+<p>It also comes with sample scripts written in Python to provide replacements
+for nsca, nrpe, and a handy CLI which talk to the bus instead of status.dat.</p>
+
+<p>NagMQ is licensed under the <code>Apache Version 2 license</code>_; see LICENSE in
+the source distribution for details.</p>
+
+<p>Visit <a href="https://groups.google.com/d/forum/nagmq">https://groups.google.com/d/forum/nagmq</a> for questions and announcements.</p>
+
+<h2>Compilation and Installation</h2>
+
+<p>Compile this from the Git repo by running::</p>
+
+<pre><code>$ autoreconf -i
+$ ./configure
+$ make
+$ make install
+</code></pre>
+
+<p>Add the path to the installed broker to your nagios.cfg with the path to the
+NagMQ config file as the broker parameter::</p>
+
+<pre><code># EVENT BROKER MODULE(S)
+...
+broker_module=/usr/local/lib/nagmq/nagmq.so /etc/nagios/nagmq.config
+#broker_module=/somewhere/module1.o
+#broker_module=/somewhere/module2.o arg1 arg2=3 debug=0
+</code></pre>
+
+<p>The NagMQ config file should be a JSON file that tells what message busses
+the broker should connect/bind to. Each endpoint can connect and or bind
+to any number of addresses - if you want to connect or bind to more than
+one address, list them as an array.::</p>
+
+<pre><code>{
+    "publish": {
+        "bind": "ipc:///var/nagios/nagmqevents.sock",
+        "override": [ "service_check_initiate", "host_check_initiate" ]
+    },  
+    "pull": {
+        "bind": [ "ipc:///var/nagios/nagmqcommands.sock", "tcp://*:5556" ],
+        "tcpacceptfilters": [ "localhost", "failoverhost" ]
+    },  
+    "reply": {
+        "bind": [ "ipc:///var/nagios/nagmqstate.sock", "tcp://*:5557" ],
+        "tcpacceptfilters": [ "localhost", "failoverhost" ]
+    },  
+    "executor": {
+            "filter": { 
+                "match": "localhost",
+                "field": "host_name"},
+        "jobs": "ipc:///var/nagios/mqexecjobs.sock",
+        "results": "ipc:///var/nagios/mqexecresults.sock"
+    },  
+    "cli": {
+        "pull": "tcp://localhost:5556",
+        "reply": "tcp://localhost:5557"
+    },  
+    "devices": [
+        [ { "backend": { "type": "push", "bind":"tcp://*:5558", "noblock":true,
+            "tcpacceptfilters": [ "localhost", "failoverhost" ] },
+            "frontend": { "type": "sub", "connect":"ipc:///var/nagios/nagmqevents.sock",
+                "subscribe": [ "service_check_initiate", "host_check_initiate" ] } },
+        { "backend": { "type": "pull", "connect":"tcp://masterhost:5558" },
+            "frontend": { "type":"push", "bind": "ipc:///var/nagios/mqexecjobs.sock" } },
+        { "backend": { "type": "push", "connect":"tcp://masterhost:5556" },
+            "frontend": { "type":"pull", "bind": "ipc:///var/nagios/mqexecresults.sock" } } ]
+    ]   
+}
+</code></pre>
+
+<p>Start the dnxmq broker and worker:</p>
+
+<pre><code>$ mqbroker /etc/nagios/nagmq.config
+$ mqexec /etc/nagios/nagmq.config
+</code></pre>
+
+<p>Restart Nagios, and you'll be able to connect to the message busses and
+get data into and out of the broker!</p>
+
+<p>If you do NOT wish to use dnxmq, remove the "override" directive from the
+sample "publisher" config.</p>
+
+<p>.. _<code>Apache Version 2 license</code>: <a href="http://www.apache.org/licenses/LICENSE-2.0.html">http://www.apache.org/licenses/LICENSE-2.0.html</a></p>
+        </section>
+
+        <footer>
+          NagMQ is maintained by <a href="https://github.com/jbreams">jbreams</a><br>
+          This page was generated by <a href="http://pages.github.com">GitHub Pages</a>. Tactile theme by <a href="http://twitter.com/jasonlong">Jason Long</a>.
+        </footer>
+
+                  <script type="text/javascript">
+            var gaJsHost = (("https:" == document.location.protocol) ? "https://ssl." : "http://www.");
+            document.write(unescape("%3Cscript src='" + gaJsHost + "google-analytics.com/ga.js' type='text/javascript'%3E%3C/script%3E"));
+          </script>
+          <script type="text/javascript">
+            try {
+              var pageTracker = _gat._getTracker("UA-37988134-1");
+            pageTracker._trackPageview();
+            } catch(err) {}
+          </script>
+
+      </div>
+    </div>
+  </body>
+</html>
