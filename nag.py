@@ -54,7 +54,7 @@ pasttenses = {
 }
 
 keys = ['host_name', 'services', 'hosts', 'service_description',
-	'current_state_str', 'members', 'type', 'name', 
+	'current_state', 'current_state_str', 'members', 'type', 'name', 
 	'problem_has_been_acknowledged', 'plugin_output', 'checks_enabled',
 	'notifications_enabled', 'event_handler_enabled' ]
 myverb = None
@@ -140,7 +140,7 @@ def handle_acknowledgement(verb, obj):
 	if('service_description' in obj):
 		name = obj['service_description'] + '@' + name
 	if(verb == 'add'):
-		if(obj['current_state_str'] == 'OK'):
+		if(obj['current_state'] == 0):
 			print "[{0}]: No problem found".format(name)
 			return
 		elif(obj['problem_has_been_acknowledged']):
