@@ -1,5 +1,5 @@
 AC_PREREQ([2.60])
-AC_INIT([nagmq], [1.3.1], [jbreams@gmail.com])
+AC_INIT([nagmq], [1.3.1], [nagmq@googlegroups.com])
 AC_CONFIG_AUX_DIR([.])
 AM_INIT_AUTOMAKE([-Wall -Werror foreign])
 AC_CONFIG_SRCDIR([mods/nagmq_pub.c])
@@ -48,6 +48,13 @@ if test "x$PCRE_CONFIG" != "x"; then
 	AC_SUBST([PCRE_LIBS], $($PCRE_CONFIG --libs))
 	AC_DEFINE([HAVE_PCRE], [], [PCRE Libraries are installed])
 fi
+
+AC_ARG_WITH([nagios-headers],
+	[AC_HELP_STRING([--with-nagios-headers=DIR],
+		[Path to header files for Nagios])],
+	[NAGINCLUDEDIR=$withval],
+	[NAGINCLUDEDIR="./naginclude"])
+AC_SUBST([NAGINCLUDEDIR])
 
 AC_CONFIG_FILES([Makefile mods/Makefile dnxmq/Makefile libev/Makefile])
 AC_CONFIG_SUBDIRS([jansson])

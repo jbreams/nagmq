@@ -4,14 +4,14 @@
 #include <time.h>
 #include <syslog.h>
 #define NSCORE 1
-#include "naginclude/nebstructs.h"
-#include "naginclude/nebcallbacks.h"
-#include "naginclude/nebmodules.h"
-#include "naginclude/nebmods.h"
-#include "naginclude/nagios.h"
-#include "naginclude/objects.h"
-#include "naginclude/broker.h"
-#include "naginclude/neberrors.h"
+#include "nebstructs.h"
+#include "nebcallbacks.h"
+#include "nebmodules.h"
+#include "nebmods.h"
+#include "nagios.h"
+#include "objects.h"
+#include "broker.h"
+#include "neberrors.h"
 #include <zmq.h>
 #include <errno.h>
 #include "json.h"
