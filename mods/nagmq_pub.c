@@ -306,10 +306,57 @@ static struct payload * parse_downtime(nebstruct_downtime_data * state) {
 	return ret;
 }
 
+/* These next three functions reimplement
+ * create_notification_list_from_service and
+ * create_notification_list_from_host which
+ * change between Nagios 3.3 and 3.4. Curse you,
+ * unstable API!!
+ */
+static void process_contacts(service * svc, host * hst, contactsmember * clck, int type, struct payload * ret) {
+	for(; clck; clck = clck->next) {
+		contact * c = clck->contact_ptr;
+		if(!c)
+			continue;
+		if(svc && check_contact_service_notification_viability(c, svc, type, 0) == OK)
+			payload_new_string(ret, NULL, c->name);
+		else if(hst && check_contact_host_notification_viability(c,hst, type, 0) == OK)
+			payload_new_string(ret, NULL, c->name);
+	}
+}
+
+static void process_contactgroups(service * svc, host * hst, contactgroupsmember * cglck, int type, struct payload * ret) {
+	for(; cglck; cglck = cglck->next) {
+		contactgroup * g = cglck->group_ptr;
+		contactsmember * cm = g->members;
+		process_contacts(svc, hst, cm, type, ret);
+	}
+}
+
+static void process_escalation_contacts(service * svc, host * hst, int type, struct payload * ret) {
+	void * ptr = NULL;
+	serviceescalation * set = svc != NULL ? get_first_serviceescalation_by_service(svc->host_name, svc->description, &ptr) : NULL;
+	hostescalation * het = hst != NULL ? get_first_hostescalation_by_host(hst->name, &ptr) : NULL;
+
+	for(; set != NULL; set = get_next_serviceescalation_by_service(svc->host_name, svc->description, &ptr)) {
+		if(is_valid_escalation_for_service_notification(svc, set, 0) == FALSE)
+			continue;
+		process_contacts(svc, NULL, set->contacts, type, ret);
+		process_contactgroups(svc, NULL, set->contact_groups, type, ret);
+	}
+
+	for(; het != NULL; het = get_next_hostescalation_by_host(hst->name, &ptr)) {
+		if(is_valid_escalation_for_host_notification(hst, het, 0) == FALSE)
+			continue;
+		process_contacts(NULL, hst, het->contacts, type, ret);
+		process_contactgroups(NULL, hst, het->contact_groups, type, ret);
+	}
+}
+
 static struct payload * parse_notification(nebstruct_notification_data * state) {
 	struct payload * ret = payload_new();
 	service * service_obj = NULL;
 	host * host_obj;
+	int escalated;
 
 	if(state->service_description)
 		service_obj = (service*)state->object_ptr;
@@ -331,8 +378,6 @@ static struct payload * parse_notification(nebstruct_notification_data * state) 
 	payload_new_boolean(ret, "escalated", state->escalated);
 	payload_new_integer(ret, "contacts_notified", state->contacts_notified);
 
-	contactgroupsmember * cgtmp;
-	contactsmember * ctmp;
 	if(service_obj) {
 		payload_new_integer(ret, "current_notification_number", service_obj->current_notification_number);
 		payload_new_integer(ret, "current_notification_id", service_obj->current_notification_id);
@@ -344,8 +389,15 @@ static struct payload * parse_notification(nebstruct_notification_data * state) 
 		payload_new_integer(ret, "last_state_change", service_obj->last_state_change);
 		payload_new_integer(ret, "last_notification", service_obj->last_notification);
 		payload_new_statestr(ret, "state_str", state->state, service_obj->has_been_checked, 1);
-		cgtmp = service_obj->contact_groups;
-		ctmp = service_obj->contacts;
+		
+		payload_start_array(ret, "recipients");
+		if(should_service_notification_be_escalated(service_obj)) {
+			process_escalation_contacts(service_obj, NULL, state->reason_type, ret);
+		} else {
+			process_contacts(service_obj, NULL, service_obj->contacts, state->reason_type, ret);
+			process_contactgroups(service_obj, NULL, service_obj->contact_groups, state->reason_type, ret);
+		}
+		payload_end_array(ret);
 	} else {
 		payload_new_integer(ret, "current_notification_number", host_obj->current_notification_number);
 		payload_new_integer(ret, "current_notification_id", host_obj->current_notification_id);
@@ -357,24 +409,15 @@ static struct payload * parse_notification(nebstruct_notification_data * state) 
 		payload_new_integer(ret, "last_state_change", host_obj->last_state_change);
 		payload_new_integer(ret, "last_notification", host_obj->last_host_notification);
 		payload_new_statestr(ret, "state_str", state->state, host_obj->has_been_checked, 1);
-		cgtmp = host_obj->contact_groups;
-		ctmp = host_obj->contacts;
+		payload_start_array(ret, "recipients");
+		if(should_host_notification_be_escalated(host_obj)) {
+			process_escalation_contacts(NULL, host_obj, state->reason_type, ret);
+		} else {
+			process_contacts(NULL, host_obj, host_obj->contacts, state->reason_type, ret);
+			process_contactgroups(NULL, host_obj, host_obj->contact_groups, state->reason_type, ret);
+		}
+		payload_end_array(ret);
 	}
-
-	payload_start_array(ret, "contacts");
-	while(ctmp) {
-		payload_new_string(ret, NULL, ctmp->contact_name);
-		ctmp = ctmp->next;
-	}
-	payload_end_array(ret);
-
-	payload_start_array(ret, "contact_groups");
-	while(cgtmp) {
-		payload_new_string(ret, NULL, cgtmp->group_name);
-		cgtmp = cgtmp->next;
-	}
-	payload_end_array(ret);
-
 	return ret;
 }
 
