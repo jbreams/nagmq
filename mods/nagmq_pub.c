@@ -352,16 +352,19 @@ static void process_escalation_contacts(service * svc, host * hst, int type, str
 	}
 }
 
+extern notification * notification_list;
 static struct payload * parse_notification(nebstruct_notification_data * state) {
 	struct payload * ret = payload_new();
 	service * service_obj = NULL;
 	host * host_obj;
-	int escalated;
 
-	if(state->service_description)
+	if(state->service_description) {
 		service_obj = (service*)state->object_ptr;
-	else
+	}
+	else {
 		host_obj = (host*)state->object_ptr;
+	}
+	nlck = notification_list;
 
 	if(state->type == NEBTYPE_NOTIFICATION_START)
 		payload_new_string(ret, "type", "notification_start");
@@ -409,6 +412,7 @@ static struct payload * parse_notification(nebstruct_notification_data * state) 
 		payload_new_integer(ret, "last_state_change", host_obj->last_state_change);
 		payload_new_integer(ret, "last_notification", host_obj->last_host_notification);
 		payload_new_statestr(ret, "state_str", state->state, host_obj->has_been_checked, 1);
+
 		payload_start_array(ret, "recipients");
 		if(should_host_notification_be_escalated(host_obj)) {
 			process_escalation_contacts(NULL, host_obj, state->reason_type, ret);
@@ -418,6 +422,7 @@ static struct payload * parse_notification(nebstruct_notification_data * state) 
 		}
 		payload_end_array(ret);
 	}
+
 	return ret;
 }
 
