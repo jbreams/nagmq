@@ -352,7 +352,6 @@ static void process_escalation_contacts(service * svc, host * hst, int type, str
 	}
 }
 
-extern notification * notification_list;
 static struct payload * parse_notification(nebstruct_notification_data * state) {
 	struct payload * ret = payload_new();
 	service * service_obj = NULL;
@@ -364,7 +363,6 @@ static struct payload * parse_notification(nebstruct_notification_data * state) 
 	else {
 		host_obj = (host*)state->object_ptr;
 	}
-	nlck = notification_list;
 
 	if(state->type == NEBTYPE_NOTIFICATION_START)
 		payload_new_string(ret, "type", "notification_start");
