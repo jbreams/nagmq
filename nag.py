@@ -33,6 +33,8 @@ op.add_option('-d', '--duration', type="string", dest="duration",
 	help="Specify duration instead of times for downtime")
 op.add_option('-x', '--hosts-only', action='store_true', dest='hostsonly',
 	help='Only look for hosts when parsing arguments', default=False)
+op.add_option('-P', '--problems-only', action="store_true", dest="problems_only",
+	help="When printing statuses, exclude everything that's OK")
 
 
 (opts, args) = op.parse_args()
@@ -281,7 +283,8 @@ def parse_object(o, svcname):
 	if(o['type'] == 'host'):
 		if(o['host_name'] in hosts):
 			return
-		if(not svcname):
+		if(not svcname and o['current_state'] != 0 or \
+			(o['current_state'] == 0 and opts.problems_only != True)):
 			hosts[o['host_name']] = o
 		if(not o['services'] or opts.hostsonly):
 			return
@@ -292,6 +295,8 @@ def parse_object(o, svcname):
 				parse_object(so, svcname)
 	elif(o['type'] == 'service' and not opts.hostsonly):
 		if(svcname and svcname != o['service_description']):
+			return
+		if(o['current_state'] == 0 and opts.problems_only == True):
 			return
 		name = "{0}@{1}".format(o['service_description'], o['host_name'])
 		if(name in services):
