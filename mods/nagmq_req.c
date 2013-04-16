@@ -25,13 +25,18 @@ extern hostgroup * hostgroup_list;
 extern servicegroup * servicegroup_list;
 extern void * reqsock;
 
-static void parse_service(service * state, struct payload * ret,
-	int include_host, int include_contacts);
-static void parse_host(host * state, struct payload * ret,
-	int include_services, int include_contacts);
+static char * host_name, *service_description;
+static int include_services, include_hosts,
+	include_contacts, expand_lists;
+
+static contact * for_user = NULL;
+static service * cur_service = NULL;
+static host * cur_host = NULL;
+
+static void parse_service(service * state, struct payload * ret);
+static void parse_host(host * state, struct payload * ret);
 static void parse_contact(contact * state, struct payload * ret);
-static void parse_contactgroup(contactgroup * state, struct payload * ret,
-	int include_contacts);
+static void parse_contactgroup(contactgroup * state, struct payload * ret);
 
 static void parse_custom_variables(struct payload * ret,
 	customvariablesmember * cvl) {
@@ -188,8 +193,7 @@ static void parse_timeperiod(timeperiod * state, struct payload * ret) {
 	payload_end_object(ret);
 }
 
-static void parse_host(host * state, struct payload * ret,
-	int include_services, int include_contacts) {
+static void parse_host(host * state, struct payload * ret) {
 	int rc;
 
 	payload_start_object(ret, NULL);
@@ -371,7 +375,7 @@ static void parse_host(host * state, struct payload * ret,
 	if(include_services) {
 		slck = state->services;
 		while(slck) {
-			parse_service(slck->service_ptr, ret, 0, 0);
+			parse_service(slck->service_ptr, ret);
 			slck = slck->next;
 		}
 	}
@@ -385,14 +389,13 @@ static void parse_host(host * state, struct payload * ret,
 
 		cglck = state->contact_groups;
 		while(cglck) {
-			parse_contactgroup(cglck->group_ptr, ret, include_contacts);
+			parse_contactgroup(cglck->group_ptr, ret);
 			cglck = cglck->next;
 		}
 	}
 }
 
-static void parse_service(service * state, struct payload * ret,
-	int include_host, int include_contacts) {
+static void parse_service(service * state, struct payload * ret) {
 	int rc;
 	payload_start_object(ret, NULL);
 	payload_new_string(ret, "type", "service");
@@ -532,8 +535,8 @@ static void parse_service(service * state, struct payload * ret,
 	parse_custom_variables(ret, state->custom_variables);
 	payload_end_object(ret);
 
-	if(include_host)
-		parse_host(state->host_ptr, ret, 0, 0);
+	if(include_hosts)
+		parse_host(state->host_ptr, ret);
 
 	if(include_contacts) {
 		clck = state->contacts;
@@ -544,14 +547,13 @@ static void parse_service(service * state, struct payload * ret,
 
 		cglck = state->contact_groups;
 		while(cglck) {
-			parse_contactgroup(cglck->group_ptr, ret, include_contacts);
+			parse_contactgroup(cglck->group_ptr, ret);
 			cglck = cglck->next;
 		}
 	}
 }
 
-static void parse_hostgroup(hostgroup * state, struct payload * ret,
-	int include_hosts, contact * for_user) {
+static void parse_hostgroup(hostgroup * state, struct payload * ret) {
 	int rc;
 	payload_start_object(ret, NULL);
 	payload_new_string(ret, "type", "hostgroup");
@@ -581,14 +583,13 @@ static void parse_hostgroup(hostgroup * state, struct payload * ret,
 				htmp = htmp->next;
 				continue;
 			}
-			parse_host(htmp->host_ptr, ret, 0, 0);
+			parse_host(htmp->host_ptr, ret);
 			htmp = htmp->next;
 		}
 	}
 }
 
-static void parse_servicegroup(servicegroup * state, struct payload * ret,
-	int include_services, contact * for_user) {
+static void parse_servicegroup(servicegroup * state, struct payload * ret) {
 	int rc;
 	payload_start_object(ret, NULL);
 	payload_new_string(ret, "type", "servicegroup");
@@ -618,7 +619,7 @@ static void parse_servicegroup(servicegroup * state, struct payload * ret,
 				stmp = stmp->next;
 				continue;
 			}
-			parse_service(stmp->service_ptr, ret, 0, 0);
+			parse_service(stmp->service_ptr, ret);
 			stmp = stmp->next;
 		}
 	}
@@ -720,8 +721,7 @@ static void parse_contact(contact * state, struct payload * ret) {
 	payload_end_object(ret);
 }
 
-static void parse_contactgroup(contactgroup * state, struct payload * ret,
-	int include_contacts) {
+static void parse_contactgroup(contactgroup * state, struct payload * ret) {
 	int rc;
 	payload_start_object(ret, NULL);
 	payload_new_string(ret, "type", "contactgroup");
@@ -786,56 +786,207 @@ static void parse_comment(comment * state, struct payload * ret) {
 }
 
 extern scheduled_downtime *scheduled_downtime_list;
-static void do_list_downtimes(struct payload * po, host * hst, service * svc, contact * auth_user) {
+static void do_list_downtimes(struct payload * po, json_t * req) {
+	int list_downtimes = 0;
+	get_values(req,
+		"list_downtimes", JSON_TRUE, 0, &list_downtimes,
+		NULL);
+	if(!list_downtimes)
+		return;
+
 	scheduled_downtime * sdlck = scheduled_downtime_list;
 	while(sdlck) {
-		if(svc && sdlck->service_description &&
-			strcmp(sdlck->service_description, svc->description) == 0 &&
-			strcmp(sdlck->host_name, svc->host_name) == 0) {
-			if(auth_user && !is_contact_for_service(svc, auth_user)) {
-				sdlck = sdlck->next;
-				continue;
-			}
-			parse_downtime(sdlck, po);
+		int ok = 1;
+		if(cur_service && sdlck->service_description) {
+			if(strcmp(sdlck->service_description, cur_service->description) != 0)
+				ok = 0;
+			else if(strcmp(sdlck->host_name, cur_service->host_name) != 0)
+				ok = 0;
+			else if(for_user && !is_contact_for_service(cur_service, for_user))
+				ok = 0;
 		}
-		else if(hst && sdlck->host_name &&
-			strcmp(sdlck->host_name, hst->name) == 0) {
-			if(auth_user && !is_contact_for_host(hst, auth_user)) {
-				sdlck = sdlck->next;
-				continue;
-			}
-			parse_downtime(sdlck, po);
+		else if(cur_host) {
+			if(strcmp(sdlck->host_name, cur_host->name) != 0)
+				ok = 0;
+			if(for_user && !is_contact_for_host(cur_host, for_user))
+				ok = 0;
 		}
-		else
+		if(ok)
 			parse_downtime(sdlck, po);
 		sdlck = sdlck->next;
 	}
 }
 
 extern comment *comment_list;
-static void do_list_comments(struct payload * po, host * hst, service * svc, contact * auth_user) {
+static void do_list_comments(struct payload * po, json_t * req) {
+	int list_comments = 0;
+	get_values(req,
+		"list_comments", JSON_TRUE, 0, &list_comments,
+		NULL);
+	if(!list_comments)
+		return;
+
 	comment * clck = comment_list;
 	while(clck) {
-		if(svc && clck->service_description &&
-			strcmp(clck->service_description, svc->description) == 0 &&
-			strcmp(clck->host_name, svc->host_name) == 0) {
-			if(auth_user && !is_contact_for_service(svc, auth_user)) {
-				clck = clck->next;
-				continue;
-			}
-			parse_comment(clck, po);
+		int ok = 1;
+		if(cur_service && clck->service_description) {
+			if(strcmp(clck->service_description, cur_service->description) != 0)
+				ok = 0;
+			else if(strcmp(clck->host_name, cur_service->host_name) != 0)
+				ok = 0;
+			else if(for_user && !is_contact_for_service(cur_service, for_user))
+				ok = 0;
 		}
-		else if(hst && clck->host_name &&
-			strcmp(clck->host_name, hst->name) == 0) {
-			if(auth_user && !is_contact_for_host(hst, auth_user)) {
-				clck = clck->next;
-				continue;
-			}
-			parse_comment(clck, po);
+		else if(cur_host) {
+			if(strcmp(clck->host_name, cur_host->name) != 0)
+				ok = 0;
+			if(for_user && !is_contact_for_host(cur_host, for_user))
+				ok = 0;
 		}
-		else
+		if(ok)
 			parse_comment(clck, po);
 		clck = clck->next;
+	}
+}
+
+static void do_list_hosts(struct payload * po, json_t * req) {
+	int list_hosts = 0;
+	
+	get_values(req,
+		"list_hosts", JSON_TRUE, 0, &list_hosts,
+		NULL);
+	if(!list_hosts)
+		return;
+
+	if(!expand_lists) {
+		payload_start_object(po, NULL);
+		payload_new_string(po, "type", "host_list");
+		if(!payload_start_array(po, "hosts")) {
+			payload_end_object(po);
+			return;
+		}
+	}
+	host * tmp_host = host_list;
+	while(tmp_host) {
+		if(for_user && !is_contact_for_host(tmp_host, for_user)) {
+			tmp_host = tmp_host->next;
+			continue;
+		}
+		if(expand_lists)
+			parse_host(tmp_host, po);
+		else
+			payload_new_string(po, NULL, tmp_host->name);
+		tmp_host = tmp_host->next;
+	}
+	if(!expand_lists) {
+		payload_end_array(po);
+		payload_end_object(po);
+	}
+}
+
+static void do_list_hostgroups(struct payload * po, json_t * req) {
+	int list_hostgroups = 0;
+
+	get_values(req,
+		"list_hostgroups", JSON_TRUE, 0, &list_hostgroups,
+		NULL);
+	if(!list_hostgroups)
+		return;
+
+	if(!expand_lists) {
+		payload_start_object(po, NULL);
+		payload_new_string(po, "type", "hostgroup_list");
+		if(!payload_start_array(po, "hostgroups")) {
+			payload_end_object(po);
+			return;
+		}
+	}
+	hostgroup * tmp_hostgroup = hostgroup_list;
+	while(tmp_hostgroup) {
+		if(expand_lists)
+			parse_hostgroup(tmp_hostgroup, po);
+		else
+			payload_new_string(po, NULL, tmp_hostgroup->group_name);
+		tmp_hostgroup = tmp_hostgroup->next;
+	}
+	if(!expand_lists) {
+		payload_end_array(po);
+		payload_end_object(po);
+	}
+}
+
+static void do_list_services(struct payload * po, json_t * req) {
+	int list_services = 0;
+	char * tolist = NULL;
+
+	get_values(req,
+		"list_services", JSON_STRING, 0, &tolist,
+		"list_services", JSON_TRUE, 0, &list_services,
+		NULL);
+	if(!list_services && !tolist)
+		return;
+
+	if(!expand_lists) {
+		payload_start_object(po, NULL);
+		payload_new_string(po, "type", "service_list");
+		if(!payload_start_array(po, "services")) {
+			payload_end_object(po);
+			return;
+		}
+	}
+	service * tmp_svc = service_list;
+	while(tmp_svc) {
+		if(tolist && strcmp(tolist, tmp_svc->description) != 0) {
+			tmp_svc = tmp_svc->next;
+			continue;
+		}
+		if(for_user && !is_contact_for_service(tmp_svc, for_user)) {
+			tmp_svc = tmp_svc->next;
+			continue;
+		}
+		if(expand_lists)
+			parse_service(tmp_svc, po);
+		else {
+			payload_start_object(po, NULL);
+			payload_new_string(po, "host_name", tmp_svc->host_ptr->name);
+			payload_new_string(po, "service_description", tmp_svc->description);
+			payload_end_object(po);
+		}
+		tmp_svc = tmp_svc->next;
+	}
+	if(!expand_lists) {
+		payload_end_array(po);
+		payload_end_object(po);
+	}
+}
+
+static void do_list_servicegroups(struct payload * po, json_t * req) {
+	int list_servicegroups = 0;
+	get_values(req,
+		"list_servicegroups", JSON_TRUE, 0, &list_servicegroups,
+		NULL);
+	if(!list_servicegroups)
+		return;
+
+	if(!expand_lists) {
+		payload_start_object(po, NULL);
+		payload_new_string(po, "type", "servicegroup_list");
+		if(!payload_start_array(po, "servicegroups")) {
+			payload_end_object(po);
+			return;
+		}
+	}
+	servicegroup * tmp_servicegroup = servicegroup_list;
+	while(tmp_servicegroup) {
+		if(expand_lists)
+			parse_servicegroup(tmp_servicegroup, po);
+		else
+			payload_new_string(po, NULL, tmp_servicegroup->group_name);
+		tmp_servicegroup = tmp_servicegroup->next;
+	}
+	if(!expand_lists) {
+		payload_end_array(po);
+		payload_end_object(po);
 	}
 }
 
@@ -860,120 +1011,6 @@ static void send_msg(struct payload * po) {
 	free(po);
 }
 
-static void do_list_hosts(struct payload * po, int expand_lists,
-	int include_services, int include_contacts, contact *auth_user) {
-	if(!expand_lists) {
-		payload_start_object(po, NULL);
-		payload_new_string(po, "type", "host_list");
-		if(!payload_start_array(po, "hosts")) {
-			payload_end_object(po);
-			return;
-		}
-	}
-	host * tmp_host = host_list;
-	while(tmp_host) {
-		if(auth_user && !is_contact_for_host(tmp_host, auth_user)) {
-			tmp_host = tmp_host->next;
-			continue;
-		}
-		if(expand_lists)
-			parse_host(tmp_host, po, include_services, include_contacts);
-		else
-			payload_new_string(po, NULL, tmp_host->name);
-		tmp_host = tmp_host->next;
-	}
-	if(!expand_lists) {
-		payload_end_array(po);
-		payload_end_object(po);
-	}
-}
-
-static void do_list_hostgroups(struct payload * po, int expand_lists,
-	int include_hosts, contact * for_user) {
-	if(!expand_lists) {
-		payload_start_object(po, NULL);
-		payload_new_string(po, "type", "hostgroup_list");
-		if(!payload_start_array(po, "hostgroups")) {
-			payload_end_object(po);
-			return;
-		}
-	}
-	hostgroup * tmp_hostgroup = hostgroup_list;
-	while(tmp_hostgroup) {
-		if(expand_lists)
-			parse_hostgroup(tmp_hostgroup, po, include_hosts, for_user);
-		else
-			payload_new_string(po, NULL, tmp_hostgroup->group_name);
-		tmp_hostgroup = tmp_hostgroup->next;
-	}
-	if(!expand_lists) {
-		payload_end_array(po);
-		payload_end_object(po);
-	}
-}
-
-static void do_list_services(struct payload * po, int expand_lists,
-	int include_hosts, int include_contacts, const char * tolist,
-	contact * auth_user) {
-	if(!expand_lists) {
-		payload_start_object(po, NULL);
-		payload_new_string(po, "type", "service_list");
-		if(!payload_start_array(po, "services")) {
-			payload_end_object(po);
-			return;
-		}
-	}
-	service * tmp_svc = service_list;
-	while(tmp_svc) {
-		if(tolist && strcmp(tolist, tmp_svc->description) != 0) {
-			tmp_svc = tmp_svc->next;
-			continue;
-		}
-		if(auth_user && !is_contact_for_service(tmp_svc, auth_user)) {
-			tmp_svc = tmp_svc->next;
-			continue;
-		}
-		if(expand_lists)
-			parse_service(tmp_svc, po, include_hosts, include_contacts);
-		else {
-			payload_start_object(po, NULL);
-			payload_new_string(po, "host_name", tmp_svc->host_ptr->name);
-			payload_new_string(po, "service_description", tmp_svc->description);
-			payload_end_object(po);
-		}
-		tmp_svc = tmp_svc->next;
-	}
-	if(!expand_lists) {
-		payload_end_array(po);
-		payload_end_object(po);
-	}
-}
-
-static void do_list_servicegroups(struct payload * po, int expand_lists,
-	int include_services, contact * for_user) {
-	if(!expand_lists) {
-		payload_start_object(po, NULL);
-		payload_new_string(po, "type", "servicegroup_list");
-		if(!payload_start_array(po, "servicegroups")) {
-			payload_end_object(po);
-			return;
-		}
-	}
-	servicegroup * tmp_servicegroup = servicegroup_list;
-	while(tmp_servicegroup) {
-		if(expand_lists)
-			parse_servicegroup(tmp_servicegroup, po, include_services, for_user);
-		else
-			payload_new_string(po, NULL, tmp_servicegroup->group_name);
-		tmp_servicegroup = tmp_servicegroup->next;
-	}
-	if(!expand_lists) {
-		payload_end_array(po);
-		payload_end_object(po);
-	}
-}
-
-
 static void err_msg(struct payload * po, char * msg, ...) {
 	payload_start_object(po, NULL);
 	po->use_hash = 0;
@@ -992,18 +1029,13 @@ static void err_msg(struct payload * po, char * msg, ...) {
 
 void process_req_msg(zmq_msg_t * reqmsg) {
 	json_t * req;
-	char * host_name = NULL, *service_description = NULL;
-	char * hostgroup_name = NULL, *servicegroup_name = NULL;
-	char * contact_name = NULL, *contactgroup_name = NULL;
-	char * timeperiod_name = NULL, *list_services_str = NULL;
-	int include_services = 0, include_hosts = 0, include_contacts = 0;
-	int list_hosts = 0, expand_lists = 0, list_hostgroups = 0;
-	int list_servicegroups = 0, list_services_bool = 0;
 	json_t *keys = NULL;
+	char * contact_name = NULL, *contactgroup_name = NULL,
+		*servicegroup_name = NULL, *hostgroup_name = NULL,
+		*timeperiod_name = NULL;
 	
 	json_error_t err;
 	struct payload * po;
-	contact * for_user = NULL;
 	char * for_username = NULL;
 
 	po = malloc(sizeof(struct payload));
@@ -1018,6 +1050,15 @@ void process_req_msg(zmq_msg_t * reqmsg) {
 		return;
 	}
 
+	host_name = NULL;
+	service_description = NULL;
+	include_services = 0;
+	include_hosts = 0;
+	include_contacts = 0;
+	cur_host = NULL;
+	cur_service = NULL;
+	for_user = NULL;
+
 	if(get_values(req,
 		"host_name", JSON_STRING, 0, &host_name,
 		"service_description", JSON_STRING, 0, &service_description,
@@ -1028,15 +1069,10 @@ void process_req_msg(zmq_msg_t * reqmsg) {
 		"include_services", JSON_TRUE, 0, &include_services,
 		"include_hosts", JSON_TRUE, 0, &include_hosts,
 		"include_contacts", JSON_TRUE, 0, &include_contacts,
-		"list_hosts", JSON_TRUE, 0, &list_hosts,
-		"list_services", JSON_TRUE, 0, &list_services_bool,
-		"list_services", JSON_STRING, 0, &list_services_str,
 		"expand_lists", JSON_TRUE, 0, &expand_lists,
 		"keys", JSON_ARRAY, 0, &keys,
 		"timeperiod_name", JSON_STRING, 0, &timeperiod_name,
 		"for_user", JSON_STRING, 0, &for_username,
-		"list_hostgroups", JSON_TRUE, 0, &list_hostgroups,
-		"list_servicegroups", JSON_TRUE, 0, &list_servicegroups,
 		NULL) != 0) {
 		json_decref(req);
 		err_msg(po, "Error unpacking request", NULL);
@@ -1061,20 +1097,7 @@ void process_req_msg(zmq_msg_t * reqmsg) {
 		}
 	}
 
-	if(list_hosts)
-		do_list_hosts(po, expand_lists, include_services, include_contacts, for_user);
-
-	if(list_services_bool || list_services_str)
-		do_list_services(po, expand_lists, include_hosts, include_contacts,
-			list_services_str, for_user);
-
-	if(list_hostgroups)
-		do_list_hostgroups(po, expand_lists, include_hosts, for_user);
-	if(list_servicegroups)
-		do_list_servicegroups(po, expand_lists, include_services, for_user);
-
 	if(service_description) {
-		service * svctarget;
 		if(!host_name) {
 			err_msg(po, "No host specified for service", "service_description",
 				service_description, NULL);
@@ -1083,31 +1106,31 @@ void process_req_msg(zmq_msg_t * reqmsg) {
 			return;
 		}
 
-		svctarget = find_service(host_name, service_description);
-		if(!svctarget) {
+		cur_service = find_service(host_name, service_description);
+		if(!cur_service) {
 			err_msg(po, "Could not find service", "service_description",
 				service_description, "host_name", host_name, NULL);
 			goto end;
 		}
-		if(for_user && !is_contact_for_service(svctarget, for_user)) {
+		if(for_user && !is_contact_for_service(cur_service, for_user)) {
 			err_msg(po, "User not authorized for service", "service_description",
 				service_description, "host_name", host_name, NULL);
 			goto end;
 		}
 		
-		parse_service(svctarget, po, include_hosts, include_contacts);
+		parse_service(cur_service, po);
 	} else if(host_name) {
-		host * hsttarget = find_host(host_name);
-		if(!hsttarget) {
+		cur_host = find_host(host_name);
+		if(!cur_host) {
 			err_msg(po, "Could not find host", "host_name", host_name, NULL);
 			goto end;
 		}
-		if(for_user && !is_contact_for_host(hsttarget, for_user)) {
+		if(for_user && !is_contact_for_host(cur_host, for_user)) {
 			err_msg(po, "User not authorized for host", "host_name", host_name, NULL);
 			goto end;
 		}
 
-		parse_host(hsttarget, po, include_services, include_contacts);
+		parse_host(cur_host, po);
 	}
 	if(hostgroup_name) {
 		hostgroup * hsttarget = find_hostgroup(hostgroup_name);
@@ -1116,7 +1139,7 @@ void process_req_msg(zmq_msg_t * reqmsg) {
 				hostgroup_name, NULL);
 			goto end;
 		}
-		parse_hostgroup(hsttarget, po, include_hosts, for_user);
+		parse_hostgroup(hsttarget, po);
 	}
 	if(servicegroup_name) {
 		servicegroup * svctarget = find_servicegroup(servicegroup_name);
@@ -1125,7 +1148,7 @@ void process_req_msg(zmq_msg_t * reqmsg) {
 				servicegroup_name, NULL);
 			goto end;
 		}
-		parse_servicegroup(svctarget, po, include_services, for_user);
+		parse_servicegroup(svctarget, po);
 	}
 	if(contactgroup_name) {
 		contactgroup * cntarget = find_contactgroup(contactgroup_name);
@@ -1134,7 +1157,7 @@ void process_req_msg(zmq_msg_t * reqmsg) {
 				contactgroup_name, NULL);
 			goto end;
 		}
-		parse_contactgroup(cntarget, po, include_contacts);
+		parse_contactgroup(cntarget, po);
 	}
 	if(contact_name) {
 		contact * cntarget = find_contact(contact_name);
@@ -1155,6 +1178,13 @@ void process_req_msg(zmq_msg_t * reqmsg) {
 		}
 		parse_timeperiod(tptarget, po);
 	}
+
+	do_list_hosts(po, req);
+	do_list_services(po, req);
+	do_list_hostgroups(po, req);
+	do_list_servicegroups(po, req);
+	do_list_comments(po, req);
+	do_list_downtimes(po, req);
 
 end:
 	json_decref(req);
