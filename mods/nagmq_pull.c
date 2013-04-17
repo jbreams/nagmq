@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <time.h>
 #include <syslog.h>
+#include <string.h>
 #define NSCORE 1
 #include "nebstructs.h"
 #include "nebcallbacks.h"
@@ -140,6 +141,10 @@ static void process_bulkstate(json_t * payload) {
 	json_decref(payload);
 }
 
+#ifdef(HAVE_ADD_CHECK_RESULT_TWO)
+extern check_result * check_result_list;
+#endif
+
 static void process_status(json_t * payload) {
 	char * host_name, *service_description = NULL, *output = NULL;
 	check_result * newcr = NULL, t;
@@ -184,8 +189,11 @@ static void process_status(json_t * payload) {
 	}
 	newcr->output = strdup(output);
 	json_decref(payload);
-
+#ifdef HAVE_ADD_CHECK_RESULT_ONE
 	add_check_result_to_list(newcr);
+#elif defined(HAVE_ADD_CHECK_RESULT_TWO)
+	add_check_result_to_list(&check_result_list, newcr);
+#endif
 }
 
 static void process_acknowledgement(json_t * payload) {
@@ -425,6 +433,7 @@ static void process_cmd(json_t * payload) {
 			enable_and_propagate_notifications(host_target, level,
 				affect_top_host, affect_hosts, affect_services);
 	}
+#ifdef HAVE_DELETE_DOWNTIME_LONGNAME
 	else if(strcmp(cmd_name, "delete_downtime") == 0) {
 		char * comment = NULL;
 		time_t start_time = 0;
@@ -435,6 +444,7 @@ static void process_cmd(json_t * payload) {
 		delete_downtime_by_hostname_service_description_start_time_comment(
 			host_name, service_description, start_time, comment);
 	}
+#endif
 
 	json_decref(payload);
 }

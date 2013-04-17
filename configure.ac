@@ -56,6 +56,25 @@ AC_ARG_WITH([nagios-headers],
 	[NAGINCLUDEDIR="./naginclude"])
 AC_SUBST([NAGINCLUDEDIR])
 
+CFLAGS_BAK=$CFLAGS
+if test "$NAGINCLUDEDIR" = "./naginclude"; then
+	CFLAGS="$CFLAGS -I./mods/naginclude"
+else
+	CFLAGS="$CFLAGS -I$NAGINCLUDEDIR"
+fi
+AC_CHECK_DECL([add_check_result_to_list(check_result **, check_result *)],
+	AC_DEFINE([HAVE_ADD_CHECK_RESULT_TWO], [], [Two parameter add_check_result_to_list]),
+	[], [#include <nagios.h>
+#define __cplusplus])
+AC_CHECK_DECL([add_check_result_to_list(check_result *)],
+	AC_DEFINE([HAVE_ADD_CHECK_RESULT_ONE], [], [One parameter add_check_result_to_list]),
+	[], [#include <nagios.h>
+#define __cplusplus])
+AC_CHECK_DECL([delete_downtime_by_hostname_service_description_start_time_comment],
+	AC_DEFINE([HAVE_DELETE_DOWNTIME_LONGNAME], [], [Have the really really long function name for deleting downtimes]),
+	[], [#include <downtime.h>])
+CFLAGS=$CFLAGS_BAK
+
 AC_CONFIG_FILES([Makefile mods/Makefile dnxmq/Makefile libev/Makefile])
 AC_CONFIG_SUBDIRS([jansson])
 AC_OUTPUT
