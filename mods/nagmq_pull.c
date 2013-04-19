@@ -1,3 +1,4 @@
+#include "config.h"
 #include <sys/types.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -9,7 +10,11 @@
 #include "nebcallbacks.h"
 #include "nebmodules.h"
 #include "nebmods.h"
+#ifdef HAVE_ICINGA
+#include "icinga.h"
+#else
 #include "nagios.h"
+#endif
 #include "objects.h"
 #include "broker.h"
 #include "comments.h"
@@ -141,7 +146,7 @@ static void process_bulkstate(json_t * payload) {
 	json_decref(payload);
 }
 
-#ifdef(HAVE_ADD_CHECK_RESULT_TWO)
+#ifdef HAVE_ADD_CHECK_RESULT_TWO
 extern check_result * check_result_list;
 #endif
 
@@ -200,7 +205,7 @@ static void process_acknowledgement(json_t * payload) {
 	char *host_name, *service_description = NULL,
 		*author_name, *comment_data;
 	int persistent_comment = 0, notify_contacts = 0,
-		acknowledgement_type = 0;
+		acknowledgement_type = 0, end_time = 0;
 	host * host_target = NULL;
 	service * service_target = NULL;
 	json_error_t err;
@@ -212,6 +217,9 @@ static void process_acknowledgement(json_t * payload) {
 		"acknowledgement_type", JSON_INTEGER, 0, &acknowledgement_type,
 		"notify_contacts", JSON_TRUE, 0, &notify_contacts,
 		"persistent_comment", JSON_TRUE, 0, &persistent_comment,
+#ifdef HAVE_ICINGA
+		"end_time", JSON_INTEGER, 0, &end_time,
+#endif
 		NULL) != 0) {
 		json_decref(payload);
 		return;
@@ -221,12 +229,21 @@ static void process_acknowledgement(json_t * payload) {
 	if(service_description)
 		service_target = find_service(host_name, service_description);
 
+#ifdef HAVE_ICINGA
+	if(service_target)
+		acknowledge_service_problem(service_target, author_name, comment_data,
+			acknowledgement_type, notify_contacts, persistent_comment, end_time);
+	else if(host_target)
+		acknowledge_host_problem(host_target, author_name, comment_data,
+			acknowledgement_type, notify_contacts, persistent_comment, end_time);
+#else
 	if(service_target)
 		acknowledge_service_problem(service_target, author_name, comment_data,
 			acknowledgement_type, notify_contacts, persistent_comment);
 	else if(host_target)
 		acknowledge_host_problem(host_target, author_name, comment_data,
 			acknowledgement_type, notify_contacts, persistent_comment);
+#endif
 	json_decref(payload);
 }
 

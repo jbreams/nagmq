@@ -1,3 +1,4 @@
+#include "config.h"
 #include <sys/types.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -9,7 +10,11 @@
 #include "nebcallbacks.h"
 #include "nebmodules.h"
 #include "nebmods.h"
+#ifdef HAVE_ICINGA
+#include "icinga.h"
+#else
 #include "nagios.h"
+#endif
 #include "objects.h"
 #include "broker.h"
 #include "neberrors.h"

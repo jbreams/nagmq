@@ -49,11 +49,22 @@ if test "x$PCRE_CONFIG" != "x"; then
 	AC_DEFINE([HAVE_PCRE], [], [PCRE Libraries are installed])
 fi
 
-AC_ARG_WITH([nagios-headers],
-	[AC_HELP_STRING([--with-nagios-headers=DIR],
-		[Path to header files for Nagios])],
+NAGINCLUDEDIR=""
+AC_ARG_WITH([icinga-headers],
+	[AC_HELP_STRING([--with-icinga-headers=DIR],
+		[Path to header files for Icinga])],
 	[NAGINCLUDEDIR=$withval],
-	[NAGINCLUDEDIR="./naginclude"])
+	[])
+
+if test "x$NAGINCLUDEDIR" == "x"; then
+	AC_ARG_WITH([nagios-headers],
+		[AC_HELP_STRING([--with-nagios-headers=DIR],
+			[Path to header files for Nagios])],
+		[NAGINCLUDEDIR=$withval],
+		[NAGINCLUDEDIR="./naginclude"])
+else
+	AC_DEFINE([HAVE_ICINGA], [], [Compiling against Icinga])
+fi
 AC_SUBST([NAGINCLUDEDIR])
 
 CFLAGS_BAK=$CFLAGS
@@ -64,11 +75,23 @@ else
 fi
 AC_CHECK_DECL([add_check_result_to_list(check_result **, check_result *)],
 	AC_DEFINE([HAVE_ADD_CHECK_RESULT_TWO], [], [Two parameter add_check_result_to_list]),
-	[], [#include <nagios.h>
+	[], [
+AC_INCLUDES_DEFAULT
+#ifdef HAVE_ICINGA
+#include <icinga.h>
+#else
+#include <nagios.h>
+#endif
 #define __cplusplus])
 AC_CHECK_DECL([add_check_result_to_list(check_result *)],
 	AC_DEFINE([HAVE_ADD_CHECK_RESULT_ONE], [], [One parameter add_check_result_to_list]),
-	[], [#include <nagios.h>
+	[], [
+AC_INCLUDES_DEFAULT
+#ifdef HAVE_ICINGA
+#include <icinga.h>
+#else
+#include <nagios.h>
+#endif
 #define __cplusplus])
 AC_CHECK_DECL([delete_downtime_by_hostname_service_description_start_time_comment],
 	AC_DEFINE([HAVE_DELETE_DOWNTIME_LONGNAME], [], [Have the really really long function name for deleting downtimes]),
