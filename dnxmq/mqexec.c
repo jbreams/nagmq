@@ -554,7 +554,7 @@ int main(int argc, char ** argv) {
 	json_error_t config_err;
 	char ch, *configobj = "executor";
 
-	while((ch = getopt(argc, argv, "vsd")) != -1) {
+	while((ch = getopt(argc, argv, "vsdhc:")) != -1) {
 		switch(ch) {
 			case 'v':
 				verbose = 1;

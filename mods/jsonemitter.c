@@ -246,5 +246,6 @@ int payload_has_keys(struct payload * po, ...) {
 		if(po->hashed_keys[WORD_OFFSET(hashval)] & (1 << BIT_OFFSET(hashval)))
 			okay++;
 	}
+    va_end(ap);
 	return okay;
 }

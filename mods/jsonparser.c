@@ -91,5 +91,6 @@ int get_values(json_t * input, ...) {
 		}
 		key = va_arg(ap, char*);
 	}
+    va_end(ap);
 	return 0;
 }

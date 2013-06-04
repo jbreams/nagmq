@@ -31,7 +31,7 @@ void logit(int level, char * fmt, ...) {
 	}
 	else if(level == WARN)
 		err = LOG_WARNING;
-	else if(level == ERR);
+	else if(level == ERR)
 		err = LOG_ERR;
 	va_start(ap, fmt);
 	if(usesyslog)
@@ -220,8 +220,8 @@ void do_forward(void * in, void *out, void *mon, int noblock, int monnoblock) {
 		zmq_msg_init(&monmsg);
 		zmq_msg_copy(&monmsg, &tmpmsg);
 		if(zmq_msg_send(&monmsg, mon, flags) == -1) {
-			logit(WARN, "Error receiving message: %s", zmq_strerror(errno));
-			zmq_msg_close(&tmpmsg);
+			logit(WARN, "Error sending message: %s", zmq_strerror(errno));
+			zmq_msg_close(&monmsg);
 			return;
 		}
 		zmq_msg_close(&monmsg);
@@ -372,7 +372,7 @@ int main(int argc, char ** argv) {
 	char ch, * configname = "devices";
 	pthread_t * threads = NULL;
 
-	while((ch = getopt(argc, argv, "vsdc:")) != -1) {
+	while((ch = getopt(argc, argv, "vsdhc:")) != -1) {
 		switch(ch) {
 			case 'v':
 				verbose = 1;

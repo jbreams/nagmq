@@ -361,7 +361,7 @@ static void process_escalation_contacts(service * svc, host * hst, int type, str
 static struct payload * parse_notification(nebstruct_notification_data * state) {
 	struct payload * ret = payload_new();
 	service * service_obj = NULL;
-	host * host_obj;
+	host * host_obj = NULL;
 
 	if(state->service_description) {
 		service_obj = (service*)state->object_ptr;
