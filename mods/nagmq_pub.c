@@ -561,7 +561,7 @@ static int safe_msg_send(zmq_msg_t * msg, void * sock, int flags) {
 			syslog(LOG_ERR, "Error publishing event: %s", zmq_strerror(errno));
 			return -1;
 		}
-	} while(rc != 0);
+	} while(rc == -1);
 	return 0;
 }
 
