@@ -5,6 +5,7 @@
 #include <time.h>
 #include <syslog.h>
 #include <string.h>
+#include <math.h>
 #define NSCORE 1
 #include "nebstructs.h"
 #include "nebcallbacks.h"
@@ -39,7 +40,10 @@ static struct payload * parse_program_status(nebstruct_program_status_data * sta
 	payload_new_integer(ret, "program_start", state->program_start);
 	payload_new_integer(ret, "pid", state->pid);
 	payload_new_integer(ret, "daemon_mode", state->daemon_mode);
+#ifndef HAVE_NAGIOS4
 	payload_new_integer(ret, "last_command_check", state->last_command_check);
+	payload_new_boolean(ret, "failure_prediction_enabled", state->failure_prediction_enabled);
+#endif
 	payload_new_integer(ret, "last_log_rotation", state->last_log_rotation);
 	payload_new_boolean(ret, "notifications_enabled", state->notifications_enabled);
 	payload_new_boolean(ret, "active_service_checks_enabled", state->active_service_checks_enabled);
@@ -48,7 +52,6 @@ static struct payload * parse_program_status(nebstruct_program_status_data * sta
 	payload_new_boolean(ret, "passive_host_checks_enabled", state->passive_host_checks_enabled);
 	payload_new_boolean(ret, "event_handlers_enabled", state->event_handlers_enabled);
 	payload_new_boolean(ret, "flap_detection_enabled", state->flap_detection_enabled);
-	payload_new_boolean(ret, "failure_prediction_enabled", state->failure_prediction_enabled);
 	payload_new_boolean(ret, "process_performance_data", state->process_performance_data);
 	payload_new_boolean(ret, "obsess_over_hosts", state->obsess_over_hosts);
 	payload_new_boolean(ret, "obsess_over_services", state->obsess_over_services);
@@ -104,18 +107,22 @@ static struct payload * parse_event_handler(nebstruct_event_handler_data * state
 	return ret;
 }
 
+#ifndef HAVE_NAGIOS4
 // Stupid Nagios 3.x global variable
 extern check_result check_result_info;
+#endif
 
 static struct payload * parse_host_check(nebstruct_host_check_data * state) {
 	struct payload * ret = payload_new();
-	host * obj = (host*)state->object_ptr; 
+	host * obj = (host*)state->object_ptr;
+#ifdef HAVE_NAGIOS4
+	check_result * cri = state->check_result_ptr;
+#else
+	check_result * cri = &check_result_info;
+#endif
 
 	payload_new_string(ret, "host_name", state->host_name);
 	payload_new_integer(ret, "check_type", state->check_type);
-	payload_new_integer(ret, "check_options", check_result_info.check_options);
-	payload_new_integer(ret, "scheduled_check", check_result_info.scheduled_check);
-	payload_new_integer(ret, "reschedule_check", check_result_info.reschedule_check);
 	payload_new_integer(ret, "current_attempt", state->current_attempt);
 	payload_new_integer(ret, "max_attempts", state->max_attempts);
 	payload_new_integer(ret, "state", state->state);
@@ -137,7 +144,14 @@ static struct payload * parse_host_check(nebstruct_host_check_data * state) {
 		payload_new_boolean(ret, "has_been_checked", obj->has_been_checked);
 		payload_new_integer(ret, "check_interval", obj->check_interval);
 		payload_new_integer(ret, "retry_interval", obj->retry_interval);
+		payload_new_integer(ret, "check_options", cri->check_options);
+		payload_new_integer(ret, "scheduled_check", cri->scheduled_check);
+		payload_new_integer(ret, "reschedule_check", cri->reschedule_check);
+#ifdef HAVE_NAGIOS4
+		payload_new_boolean(ret, "accept_passive_checks", obj->accept_passive_checks);
+#else
 		payload_new_boolean(ret, "accept_passive_checks", obj->accept_passive_host_checks);
+#endif
 	} else if(state->type == NEBTYPE_HOSTCHECK_PROCESSED) {
 		payload_new_string(ret, "type", "host_check_processed");
 		payload_new_timestamp(ret, "start_time", &state->start_time);
@@ -155,13 +169,15 @@ static struct payload * parse_host_check(nebstruct_host_check_data * state) {
 static struct payload * parse_service_check(nebstruct_service_check_data * state) {
 	struct payload * ret = payload_new();
 	service * obj = (service*)state->object_ptr;
+#ifdef HAVE_NAGIOS4
+	check_result * cri = state->check_result_ptr;
+#else
+	check_result * cri = &check_result_info;
+#endif
 
 	payload_new_string(ret, "host_name", state->host_name);
 	payload_new_string(ret, "service_description", state->service_description);
 	payload_new_integer(ret, "check_type", state->check_type);
-	payload_new_integer(ret, "check_options", check_result_info.check_options);
-	payload_new_integer(ret, "scheduled_check", check_result_info.scheduled_check);
-	payload_new_integer(ret, "reschedule_check", check_result_info.reschedule_check);
 	payload_new_integer(ret, "current_attempt", state->current_attempt);
 	payload_new_integer(ret, "max_attempts", state->max_attempts);
 	payload_new_integer(ret, "state", state->state);
@@ -183,7 +199,14 @@ static struct payload * parse_service_check(nebstruct_service_check_data * state
 		payload_new_boolean(ret, "has_been_checked", obj->has_been_checked);
 		payload_new_integer(ret, "check_interval", obj->check_interval);
 		payload_new_integer(ret, "retry_interval", obj->retry_interval);
+		payload_new_integer(ret, "check_options", cri->check_options);
+		payload_new_integer(ret, "scheduled_check", cri->scheduled_check);
+		payload_new_integer(ret, "reschedule_check", cri->reschedule_check);
+#ifdef HAVE_NAGIOS4
+		payload_new_boolean(ret, "accept_passive_checks", obj->accept_passive_checks);
+#else
 		payload_new_boolean(ret, "accept_passive_checks", obj->accept_passive_service_checks);
+#endif
 	} else if(state->type == NEBTYPE_SERVICECHECK_PROCESSED) {
 		payload_new_string(ret, "type", "service_check_processed");
 		payload_new_timestamp(ret, "start_time", &state->start_time);
@@ -338,6 +361,29 @@ static void process_contactgroups(service * svc, host * hst, contactgroupsmember
 	}
 }
 
+#ifdef HAVE_NAGIOS4
+static void process_escalation_contacts(service * svc, host * hst, int type, struct payload * ret) {
+	void * ptr = NULL;
+	objectlist * set = svc != NULL ? svc->escalation_list : NULL;
+	objectlist * het = hst != NULL ? hst->escalation_list : NULL;
+
+	for(; set != NULL; set = set->next) {
+		serviceescalation * se = set->object_ptr;
+		if(is_valid_escalation_for_service_notification(svc, se, 0) == FALSE)
+			continue;
+		process_contacts(svc, NULL, se->contacts, type, ret);
+		process_contactgroups(svc, NULL, se->contact_groups, type, ret);
+	}
+
+	for(; het != NULL; het = het->next) {
+		hostescalation * he = het->object_ptr;
+		if(is_valid_escalation_for_host_notification(hst, he, 0) == FALSE)
+			continue;
+		process_contacts(NULL, hst, he->contacts, type, ret);
+		process_contactgroups(NULL, hst, he->contact_groups, type, ret);
+	}
+}
+#else
 static void process_escalation_contacts(service * svc, host * hst, int type, struct payload * ret) {
 	void * ptr = NULL;
 	serviceescalation * set = svc != NULL ? get_first_serviceescalation_by_service(svc->host_name, svc->description, &ptr) : NULL;
@@ -357,6 +403,7 @@ static void process_escalation_contacts(service * svc, host * hst, int type, str
 		process_contactgroups(NULL, hst, het->contact_groups, type, ret);
 	}
 }
+#endif
 
 static struct payload * parse_notification(nebstruct_notification_data * state) {
 	struct payload * ret = payload_new();
@@ -414,7 +461,11 @@ static struct payload * parse_notification(nebstruct_notification_data * state) 
 		payload_new_statestr(ret, "last_hard_state_str", host_obj->last_hard_state, host_obj->has_been_checked, 0);
 		payload_new_integer(ret, "last_check", host_obj->last_check);
 		payload_new_integer(ret, "last_state_change", host_obj->last_state_change);
+#ifdef HAVE_NAGIOS4
+		payload_new_integer(ret, "last_notification", host_obj->last_notification);
+#else
 		payload_new_integer(ret, "last_notification", host_obj->last_host_notification);
+#endif
 		payload_new_statestr(ret, "state_str", state->state, host_obj->has_been_checked, 1);
 
 		payload_start_array(ret, "recipients");
@@ -492,12 +543,21 @@ static struct payload * parse_adaptivechange(nebstruct_adaptive_host_data * stat
 			break;
 		case MODATTR_PASSIVE_CHECKS_ENABLED:
 			payload_new_string(ret, "attr", "passive_checks_enabled");
+#ifdef HAVE_NAGIOS4
+			if(svc)
+				payload_new_boolean(ret, "accept_passive_checks",
+					svc->accept_passive_checks);
+			else if(hst)
+				payload_new_boolean(ret, "accept_passive_checks",
+					svc->accept_passive_checks);
+#else
 			if(svc)
 				payload_new_boolean(ret, "accept_passive_service_checks",
 					svc->accept_passive_service_checks);
 			else if(hst)
 				payload_new_boolean(ret, "accept_passive_host_checks",
 					hst->accept_passive_host_checks);
+#endif
 			break;
 		case MODATTR_EVENT_HANDLER_ENABLED:
 			payload_new_string(ret, "attr", "event_handler_enabled");
@@ -519,12 +579,19 @@ static struct payload * parse_adaptivechange(nebstruct_adaptive_host_data * stat
 			break;
 		case MODATTR_OBSESSIVE_HANDLER_ENABLED:
 			payload_new_string(ret, "attr", "obsessive_handler_enabled");
+#ifdef HAVE_NAGIOS4
+			if(svc)
+				payload_new_boolean(ret, "obsess", svc->obsess);
+			else if(hst)
+				payload_new_boolean(ret, "obsess", hst->obsess);
+#else
 			if(svc)
 				payload_new_boolean(ret, "obsess_over_service",
 					svc->obsess_over_service);
 			else if(hst)
 				payload_new_boolean(ret, "obsess_over_host",
 					hst->obsess_over_host);
+#endif
 			break;
 		case MODATTR_EVENT_HANDLER_COMMAND:
 			payload_new_string(ret, "attr", "event_handler_command");

@@ -17,7 +17,7 @@
 #endif
 #include "objects.h"
 #include "broker.h"
-#include "skiplist.h"
+//#include "skiplist.h"
 #include "comments.h"
 #include "downtime.h"
 #include <zmq.h>
@@ -269,7 +269,6 @@ static void parse_host(host * state, struct payload * ret) {
 	} else
 		payload_new_string(ret, "hostgroups", NULL);
 
-	payload_new_string(ret, "check_command", state->host_check_command);
 	payload_new_integer(ret, "initial_state", state->initial_state);
 	payload_new_double(ret, "check_interval", state->check_interval);
 	payload_new_double(ret, "retry_interval", state->retry_interval);
@@ -277,31 +276,22 @@ static void parse_host(host * state, struct payload * ret) {
 	payload_new_string(ret, "event_handler", state->event_handler);
 	payload_new_double(ret, "notification_interval", state->notification_interval);
 	payload_new_double(ret, "first_notification_delay", state->first_notification_delay);
-	payload_new_boolean(ret, "notify_on_down", state->notify_on_down);
-	payload_new_boolean(ret, "notify_on_unreachable", state->notify_on_unreachable);
-	payload_new_boolean(ret, "notify_on_recovery", state->notify_on_recovery);
-	payload_new_boolean(ret, "notify_on_flapping", state->notify_on_flapping);
-	payload_new_boolean(ret, "notify_on_downtime", state->notify_on_downtime);
 	payload_new_string(ret, "notification_period", state->notification_period);
 	payload_new_string(ret, "check_period", state->check_period);
 	payload_new_boolean(ret, "flap_detection_enabled", state->flap_detection_enabled);
 	payload_new_double(ret, "low_flap_threshold", state->low_flap_threshold);
 	payload_new_double(ret, "high_flap_threshold", state->high_flap_threshold);
-	payload_new_boolean(ret, "flap_detection_on_up", state->flap_detection_on_up);
-	payload_new_boolean(ret, "flap_detection_on_down", state->flap_detection_on_down);
-	payload_new_boolean(ret, "flap_detection_on_unreachable", state->flap_detection_on_unreachable);
-	payload_new_boolean(ret, "stalk_on_up", state->stalk_on_up);
-	payload_new_boolean(ret, "stalk_on_down", state->stalk_on_down);
-	payload_new_boolean(ret, "stalk_on_unreachable", state->stalk_on_unreachable);
 	payload_new_boolean(ret, "check_freshness", state->check_freshness);
 	payload_new_integer(ret, "freshness_threshold", state->freshness_threshold);
 	payload_new_boolean(ret, "process_performance_data", state->process_performance_data);
 	payload_new_boolean(ret, "checks_enabled", state->checks_enabled);
-	payload_new_boolean(ret, "accept_passive_host_checks", state->accept_passive_host_checks);
 	payload_new_boolean(ret, "event_handler_enabled", state->event_handler_enabled);
+#ifndef HAVE_NAGIOS4
 	payload_new_boolean(ret, "failure_prediction_enabled", state->failure_prediction_enabled);
 	payload_new_string(ret, "failure_prediction_options", state->failure_prediction_options);
-	payload_new_boolean(ret, "obsess_over_host", state->obsess_over_host);
+	payload_new_integer(ret, "circular_path_checked", state->circular_path_checked);
+	payload_new_integer(ret, "contains_circular_path", state->contains_circular_path);
+#endif
 	payload_new_string(ret, "notes", state->notes);
 	payload_new_string(ret, "notes_url", state->notes_url);
 	payload_new_string(ret, "action_url", state->action_url);
@@ -320,8 +310,6 @@ static void parse_host(host * state, struct payload * ret) {
 	payload_new_boolean(ret, "retain_status_information", state->retain_status_information);
 	payload_new_boolean(ret, "retain_nonstatus_information", state->retain_nonstatus_information);
 	payload_new_integer(ret, "modified_attributes", state->modified_attributes);
-	payload_new_integer(ret, "circular_path_checked", state->circular_path_checked);
-	payload_new_integer(ret, "contains_circular_path", state->contains_circular_path);
 	payload_new_boolean(ret, "problem_has_been_acknowledged", state->problem_has_been_acknowledged);
 	payload_new_integer(ret, "current_state", state->current_state);
 	payload_new_statestr(ret, "current_state_str", state->current_state, state->has_been_checked, 0);
@@ -343,8 +331,6 @@ static void parse_host(host * state, struct payload * ret) {
 	payload_new_boolean(ret, "is_executing", state->is_executing);
 	payload_new_integer(ret, "check_options", state->check_options);
 	payload_new_boolean(ret, "notifications_enabled", state->notifications_enabled);
-	payload_new_integer(ret, "last_notification", state->last_host_notification);
-	payload_new_integer(ret, "next_notification", state->next_host_notification);
 	payload_new_integer(ret, "next_check", state->next_check);
 	payload_new_boolean(ret, "should_be_scheduled", state->should_be_scheduled);
 	payload_new_integer(ret, "last_check", state->last_check);
@@ -355,8 +341,36 @@ static void parse_host(host * state, struct payload * ret) {
 	payload_new_integer(ret, "last_time_unreachable", state->last_time_unreachable);
 	payload_new_boolean(ret, "has_been_checked", state->has_been_checked);
 	payload_new_boolean(ret, "is_being_freshened", state->is_being_freshened);
+#ifdef HAVE_NAGIOS4
+	payload_new_integer(ret, "notified_on", state->notified_on);
+	payload_new_integer(ret, "notification_options", state->notification_options);
+	payload_new_integer(ret, "flap_detection_options", state->flap_detection_options);
+	payload_new_integer(ret, "stalking_options", state->stalking_options);
+	payload_new_integer(ret, "last_notification", state->last_notification);
+	payload_new_integer(ret, "next_notification", state->next_notification);
+	payload_new_boolean(ret, "accept_passive_checks", state->accept_passive_checks);
+	payload_new_boolean(ret, "obsess", state->obsess);
+	payload_new_string(ret, "check_command", state->check_command);
+#else
 	payload_new_boolean(ret, "notified_on_down", state->notified_on_down);
 	payload_new_boolean(ret, "notified_on_unreachable", state->notified_on_unreachable);
+	payload_new_boolean(ret, "notify_on_down", state->notify_on_down);
+	payload_new_boolean(ret, "notify_on_unreachable", state->notify_on_unreachable);
+	payload_new_boolean(ret, "notify_on_recovery", state->notify_on_recovery);
+	payload_new_boolean(ret, "notify_on_flapping", state->notify_on_flapping);
+	payload_new_boolean(ret, "notify_on_downtime", state->notify_on_downtime);
+	payload_new_boolean(ret, "flap_detection_on_up", state->flap_detection_on_up);
+	payload_new_boolean(ret, "flap_detection_on_down", state->flap_detection_on_down);
+	payload_new_boolean(ret, "flap_detection_on_unreachable", state->flap_detection_on_unreachable);
+	payload_new_boolean(ret, "stalk_on_up", state->stalk_on_up);
+	payload_new_boolean(ret, "stalk_on_down", state->stalk_on_down);
+	payload_new_boolean(ret, "stalk_on_unreachable", state->stalk_on_unreachable);
+	payload_new_integer(ret, "last_notification", state->last_host_notification);
+	payload_new_integer(ret, "next_notification", state->next_host_notification);
+	payload_new_boolean(ret, "accept_passive_host_checks", state->accept_passive_host_checks);
+	payload_new_boolean(ret, "obsess_over_host", state->obsess_over_host);
+	payload_new_string(ret, "check_command", state->host_check_command);
+#endif
 	payload_new_integer(ret, "current_notification_number", state->current_notification_number);
 	payload_new_boolean(ret, "no_more_notifications", state->no_more_notifications);
 	payload_new_integer(ret, "current_notification_id", state->current_notification_id);
@@ -408,7 +422,6 @@ static void parse_service(service * state, struct payload * ret) {
 	payload_new_string(ret, "host_name", state->host_name);
 	payload_new_string(ret, "service_description", state->description);
 	payload_new_string(ret, "display_name", state->display_name);
-	payload_new_string(ret, "check_command", state->service_check_command);
 	payload_new_string(ret, "event_handler", state->event_handler);
 	payload_new_integer(ret, "initial_state", state->initial_state);
 	payload_new_double(ret, "check_interval", state->check_interval);
@@ -448,6 +461,15 @@ static void parse_service(service * state, struct payload * ret) {
 
 	payload_new_double(ret, "notification_interval", state->notification_interval);
 	payload_new_double(ret, "first_notification_delay", state->first_notification_delay);
+#ifdef HAVE_NAGIOS4
+	payload_new_integer(ret, "notification_options", state->notification_options);
+	payload_new_integer(ret, "stalking_options", state->stalking_options);
+	payload_new_integer(ret, "flap_detection_options", state->flap_detection_options);
+	payload_new_integer(ret, "notified_on", state->notified_on);
+	payload_new_boolean(ret, "obsess", state->obsess);
+	payload_new_string(ret, "check_command", state->check_command);
+	payload_new_boolean(ret, "accept_passive_checks", state->accept_passive_checks);
+#else
 	payload_new_boolean(ret, "notify_on_unknown", state->notify_on_unknown);
 	payload_new_boolean(ret, "notify_on_warning", state->notify_on_warning);
 	payload_new_boolean(ret, "notify_on_critical", state->notify_on_critical);
@@ -458,26 +480,33 @@ static void parse_service(service * state, struct payload * ret) {
 	payload_new_boolean(ret, "stalk_on_warning", state->stalk_on_warning);
 	payload_new_boolean(ret, "stalk_on_unknown", state->stalk_on_unknown);
 	payload_new_boolean(ret, "stalk_on_critical", state->stalk_on_critical);
+	payload_new_boolean(ret, "flap_detection_on_ok", state->flap_detection_on_ok);
+	payload_new_boolean(ret, "flap_detection_on_warning", state->flap_detection_on_warning);
+	payload_new_boolean(ret, "flap_detection_on_unknown", state->flap_detection_on_unknown);
+	payload_new_boolean(ret, "flap_detection_on_critical", state->flap_detection_on_critical);
+	payload_new_boolean(ret, "notified_on_unknown", state->notified_on_unknown);
+	payload_new_boolean(ret, "notified_on_warning", state->notified_on_warning);
+	payload_new_boolean(ret, "notified_on_critical", state->notified_on_critical);
+	payload_new_boolean(ret, "obsess_over_service", state->obsess_over_service);
+	payload_new_string(ret, "check_command", state->service_check_command);
+	payload_new_boolean(ret, "accept_passive_service_checks", state->accept_passive_service_checks);
+#endif
 	payload_new_boolean(ret, "is_volatile", state->is_volatile);
 	payload_new_string(ret, "notification_period", state->notification_period);
 	payload_new_string(ret, "check_period", state->check_period);
 	payload_new_boolean(ret, "flap_detection_enabled", state->flap_detection_enabled);
 	payload_new_double(ret, "low_flap_threshold", state->low_flap_threshold);
 	payload_new_double(ret, "high_flap_threshold", state->high_flap_threshold);
-	payload_new_boolean(ret, "flap_detection_on_ok", state->flap_detection_on_ok);
-	payload_new_boolean(ret, "flap_detection_on_warning", state->flap_detection_on_warning);
-	payload_new_boolean(ret, "flap_detection_on_unknown", state->flap_detection_on_unknown);
-	payload_new_boolean(ret, "flap_detection_on_critical", state->flap_detection_on_critical);
 	payload_new_boolean(ret, "process_performance_data", state->process_performance_data);
 	payload_new_integer(ret, "check_freshness", state->check_freshness);
 	payload_new_integer(ret, "freshness_threshold", state->freshness_threshold);
-	payload_new_boolean(ret, "accept_passive_service_checks", state->accept_passive_service_checks);
 	payload_new_boolean(ret, "event_handler_enabled", state->event_handler_enabled);
 	payload_new_boolean(ret, "checks_enabled", state->checks_enabled);
 	payload_new_boolean(ret, "notifications_enabled", state->notifications_enabled);
-	payload_new_boolean(ret, "obsess_over_service", state->obsess_over_service);
+#ifndef HAVE_NAGIOS4
 	payload_new_boolean(ret, "failure_prediction_enabled", state->failure_prediction_enabled);
 	payload_new_string(ret, "failure_prediction_options", state->failure_prediction_options);
+#endif
 	payload_new_string(ret, "notes", state->notes);
 	payload_new_string(ret, "notes_url", state->notes_url);
 	payload_new_string(ret, "action_url", state->action_url);
@@ -518,9 +547,6 @@ static void parse_service(service * state, struct payload * ret) {
 	payload_new_integer(ret, "last_time_critical", state->last_time_critical);
 	payload_new_boolean(ret, "has_been_checked", state->has_been_checked);
 	payload_new_boolean(ret, "is_being_freshened", state->is_being_freshened);
-	payload_new_boolean(ret, "notified_on_unknown", state->notified_on_unknown);
-	payload_new_boolean(ret, "notified_on_warning", state->notified_on_warning);
-	payload_new_boolean(ret, "notified_on_critical", state->notified_on_critical);
 	payload_new_integer(ret, "current_notification_number", state->current_notification_number);
 	payload_new_integer(ret, "current_notification_id", state->current_notification_id);
 	payload_new_double(ret, "latency", state->latency);
@@ -656,6 +682,10 @@ static void parse_contact(contact * state, struct payload * ret) {
 		payload_end_array(ret);
 	} else
 		payload_new_string(ret, "contactgroups", NULL);
+#ifdef HAVE_NAGIOS4
+	payload_new_integer(ret, "host_notification_options_int", state->host_notification_options);
+	payload_new_integer(ret, "service_notification_options_int", state->service_notification_options);
+#else
 	payload_new_boolean(ret, "notify_on_service_unknown", state->notify_on_service_unknown);
 	payload_new_boolean(ret, "notify_on_service_warning", state->notify_on_service_warning);
 	payload_new_boolean(ret, "notify_on_service_critical", state->notify_on_service_critical);
@@ -667,34 +697,81 @@ static void parse_contact(contact * state, struct payload * ret) {
 	payload_new_boolean(ret, "notify_on_host_recovery", state->notify_on_host_recovery);
 	payload_new_boolean(ret, "notify_on_host_flapping", state->notify_on_host_flapping);
 	payload_new_boolean(ret, "notify_on_host_downtime", state->notify_on_host_downtime);
+#endif
 	payload_new_string(ret, "host_notification_period", state->host_notification_period);
 
 	if(payload_start_array(ret, "host_notification_options")) {
+#ifdef HAVE_NAGIOS4
+		int options = state->host_notification_options;
+		if(options & OPT_DOWN)
+#else
 		if(state->notify_on_host_down)
+#endif
 			payload_new_string(ret, NULL, "d");
+#ifdef HAVE_NAGIOS4
+		if(options & OPT_UNREACHABLE)
+#else
 		if(state->notify_on_host_unreachable)
+#endif
 			payload_new_string(ret, NULL, "u");
+#ifdef HAVE_NAGIOS4
+		if(options & OPT_RECOVERY)
+#else
 		if(state->notify_on_host_recovery)
+#endif
 			payload_new_string(ret, NULL, "r");
+#ifdef HAVE_NAGIOS4
+		if(options & OPT_FLAPPING)
+#else
 		if(state->notify_on_host_flapping)
+#endif
 			payload_new_string(ret, NULL, "f");
+#ifdef HAVE_NAGIOS4
+		if(options & OPT_DOWNTIME)
+#else
 		if(state->notify_on_host_downtime)
+#endif
 			payload_new_string(ret, NULL, "s");
 		payload_end_array(ret);
 	}
 
 	if(payload_start_array(ret, "service_notification_options")) {
+#ifdef HAVE_NAGIOS4
+		int options = state->service_notification_options;
+		if(options & OPT_UNKNOWN)
+#else
 		if(state->notify_on_service_unknown)
+#endif
 			payload_new_string(ret, NULL, "u");
+#ifdef HAVE_NAGIOS4
+		if(options & OPT_WARNING)
+#else
 		if(state->notify_on_service_warning)
+#endif
 			payload_new_string(ret, NULL, "w");
+#ifdef HAVE_NAGIOS4
+		if(options & OPT_CRITICAL)
+#else
 		if(state->notify_on_service_critical)
+#endif
 			payload_new_string(ret, NULL, "c");
+#ifdef HAVE_NAGIOS4
+		if(options & OPT_RECOVERY)
+#else
 		if(state->notify_on_service_recovery)
+#endif
 			payload_new_string(ret, NULL, "r");
+#ifdef HAVE_NAGIOS4
+		if(options & OPT_FLAPPING)
+#else
 		if(state->notify_on_service_flapping)
+#endif
 			payload_new_string(ret, NULL, "f");
+#ifdef HAVE_NAGIOS4
+		if(options & OPT_DOWNTIME)
+#else
 		if(state->notify_on_service_downtime)
+#endif
 			payload_new_string(ret, NULL, "s");
 		payload_end_array(ret);
 	}

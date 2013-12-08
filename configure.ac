@@ -49,30 +49,45 @@ if test "x$PCRE_CONFIG" != "x"; then
 	AC_DEFINE([HAVE_PCRE], [], [PCRE Libraries are installed])
 fi
 
-NAGINCLUDEDIR=""
+WITHHEADERS="no"
 AC_ARG_WITH([icinga-headers],
 	[AC_HELP_STRING([--with-icinga-headers=DIR],
 		[Path to header files for Icinga])],
-	[NAGINCLUDEDIR=$withval],
-	[])
+	[
+		WITHHEADERS="-I$withval"
+		AC_DEFINE([HAVE_ICINGA], [], [Compiling against Icinga])
+	],
+	[]
+)
 
-if test "x$NAGINCLUDEDIR" == "x"; then
-	AC_ARG_WITH([nagios-headers],
-		[AC_HELP_STRING([--with-nagios-headers=DIR],
-			[Path to header files for Nagios])],
-		[NAGINCLUDEDIR=$withval],
-		[NAGINCLUDEDIR="./naginclude"])
-else
-	AC_DEFINE([HAVE_ICINGA], [], [Compiling against Icinga])
-fi
-AC_SUBST([NAGINCLUDEDIR])
+AC_ARG_WITH([nagios-headers],
+	[AC_HELP_STRING([--with-nagios3-headers=DIR],
+		[Path to header files for Nagios])],
+	[
+		WITHEADERS="-I$withval"
+		AC_DEFINE([HAVE_NAGIOS3], [], [Compiling against Nagios 3])
+	],
+	[]
+)
+
+AC_ARG_WITH([nagios4-src],
+	[AC_HELP_STRING([--with-nagios4-src=DIR],
+		[Path to source files for Nagios 4])],
+	[
+		WITHHEADERS="-I$withval/include -I$withval"
+		AC_DEFINE([HAVE_NAGIOS4], [], [Compiling against Nagios 4])
+	],
+	[]
+)
 
 CFLAGS_BAK=$CFLAGS
-if test "$NAGINCLUDEDIR" = "./naginclude"; then
-	CFLAGS="$CFLAGS -I./mods/naginclude"
-else
-	CFLAGS="$CFLAGS -I$NAGINCLUDEDIR"
+if test "$WITHHEADERS" = "no"; then
+	WITHHEADERS="-I./mods/naginclude"
+	CFLAGS="$CFLAGS $WITHHEADERS"
 fi
+
+AC_SUBST([WITHHEADERS])
+
 AC_CHECK_DECL([add_check_result_to_list(check_result **, check_result *)],
 	AC_DEFINE([HAVE_ADD_CHECK_RESULT_TWO], [], [Two parameter add_check_result_to_list]),
 	[], [

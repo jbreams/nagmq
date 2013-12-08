@@ -18,7 +18,6 @@
 #endif
 #include "objects.h"
 #include "broker.h"
-#include "skiplist.h"
 #include <zmq.h>
 #include "json.h"
 #include "jansson.h"
@@ -190,6 +189,7 @@ void * getsock(char * forwhat, int type, json_t * def) {
 void * pullsock = NULL, * reqsock = NULL;
 extern void * pubext;
 
+#ifndef HAVE_NAGIOS4
 int handle_timedevent(int which, void * obj) {
 	nebstruct_timed_event_data * data = obj;
 	struct timespec * delay = NULL;
@@ -265,6 +265,7 @@ int handle_timedevent(int which, void * obj) {
 
 	return 0;
 }
+#endif
 
 void input_reaper(void * insock) {
 	while(1) {
@@ -289,6 +290,15 @@ void input_reaper(void * insock) {
 		zmq_msg_close(&input);
 	}
 }
+
+#ifdef HAVE_NAGIOS4
+int brokered_input_reaper(int sd, int events, void * arg) {
+	input_reaper(arg);
+	return 0;
+}
+
+extern iobroker_set *nagios_iobs;
+#endif
 
 int handle_startup(int which, void * obj) {
 	struct nebstruct_process_struct *ps = (struct nebstruct_process_struct *)obj;
@@ -332,8 +342,15 @@ int handle_startup(int which, void * obj) {
 					NULL);
 				if((pullsock = getsock("pull", ZMQ_PULL, pulldef)) == NULL)
 					return -1;
+#ifdef HAVE_NAGIOS4
+				int fd;
+				size_t throwaway = sizeof(fd);
+				zmq_getsockopt(pullsock, ZMQ_FD, &fd, &throwaway);
+				iobroker_register(nagios_iobs, fd, pullsock, brokered_input_reaper);
+#else
 				schedule_new_event(EVENT_USER_FUNCTION, 1, now, 1, interval,
 					NULL, 1, input_reaper, pullsock, 0);
+#endif
 			}
 
 			if(reqdef) {
@@ -343,12 +360,21 @@ int handle_startup(int which, void * obj) {
 					NULL);
 				if((reqsock = getsock("reply", ZMQ_REP, reqdef)) == NULL)
 					return -1;
+#ifdef HAVE_NAGIOS4
+				int fd;
+				size_t throwaway = sizeof(fd);
+				zmq_getsockopt(reqsock, ZMQ_FD, &fd, &throwaway);
+				iobroker_register(nagios_iobs, fd, reqsock, brokered_input_reaper);
+#else
 				schedule_new_event(EVENT_USER_FUNCTION, 1, now, 1, interval,
 					NULL, 1, input_reaper, reqsock, 0);
+#endif
 			}
 
+#ifndef HAVE_NAGIOS4
 			if(pulldef || reqdef)
 				neb_register_callback(NEBCALLBACK_TIMED_EVENT_DATA, handle, 0, handle_timedevent);
+#endif
 			break;
 		}
 		case NEBTYPE_PROCESS_SHUTDOWN:
