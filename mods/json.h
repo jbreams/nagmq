@@ -6,7 +6,7 @@ struct payload {
 	char * host_name;
 	char * service_description;
 	char * json_buf;
-	uint32_t hashed_keys[30];
+	uint32_t hashed_keys[24];
 	char use_hash;
 	size_t buflen, bufused;
 	char keep_auxdata;

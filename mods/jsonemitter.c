@@ -12,7 +12,7 @@
  * $ perl -ne '/payload_(start|new)_\w+\(\w+, \"(\w+)\"/ && print "$2\n"' *.c | sort -u | gperf -m 10000 -H hash_output_key -N in_output_word_set -C -r > output_hash_raw.c
  *
  * After updating output_hash_raw.c, you must update json.h, so that the size of 
- * payload->hashed_keys == (BITS_PER_UINT32 / MAX_HASH_VALUE) + 1
+ * payload->hashed_keys == (MAX_HASH_VALUE/32) + 1
  */
 #include "output_hash_raw.c"
 

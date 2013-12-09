@@ -2,7 +2,7 @@ import zmq, time, json
 context = zmq.Context()
 
 pub = context.socket(zmq.REQ)
-pub.connect("ipc:///tmp/nagmqreply.sock")
+pub.connect("ipc:///tmp/nagmqstate.sock")
 keys = ['host_name', 'services', 'hosts', 'contacts', 'contact_groups',
         'service_description', 'current_state', 'members', 'type', 'name',
         'problem_has_been_acknowledged', 'plugin_output' ]

@@ -459,6 +459,28 @@ static void parse_service(service * state, struct payload * ret) {
 	} else
 		payload_new_string(ret, "servicegroups", NULL);
 
+#ifdef HAVE_NAGIOS4
+	struct servicesmember * pslck = state->parents;
+	if(pslck && payload_start_array(ret, "parents")) {
+		while(pslck) {
+			payload_new_string(ret, NULL, pslck->service_description);
+			pslck = pslck->next;
+		}
+		payload_end_array(ret);
+	} else
+		payload_new_string(ret, "parents", NULL);
+
+	struct servicesmember * cslck = state->children;
+	if(cslck && payload_start_array(ret, "children")) {
+		while(cslck) {
+			payload_new_string(ret, NULL, cslck->service_description);
+			cslck = cslck->next;
+		}
+		payload_end_array(ret);
+	} else
+		payload_new_string(ret, "parents", NULL);
+#endif
+
 	payload_new_double(ret, "notification_interval", state->notification_interval);
 	payload_new_double(ret, "first_notification_delay", state->first_notification_delay);
 #ifdef HAVE_NAGIOS4
