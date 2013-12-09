@@ -11,6 +11,7 @@
 #include <zmq.h>
 #include <jansson.h>
 #include <syslog.h>
+#include <limits.h>
 #include <sys/types.h>
 #ifdef HAVE_PCRE
 #include <pcre.h>
@@ -33,6 +34,8 @@ char myfqdn[255];
 char mynodename[255];
 uint32_t runningjobs = 0;
 ev_io pullio;
+char rootpath[PATH_MAX];
+size_t rootpathlen = 0;
 
 struct child_job {
 	json_t * input;
@@ -393,6 +396,14 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 	j->host_name = hostname;
 	j->service_description = svcdesc;
 
+	if(rootpathlen && strncmp(command_line, rootpath, rootpathlen) != 0) {
+		logit(ERR, "Refusing to execute job outside sandbox %s", command_line);
+		obj_for_ending(j, "Command line outside sandbox", 3, 0, 0);
+		free(j);
+		json_decref(input);
+		return;
+	}
+
 	if(pipe(fds) < 0) {
 		logit(ERR, "Error creating pipe for %s: %s",
 			command_line, strerror(errno));
@@ -552,7 +563,7 @@ int main(int argc, char ** argv) {
 	size_t pullfds = sizeof(pullfd);
 	json_t * config, *filter = NULL;
 	json_error_t config_err;
-	char ch, *configobj = "executor";
+	char ch, *configobj = "executor", *tmprootpath = NULL;
 
 	while((ch = getopt(argc, argv, "vsdhc:")) != -1) {
 		switch(ch) {
@@ -600,11 +611,11 @@ int main(int argc, char ** argv) {
 		exit(1);
 	}
 
-	if(json_unpack(config, "{s:{s?:os:os?is?bs?bs?:o}}",
+	if(json_unpack(config, "{s:{s?:os:os?is?bs?bs?:os?s}}",
 		configobj, "jobs", &jobs, "results", &results,
 		"iothreads", &iothreads, "verbose", &verbose,
 		"syslog", &usesyslog, "filter", &filter,
-		"publisher", &publisher) != 0) {
+		"publisher", &publisher, "root", &tmprootpath) != 0) {
 		logit(ERR, "Error getting config");
 		exit(-1);
 	}
@@ -618,6 +629,11 @@ int main(int argc, char ** argv) {
 			mynodename[i] = '\0';
 			break;
 		}
+	}
+
+	if(tmprootpath) {
+		strncpy(rootpath, tmprootpath, PATH_MAX);
+		rootpathlen = strlen(rootpath);
 	}
 
 	zmqctx = zmq_init(iothreads);
