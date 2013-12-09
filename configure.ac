@@ -80,6 +80,18 @@ AC_ARG_WITH([nagios4-src],
 	[]
 )
 
+AC_ARG_WITH([naemon-src],
+	[AC_HELP_STRING([--with-nagios4-src=DIR],
+		[Path to source files for Naemon])],
+	[
+		WITHHEADERS="-I$withval"
+		# For right now these are one and the same
+		AC_DEFINE([HAVE_NAGIOS4], [], [Compiling against Nagios 4.x])
+		AC_DEFINE([HAVE_NAEMON], [], [Compiling against Naemon])
+	],
+	[]
+)
+
 CFLAGS_BAK=$CFLAGS
 if test "$WITHHEADERS" = "no"; then
 	WITHHEADERS="-I./mods/naginclude"
