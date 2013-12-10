@@ -450,7 +450,7 @@ static void process_cmd(json_t * payload) {
 			enable_and_propagate_notifications(host_target, level,
 				affect_top_host, affect_hosts, affect_services);
 	}
-#ifdef HAVE_DELETE_DOWNTIME_LONGNAME
+#if 0
 	else if(strcmp(cmd_name, "delete_downtime") == 0) {
 		char * comment = NULL;
 		time_t start_time = 0;
