@@ -60,7 +60,7 @@ AC_ARG_WITH([icinga-headers],
 	[]
 )
 
-AC_ARG_WITH([nagios-headers],
+AC_ARG_WITH([nagios3-headers],
 	[AC_HELP_STRING([--with-nagios3-headers=DIR],
 		[Path to header files for Nagios])],
 	[
@@ -81,7 +81,7 @@ AC_ARG_WITH([nagios4-src],
 )
 
 AC_ARG_WITH([naemon-src],
-	[AC_HELP_STRING([--with-nagios4-src=DIR],
+	[AC_HELP_STRING([--with-naemon-src=DIR],
 		[Path to source files for Naemon])],
 	[
 		WITHHEADERS="-I$withval"
