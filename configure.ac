@@ -1,10 +1,10 @@
 AC_PREREQ([2.60])
-AC_INIT([nagmq], [1.3.1], [nagmq@googlegroups.com])
+AC_INIT([nagmq], [1.4], [nagmq@googlegroups.com])
 AC_CONFIG_AUX_DIR([.])
-AM_INIT_AUTOMAKE([-Wall -Werror foreign subdir-objects])
 AC_CONFIG_SRCDIR([mods/nagmq_pub.c])
 AC_CONFIG_HEADERS([mods/config.h libev/config.h dnxmq/config.h])
 AC_CONFIG_MACRO_DIR([m4])
+AM_INIT_AUTOMAKE([-Wall -Werror foreign subdir-objects])
 
 AC_ARG_WITH([pcre-config],
 	[AC_HELP_STRING([--with-pcre-config],
@@ -16,6 +16,8 @@ AC_PROG_CC
 AM_PROG_CC_C_O
 AM_PROG_AR
 AC_PROG_LIBTOOL
+
+LT_INIT
 
 AC_CHECK_LIB([zmq], [zmq_socket], [],
 	[AC_MSG_FAILURE([Could not find usable ZMQ library])], [])
@@ -126,5 +128,4 @@ AC_CHECK_DECL([delete_downtime_by_hostname_service_description_start_time_commen
 CFLAGS=$CFLAGS_BAK
 
 AC_CONFIG_FILES([Makefile mods/Makefile dnxmq/Makefile libev/Makefile])
-AC_CONFIG_SUBDIRS([jansson])
 AC_OUTPUT

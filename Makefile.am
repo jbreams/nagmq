@@ -1,4 +1,5 @@
-SUBDIRS = jansson mods dnxmq
-DIST_SUBDIRS = jansson mods dnxmq libev
+ACLOCAL_AMFLAGS = -I m4
+SUBDIRS = mods dnxmq
+DIST_SUBDIRS = mods dnxmq libev
 bin_SCRIPTS = nag.py
-EXTRA_DIST = README.rst LICENSE jansson/configure.gnu nag.py
+EXTRA_DIST = README.rst LICENSE nag.py autogen.sh
