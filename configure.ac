@@ -96,7 +96,7 @@ AC_ARG_WITH([naemon-src],
 
 CFLAGS_BAK=$CFLAGS
 if test "$WITHHEADERS" = "no"; then
-	WITHHEADERS="-I./mods/naginclude"
+	WITHHEADERS="-I./naginclude"
 	CFLAGS="$CFLAGS $WITHHEADERS"
 fi
 
