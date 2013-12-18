@@ -14,7 +14,6 @@ AC_PATH_PROG(PCRE_CONFIG, [pcre-config], $pcre_config_prog)
 
 AC_PROG_CC
 AM_PROG_CC_C_O
-AM_PROG_AR
 AC_PROG_LIBTOOL
 
 LT_INIT
@@ -24,7 +23,7 @@ AC_CHECK_LIB([zmq], [zmq_socket], [],
 
 AC_HEADER_STDC
 AC_CHECK_HEADERS([ctype.h fcntl.h float.h pthread.h signal.h stdarg.h \
-	sys/types.h syslog.h time.h zmq.h jansson.h ev.h])
+	sys/types.h syslog.h time.h zmq.h jansson.h ev.h libev/ev.h])
 
 AC_TYPE_SIZE_T
 AC_TYPE_SIGNAL
@@ -59,7 +58,10 @@ AC_ARG_WITH([icinga-headers],
 		WITHHEADERS="-I$withval"
 		AC_DEFINE([HAVE_ICINGA], [], [Compiling against Icinga])
 	],
-	[]
+	[
+		AC_CHECK_HEADER([icinga.h],
+			[AC_DEFINE([HAVE_ICINGA], [], [Compiling against Icinga])])
+	]
 )
 
 AC_ARG_WITH([nagios3-headers],
@@ -68,8 +70,7 @@ AC_ARG_WITH([nagios3-headers],
 	[
 		WITHEADERS="-I$withval"
 		AC_DEFINE([HAVE_NAGIOS3], [], [Compiling against Nagios 3])
-	],
-	[]
+	]
 )
 
 AC_ARG_WITH([nagios4-src],
@@ -79,7 +80,13 @@ AC_ARG_WITH([nagios4-src],
 		WITHHEADERS="-I$withval/include -I$withval"
 		AC_DEFINE([HAVE_NAGIOS4], [], [Compiling against Nagios 4])
 	],
-	[]
+	[
+		AC_CHECK_HEADERS([nagios/nagios.h nagios/lib/libnagios.h],
+		[
+			WITHHEADERS="-I/usr/include/nagios"
+			AC_DEFINE([HAVE_NAGIOS4], [], [Compiling against Nagios 4])
+		])
+	]
 )
 
 AC_ARG_WITH([naemon-src],
@@ -90,8 +97,7 @@ AC_ARG_WITH([naemon-src],
 		# For right now these are one and the same
 		AC_DEFINE([HAVE_NAGIOS4], [], [Compiling against Nagios 4.x])
 		AC_DEFINE([HAVE_NAEMON], [], [Compiling against Naemon])
-	],
-	[]
+	]
 )
 
 CFLAGS_BAK=$CFLAGS

@@ -1,4 +1,4 @@
-#!/usr/bin/python26
+#!/usr/bin/python
 
 import json, time, zmq, re, os, pwd, types
 from optparse import OptionParser

@@ -1,3 +1,4 @@
+#include "config.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -7,7 +8,11 @@
 #include <stdint.h>
 #include <fcntl.h>
 #include <pwd.h>
+#ifdef HAVE_LIBEV_EV_H
+#include <libev/ev.h>
+#else
 #include <ev.h>
+#endif
 #include <zmq.h>
 #include <jansson.h>
 #include <syslog.h>
