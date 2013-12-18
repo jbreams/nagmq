@@ -2,7 +2,7 @@ AC_PREREQ([2.60])
 AC_INIT([nagmq], [1.4], [nagmq@googlegroups.com])
 AC_CONFIG_AUX_DIR([.])
 AC_CONFIG_SRCDIR([mods/nagmq_pub.c])
-AC_CONFIG_HEADERS([mods/config.h libev/config.h dnxmq/config.h])
+AC_CONFIG_HEADERS([mods/config.h dnxmq/config.h])
 AC_CONFIG_MACRO_DIR([m4])
 AM_INIT_AUTOMAKE([-Wall -Werror foreign subdir-objects])
 
