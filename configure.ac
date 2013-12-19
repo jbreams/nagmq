@@ -15,7 +15,7 @@ AC_PATH_PROG(PCRE_CONFIG, [pcre-config], $pcre_config_prog)
 AC_PROG_CC
 AM_PROG_CC_C_O
 AC_PROG_LIBTOOL
-
+#AM_PROG_AR
 LT_INIT
 
 AC_CHECK_LIB([zmq], [zmq_socket], [],

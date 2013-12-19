@@ -24,6 +24,7 @@
 #include <regex.h>
 #endif
 #include "zmq3compat.h"
+#include <wordexp.h>
 
 #ifndef MAX_PLUGIN_OUTPUT_LENGTH
 #define MAX_PLUGIN_OUTPUT_LENGTH 8192
@@ -39,8 +40,9 @@ char myfqdn[255];
 char mynodename[255];
 uint32_t runningjobs = 0;
 ev_io pullio;
-char rootpath[PATH_MAX];
-size_t rootpathlen = 0;
+char * rootpath = NULL, *unprivpath = NULL;
+size_t rootpathlen = 0, unprivpathlen = 0;
+uid_t runas = 0;
 
 struct child_job {
 	json_t * input;
@@ -144,7 +146,7 @@ int parse_filter(json_t * in, int or) {
 		strncpy(newfilt->field, field, sizeof(newfilt->field) - 1);
 		if(match) {
 #ifdef HAVE_PCRE
-			char * errptr = NULL;
+			const char * errptr = NULL;
 			int errofft = 0, options = PCRE_NO_AUTO_CAPTURE;
 			if(icase)
 				options |= PCRE_CASELESS;
@@ -218,7 +220,7 @@ int match_filter(json_t * input) {
 #ifdef HAVE_PCRE
 			int ovec[33];
 			res = pcre_exec(cur->regex, cur->extra,
-				tomatch, strlen(tomatch), 0, ovec, 33);
+				tomatch, strlen(tomatch), 0, 0, ovec, 33);
 #else
 			regmatch_t ovec[33];
 			res = regexec(&cur->regex, tomatch, 33, ovec, 0);
@@ -276,7 +278,7 @@ void obj_for_ending(struct child_job * j, const char * output,
 			logit(ERR, "Error sending message: %s", zmq_strerror(errno));
 			break;
 		}
-	} while(rc != 0);
+	} while(rc < 0);
 	zmq_msg_close(&outmsg);
 }
 
@@ -351,6 +353,16 @@ void child_end_cb(struct ev_loop * loop, ev_child * c, int event) {
 		ev_break(loop, EVBREAK_ALL);
 }
 
+int check_jail(const char * cmdline) {
+	if(!unprivpath && !rootpath)
+		return 1;
+	if(rootpath && strncmp(cmdline, rootpath, rootpathlen) == 0)
+		return 1;
+	else if(unprivpath && strncmp(cmdline, unprivpath, unprivpathlen) == 0)
+		return 2;
+	return 0;
+}
+
 void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 	json_t * input;
 	struct child_job * j;
@@ -358,7 +370,7 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 	json_error_t err;
 	int fds[2];
 	pid_t pid;
-	int timeout = 0;
+	int timeout = 0, okay_to_run;
 
 	input = json_loadb(zmq_msg_data(inmsg), zmq_msg_size(inmsg), 0, &err);
 	zmq_msg_close(inmsg);
@@ -401,7 +413,8 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 	j->host_name = hostname;
 	j->service_description = svcdesc;
 
-	if(rootpathlen && strncmp(command_line, rootpath, rootpathlen) != 0) {
+	okay_to_run = check_jail(command_line);
+	if(okay_to_run == 0) {
 		logit(ERR, "Refusing to execute job outside sandbox %s", command_line);
 		obj_for_ending(j, "Command line outside sandbox", 3, 0, 0);
 		free(j);
@@ -426,6 +439,7 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 	gettimeofday(&j->start, NULL);
 	pid = fork();
 	if(pid == 0) {
+		wordexp_t expvec;
 		int dn = open("/dev/null", O_RDONLY);
 		dup2(fds[1], fileno(stdout));
 		dup2(fds[1], fileno(stderr));
@@ -436,7 +450,33 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 		printf("Testing testing testing!\n");
 		exit(0);
 #else
-		execl("/bin/sh", "sh", "-c", command_line, NULL);
+
+		if(geteuid() == 0 && runas != 0 && okay_to_run == 2)
+			setuid(runas);
+
+		switch(wordexp(command_line, &expvec, WRDE_NOCMD)) {
+			case 0:
+				break;
+			case WRDE_SYNTAX:
+				printf("Error executing \"%s\". Bad syntax\n", command_line);
+				exit(127);
+				break;
+			case WRDE_CMDSUB:
+				printf("Command \"%s\" uses unsafe command substitution.\n", command_line);
+				exit(127);
+				break;
+			case WRDE_BADVAL:
+			case WRDE_BADCHAR:
+				printf("Command \"%s\" uses invalid characters or variables\n", command_line);
+				exit(127);
+				break;
+			case WRDE_NOSPACE:
+				printf("Out of memory while parsing command line\n");
+				exit(127);
+				break;
+		}
+
+		execv(expvec.we_wordv[0], expvec.we_wordv);
 		printf("Error executing shell for %s: %m", command_line);
 		exit(127);
 #endif
@@ -568,7 +608,8 @@ int main(int argc, char ** argv) {
 	size_t pullfds = sizeof(pullfd);
 	json_t * config, *filter = NULL;
 	json_error_t config_err;
-	char ch, *configobj = "executor", *tmprootpath = NULL;
+	char ch, *configobj = "executor", *tmprootpath = NULL,
+		*tmpunprivpath = NULL, *tmpunprivuser = NULL;
 
 	while((ch = getopt(argc, argv, "vsdhc:")) != -1) {
 		switch(ch) {
@@ -616,11 +657,12 @@ int main(int argc, char ** argv) {
 		exit(1);
 	}
 
-	if(json_unpack(config, "{s:{s?:os:os?is?bs?bs?:os?s}}",
+	if(json_unpack(config, "{s:{s?:os:os?is?bs?bs?:os?ss?ss?s}}",
 		configobj, "jobs", &jobs, "results", &results,
 		"iothreads", &iothreads, "verbose", &verbose,
 		"syslog", &usesyslog, "filter", &filter,
-		"publisher", &publisher, "root", &tmprootpath) != 0) {
+		"publisher", &publisher, "rootpath", &tmprootpath,
+		"unprivpath", &tmpunprivpath, "unprivuser", &tmpunprivuser) != 0) {
 		logit(ERR, "Error getting config");
 		exit(-1);
 	}
@@ -637,8 +679,22 @@ int main(int argc, char ** argv) {
 	}
 
 	if(tmprootpath) {
-		strncpy(rootpath, tmprootpath, PATH_MAX);
+		rootpath = strdup(tmprootpath);
 		rootpathlen = strlen(rootpath);
+	}
+
+	if(tmpunprivpath) {
+		unprivpath = strdup(tmpunprivpath);
+		unprivpathlen = strlen(unprivpath);
+	}
+
+	if(tmpunprivuser) {
+		struct passwd * pwdent = getpwnam(tmpunprivuser);
+		if(pwdent == NULL) {
+			logit(ERR, "Error looking up user %s: %d", tmpunprivuser, errno);
+			exit(-1);
+		}
+		runas = pwdent->pw_uid;
 	}
 
 	zmqctx = zmq_init(iothreads);
