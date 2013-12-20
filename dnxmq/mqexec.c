@@ -162,7 +162,7 @@ int parse_filter(json_t * in, int or) {
 			}
 			
 			newfilt->extra = pcre_study(newfilt->regex, 0, &errptr);
-			if(newfilt->extra == NULL) {
+			if(errptr != NULL) {
 				logit(ERR, "Error studying regex: %s", errptr);
 				free(newfilt);
 				return -1;
@@ -657,7 +657,7 @@ int main(int argc, char ** argv) {
 		exit(1);
 	}
 
-	if(json_unpack(config, "{s:{s?:os:os?is?bs?bs?:os?ss?ss?s}}",
+	if(json_unpack(config, "{s:{s?:o s:o s?i s?b s?b s?:o s?o s?s s?s s?s}}",
 		configobj, "jobs", &jobs, "results", &results,
 		"iothreads", &iothreads, "verbose", &verbose,
 		"syslog", &usesyslog, "filter", &filter,
