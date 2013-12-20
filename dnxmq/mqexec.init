@@ -6,6 +6,23 @@
 
 prog="mqexec"
 
+status() {
+	pids=$(pidof $prog)
+	running=$?
+
+	if [ $running -eq 0 ]; then
+		echo "mqexec is running $pids"
+		return 0
+	else
+		if [ -e /var/lock/subsys/mqexec ]; then
+			echo "mqexec isn't running, but lock file exists"
+		else
+			echo "mqexec isn't running"
+		fi
+		return 1
+	fi
+}
+
 start() {
 	if [ -e /var/lock/subsys/mqexec ]; then
 		echo -n $"cannot start mqexec. It is already running.";
@@ -55,7 +72,11 @@ case "$1" in
 	restart)
 		restart
 		;;
+	status)
+		status
+		;;
 	*)
-		echo $"Usage: $0 {start|stop|restart}"
+		echo $"Usage: $0 {start|stop|restart|status}"
 		exit 1
 esac
+
