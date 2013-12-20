@@ -45,6 +45,9 @@ NagMQ client package
 %{__mkdir} -p ${RPM_BUILD_ROOT}/%{_docdir}/%{name}-%{version}/
 %{__cp} -a LICENSE ${RPM_BUILD_ROOT}/%{_docdir}/%{name}-%{version}/
 %{__cp} -a README.rst ${RPM_BUILD_ROOT}/%{_docdir}/%{name}-%{version}/
+%{__mkdir} -p ${RPM_BUILD_ROOT}/%{_initrddir}
+%{__cp} -a dnxmq/mqexec.init ${RPM_BUILD_ROOT}/%{_initrddir}/mqexec
+%{__cp} -a dnxmq/mqbroker.init ${RPM_BUILD_ROOT}/%{_initrddir}/mqbroker
 %{__rm} ${RPM_BUILD_ROOT}%{_libdir}/nagmq/nagmq.so.0*
 %{__rm} ${RPM_BUILD_ROOT}%{_libdir}/nagmq/nagmq.a
 %{__rm} ${RPM_BUILD_ROOT}%{_libdir}/nagmq/nagmq.la
@@ -54,11 +57,13 @@ NagMQ client package
 %attr(0775,root,root) %dir %{_libdir}/nagmq/
 %attr(0664,root,root) %{_libdir}/nagmq/nagmq.so
 %attr(0664,root,root) %{_docdir}/%{name}-%{version}/*
-%attr(0755,root,root) %{_sbindir}/mqbroker
 %attr(0755,root,root) %{_bindir}/nag.py
 
 %files client
 %attr(0755,root,root) %{_sbindir}/mqexec
+%attr(0755,root,root) %{_sbindir}/mqbroker
+%attr(0755,root,root) %config %{_initrddir}/mqexec
+%attr(0755,root,root) %config %{_initrddir}/mqbroker
 
 %clean
 %__rm -rf $RPM_BUILD_ROOT
