@@ -1105,7 +1105,7 @@ static void send_msg(struct payload * po) {
 			syslog(LOG_ERR, "Error sending state response: %s", zmq_strerror(errno));
 			break;
 		}
-	} while(rc != 0);
+	} while(rc == -1);
 	zmq_msg_close(&outmsg);
 	if(po->type)
 		free(po->type);

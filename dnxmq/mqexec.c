@@ -43,6 +43,9 @@ ev_io pullio;
 char * rootpath = NULL, *unprivpath = NULL;
 size_t rootpathlen = 0, unprivpathlen = 0;
 uid_t runas = 0;
+#if ZMQ_VERSION_MAJOR > 3
+char * curve_private = NULL, *curve_public = NULL, *curve_server = NULL;
+#endif
 
 struct child_job {
 	json_t * input;
@@ -512,7 +515,7 @@ void recv_job_cb(struct ev_loop * loop, ev_io * i, int event) {
 		zmq_msg_t inmsg;
 #if ZMQ_VERSION_MAJOR == 2
 		int64_t rcvmore = 0;
-#elif ZMQ_VERSION_MAJOR == 3
+#elif ZMQ_VERSION_MAJOR >= 3
 		int rcvmore = 0;
 #endif
 		size_t rms = sizeof(rcvmore);
@@ -549,6 +552,16 @@ void parse_sock_directive(void * socket, json_t * arg, int bind) {
 			zmq_bind(socket, json_string_value(arg));
 		else
 			zmq_connect(socket, json_string_value(arg));
+#if ZMQ_VERSION_MAJOR > 3
+		if(curve_private) {
+			zmq_setsockopt(socket, ZMQ_CURVE_SECRETKEY,
+				curve_private, strlen(curve_private));
+			zmq_setsockopt(socket, ZMQ_CURVE_PUBLICKEY,
+				curve_public, strlen(curve_public));
+			zmq_setsockopt(socket, ZMQ_CURVE_SERVERKEY,
+				curve_server, strlen(curve_server));
+		}
+#endif
 	} else if(json_is_object(arg)) {
 		char * addr = NULL;
 		json_t * subscribe = NULL;
@@ -556,6 +569,18 @@ void parse_sock_directive(void * socket, json_t * arg, int bind) {
 			"address", &addr, "bind", &bind, "subscribe",
 			&subscribe) != 0)
 			return;
+
+#if ZMQ_VERSION_MAJOR > 3
+		if(curve_private) {
+			zmq_setsockopt(socket, ZMQ_CURVE_SECRETKEY,
+				curve_private, strlen(curve_private));
+			zmq_setsockopt(socket, ZMQ_CURVE_PUBLICKEY,
+				curve_public, strlen(curve_public));
+			zmq_setsockopt(socket, ZMQ_CURVE_SERVERKEY,
+				curve_server, strlen(curve_server));
+		}
+#endif
+
 		if(bind)
 			zmq_bind(socket, addr);
 		else
@@ -610,6 +635,7 @@ int main(int argc, char ** argv) {
 	json_error_t config_err;
 	char ch, *configobj = "executor", *tmprootpath = NULL,
 		*tmpunprivpath = NULL, *tmpunprivuser = NULL;
+	json_error_t jsonerr;
 
 	while((ch = getopt(argc, argv, "vsdhc:")) != -1) {
 		switch(ch) {
@@ -657,15 +683,31 @@ int main(int argc, char ** argv) {
 		exit(1);
 	}
 
-	if(json_unpack(config, "{s:{s?:o s:o s?i s?b s?b s?:o s?o s?s s?s s?s}}",
+#if ZMQ_VERSION_MAJOR < 4
+	if(json_unpack_ex(config, &jsonerr, 0,
+		"{s:{s?:o s:o s?i s?b s?b s?:o s?o s?s s?s s?s}}",
 		configobj, "jobs", &jobs, "results", &results,
 		"iothreads", &iothreads, "verbose", &verbose,
 		"syslog", &usesyslog, "filter", &filter,
 		"publisher", &publisher, "rootpath", &tmprootpath,
 		"unprivpath", &tmpunprivpath, "unprivuser", &tmpunprivuser) != 0) {
-		logit(ERR, "Error getting config");
+		logit(ERR, "Error getting config %s", jsonerr.text);
 		exit(-1);
 	}
+#else
+	if(json_unpack_ex(config, &jsonerr, 0,
+		"{s:{s?:o s:o s?i s?b s?b s?:o s?o s?s s?s s?s s?{s:s s:s s:s}}}",
+		configobj, "jobs", &jobs, "results", &results,
+		"iothreads", &iothreads, "verbose", &verbose,
+		"syslog", &usesyslog, "filter", &filter,
+		"publisher", &publisher, "rootpath", &tmprootpath,
+		"unprivpath", &tmpunprivpath, "unprivuser", &tmpunprivuser,
+		"curve", "publickey", &curve_public, "privatekey", &curve_private,
+		"serverkey", &curve_server) != 0) {
+		logit(ERR, "Error getting config: %s", jsonerr.text);
+		exit(-1);
+	}
+#endif
 
 	parse_filter(filter,0);
 
@@ -696,6 +738,15 @@ int main(int argc, char ** argv) {
 		}
 		runas = pwdent->pw_uid;
 	}
+
+#if ZMQ_VERSION_MAJOR > 3
+	if(curve_public)
+		curve_public = strdup(curve_public);
+	if(curve_private)
+		curve_private = strdup(curve_private);
+	if(curve_server)
+		curve_server = strdup(curve_server);
+#endif
 
 	zmqctx = zmq_init(iothreads);
 	if(zmqctx == NULL)

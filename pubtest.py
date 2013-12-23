@@ -6,7 +6,7 @@ payload="{ \"host_name\": \"localhost\", \"current_attempt\": 1, \"max_attempts\
 #payload="{ \"command_name\": \"stop_executing_host_checks\" }"
 
 pub = context.socket(zmq.PUSH)
-pub.connect("ipc:///tmp/nagmqpull.sock")
+pub.connect("tcp://localhost:5556")
 pub.send('host_check_processed', zmq.SNDMORE)
 pub.send(payload)
 print "Sent {0}".format(payload)

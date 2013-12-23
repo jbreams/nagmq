@@ -2,7 +2,17 @@ import zmq, time, json
 context = zmq.Context()
 
 pub = context.socket(zmq.REQ)
-pub.connect("ipc:///tmp/nagmqstate.sock")
+
+# These are random useless keys for testing Curve auth
+pubkey = u"7d0:tz+tGVT&*ViD/SzU)dz(3=yIE]aT2TRNrG2$"
+privkey = u"FCFo%:3pZTbiQq?MARHYk(<Kp*B-<RpRG7QMUlXr"
+serverkey = u"mN>y$-+17hxa6F>r@}sxmL-uX}IM=:wIq}G4y*f["
+
+pub.setsockopt_string(zmq.CURVE_PUBLICKEY, pubkey)
+pub.setsockopt_string(zmq.CURVE_SECRETKEY, privkey)
+pub.setsockopt_string(zmq.CURVE_SERVERKEY, serverkey)
+
+pub.connect("tcp://localhost:5557")
 keys = ['host_name', 'services', 'hosts', 'contacts', 'contact_groups',
         'service_description', 'current_state', 'members', 'type', 'name',
         'problem_has_been_acknowledged', 'plugin_output' ]

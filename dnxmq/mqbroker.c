@@ -91,7 +91,7 @@ void parse_sock_directive(json_t * arg, zmq_pollitem_t * pollable, int * noblock
 	char *type;
 #if ZMQ_VERSION_MAJOR == 2
 	int64_t hwm = 0, swap = 0, affinity = 0;
-#elif ZMQ_VERSION_MAJOR == 3
+#elif ZMQ_VERSION_MAJOR >= 3
 	int sndhwm = -1, rcvhwm = -1, maxmsgsize = 0, backlog = 0;
 	int64_t affinity = 0;
 	json_t * accept_filters = NULL;
@@ -103,7 +103,7 @@ void parse_sock_directive(json_t * arg, zmq_pollitem_t * pollable, int * noblock
 		"type", &type, "connect", &connect, "bind", &bind,
 		"subscribe", &subscribe, "hwm", &hwm, "swap", &swap,
 		"affinity", &affinity, "noblock", noblock) != 0)
-#elif ZMQ_VERSION_MAJOR == 3
+#elif ZMQ_VERSION_MAJOR >= 3
 	if(json_unpack(arg, "{s:s s?:o s?:o s?:o s?i s?i s?i s?b s?i s?o s?i}", 
 		"type", &type, "connect", &connect, "bind", &bind,
 		"subscribe", &subscribe, "sndhwm", &sndhwm, "rcvhwm", &rcvhwm,
@@ -153,7 +153,7 @@ void parse_sock_directive(json_t * arg, zmq_pollitem_t * pollable, int * noblock
 		zmq_setsockopt(sock, ZMQ_HWM, &hwm, sizeof(hwm));
 	if(swap > 0)
 		zmq_setsockopt(sock, ZMQ_SWAP, &swap, sizeof(swap));
-#elif ZMQ_VERSION_MAJOR == 3
+#elif ZMQ_VERSION_MAJOR >= 3
 	if(sndhwm > -1)
 		zmq_setsockopt(sock, ZMQ_SNDHWM, &sndhwm, sizeof(sndhwm));
 	if(rcvhwm > -1)
@@ -199,7 +199,7 @@ void do_forward(void * in, void *out, void *mon, int noblock, int monnoblock) {
 	int rc;
 #if ZMQ_VERSION_MAJOR == 2
 	int64_t rcvmore;
-#elif ZMQ_VERSION_MAJOR == 3
+#elif ZMQ_VERSION_MAJOR >= 3
 	int rcvmore;
 #endif
 	size_t size = sizeof(rcvmore);

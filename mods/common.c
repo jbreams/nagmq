@@ -31,6 +31,9 @@ extern void * pubext;
 extern int daemon_mode;
 extern int sigrestart;
 json_t * config;
+char * curve_publickey = NULL, *curve_privatekey = NULL,
+	*curve_knownhosts = NULL;
+int keyfile_refresh_interval = 60;
 
 int nebmodule_deinit(int flags, int reason) {
 	neb_deregister_module_callbacks(nagmq_handle);
@@ -144,6 +147,30 @@ void * getsock(char * forwhat, int type, json_t * def) {
 				return NULL;
 			}
 		}
+	}
+#endif
+
+#if ZMQ_VERSION_MAJOR > 3
+	if(curve_privatekey) {
+		int yes = 1, rc;
+		rc = zmq_setsockopt(sock, ZMQ_CURVE_SECRETKEY,
+			curve_privatekey, strlen(curve_privatekey));
+		if(rc == -1) {
+			syslog(LOG_ERR, "Error setting secret key for %s %s %d %s",
+				forwhat, curve_privatekey, strlen(curve_privatekey), zmq_strerror(errno));
+			zmq_close(sock);
+			return NULL;
+		}
+		rc = zmq_setsockopt(sock, ZMQ_CURVE_PUBLICKEY,
+			curve_privatekey, strlen(curve_publickey));
+		if(rc == -1) {
+			syslog(LOG_ERR, "Error setting public key for %s %s %s",
+				forwhat, curve_privatekey, zmq_strerror(errno));
+			zmq_close(sock);
+			return NULL;
+		}
+		zmq_setsockopt(sock, ZMQ_CURVE_SERVER, &yes, sizeof(int));
+		syslog(LOG_INFO, "Set up curve security in NagMQ");
 	}
 #endif
 
@@ -300,6 +327,250 @@ int brokered_input_reaper(int sd, int events, void * arg) {
 extern iobroker_set *nagios_iobs;
 #endif
 
+#if ZMQ_VERSION_MAJOR > 3
+struct keybag {
+	uint8_t key[32];
+	struct keybag * next;
+};
+
+struct keybaghash {
+	int buckets;
+	int count;
+	struct keybag ** data;
+};
+
+uint32_t fnv_hash(uint8_t * key) {
+	int i;
+	uint32_t hash = 2166136261; // offset_basis
+	for(i = 0; i < 32; i++) {
+		hash ^= key[i];
+		hash *= 16777619; //fnv_prime
+	}
+
+	return hash;
+}
+
+int read_keyfile(const char * path, struct keybaghash * o) {
+	char * buf = NULL;
+	size_t buflen = 0;
+	ssize_t readcount;
+	int i;
+
+	FILE * fp = fopen(path, "r");
+	if(fp == NULL)
+		return errno;
+
+	for(i = 0; i < o->buckets; i++) {
+		while(o->data[i]) {
+			struct keybag * n = o->data[i]->next;
+			free(o->data[i]);
+			o->data[i] = n;
+		}
+	}
+	o->count = 0;
+
+	while((readcount = getline(&buf, &buflen, fp)) != -1) {
+		char * kl = buf + readcount, *end, *front = buf;
+		buflen = buflen > readcount ? buflen : readcount;
+		if(readcount < 40) // Short lines are useless
+			continue;
+
+		for(;(*front == ' ' || *front == '\t' || *front == '\0'); front++);
+		if(*front == '\n' || *front == '\0' || *front == '#')
+			continue;
+
+		kl--;
+		for(;(*kl == ' ' || *kl == '\t' || *kl == '\n'); kl--)
+		end = kl;
+		for(;kl != buf && end - kl < 40; kl--);
+
+		struct keybag * nk = calloc(1, sizeof(struct keybag));
+
+		if(zmq_z85_decode(nk->key, kl) == NULL) {
+			free(nk);
+			continue;
+		}
+
+		uint32_t hashval = fnv_hash(nk->key) & o->buckets;
+
+		nk->next = o->data[hashval];
+		o->data[hashval] = nk;
+		o->count++;
+
+		if(o->count > o->buckets && o->count < (0xffff)) {
+			int newsize = o->count - 1;
+			newsize |= newsize >> 1;
+			newsize |= newsize >> 2;
+			newsize |= newsize >> 4;
+			newsize |= newsize >> 8;
+			newsize |= newsize >> 16;
+
+			struct keybag ** newdata = calloc(newsize, sizeof(struct keybag*));
+			if(newdata == NULL) {
+				fclose(fp);
+				free(buf);
+				return -ENOMEM;
+			}
+
+			for(i = 0; i < o->buckets; i++) {
+				struct keybag * cur = o->data[i];
+				while(cur) {
+					struct keybag * n = cur->next;
+					hashval = fnv_hash(cur->key) & newsize;
+					cur->next = newdata[hashval];
+					newdata[hashval] = cur;
+					cur = n;
+				}
+			}
+
+			free(o->data);
+			o->buckets = newsize;
+			o->data = newdata;
+		}
+	}
+
+	fclose(fp);
+	free(buf);
+	return 0;
+}
+
+int send_zap_resp(zmq_msg_t * reqid, char * code, char * text,
+	char *user, void * sock) {
+	int i = 0;
+
+	struct tosend {
+		char * val;
+		size_t msgsize;
+	} msgs[] = {
+		{ "1.0", 3 },
+		{ zmq_msg_data(reqid), zmq_msg_size(reqid) },
+		{ code, strlen(code) },
+		{ text, strlen(text) },
+		{ user, strlen(user) },
+		{ "", 0 },
+		{ NULL, 0 }
+	};
+
+	for(i = 0; msgs[i].val != NULL; i++) {
+		int flags = ZMQ_SNDMORE, rc;
+		if(msgs[i + 1].val == NULL)
+			flags = 0;
+		rc = zmq_send(sock, msgs[i].val, msgs[i].msgsize, flags);
+		if(rc == -1) {
+			if(errno == ETERM)
+				return -ETERM;
+		}
+	}
+
+	return 0;
+}
+
+void * zap_handler(void* zapsock) {
+	struct keybaghash bag;
+	bag.buckets = 63;
+	bag.data = calloc(63, sizeof(struct keybag*));
+	bag.count;
+	time_t last_refresh = 0;
+	int keeprunning = 1, i;
+	sigset_t sigset;
+
+	sigfillset(&sigset);
+	pthread_sigmask(SIG_SETMASK, &sigset, NULL);
+
+	syslog(LOG_DEBUG, "Starting ZeroMQ Authentication Thread");
+
+	for(;;) {
+		time_t now = time(NULL);
+		int rc;
+		if(rc = now - last_refresh > keyfile_refresh_interval) {
+			if((rc = read_keyfile(curve_knownhosts, &bag)) != 0)
+				syslog(LOG_ERR, "Error reading clients file: %s", strerror(rc));
+			last_refresh = now;
+			syslog(LOG_DEBUG, "Read in key file for ZeroMQ Curve Auth");
+		}
+
+		zmq_msg_t reqid;
+		char mech[32], creds[255];
+		i = 0;
+
+		zmq_msg_init(&reqid);
+		for(i = 0; i < 7; i++) {
+			zmq_msg_t curmsg;
+
+			zmq_msg_init(&curmsg);
+			rc = zmq_msg_recv(&curmsg, zapsock, 0);
+			if(rc == -1) {
+				if(errno == ETERM) {
+					keeprunning == 0;
+					break;
+				}
+				else
+					break;
+				syslog(LOG_DEBUG, "Error receiving auth packet");
+			}
+
+			if(i == 1) {
+				size_t msglen = zmq_msg_size(&curmsg);
+				zmq_msg_init_size(&reqid, msglen);
+				memcpy(zmq_msg_data(&reqid), zmq_msg_data(&curmsg), msglen);
+			}
+			else if(i == 5)
+				strncpy(mech, zmq_msg_data(&curmsg), zmq_msg_size(&curmsg));
+			else if(i == 6)
+				memcpy(creds, zmq_msg_data(&curmsg), zmq_msg_size(&curmsg));
+			zmq_msg_close(&curmsg);
+		}
+
+		if(keeprunning == 0)
+			break;
+		else if(i < 7)
+			continue;
+
+		if(strcmp(mech, "CURVE") != 0) {
+			rc = send_zap_resp(&reqid, "400",
+				"Must use curve auth", "", zapsock);
+			syslog(LOG_DEBUG, "Mechanism wasn't curve: %s", mech);
+			goto cleanup;
+		}
+
+		uint32_t hashval = fnv_hash(creds);
+		hashval &= bag.buckets;
+
+		struct keybag * search = bag.data[hashval];
+
+		while(search && memcmp(search->key, creds, 32) != 0)
+			search = search->next;
+
+		if(search == NULL) {
+			rc = send_zap_resp(&reqid, "400",
+				"No authorized key found", "", zapsock);
+			syslog(LOG_DEBUG, "Client not found in ZeroMQ authorized keys file!");
+			goto cleanup;
+		}
+
+		rc = send_zap_resp(&reqid, "200",
+			"Authentication successful", "Authenticated User", zapsock);
+		syslog(LOG_DEBUG, "Successfully authenticated client from authorized keys file!");
+cleanup:
+		zmq_msg_close(&reqid);
+		if(rc == ETERM)
+			break;
+	}
+
+	for(i = 0; i < bag.buckets; i++) {
+		while(bag.data[i]) {
+			struct keybag * n = bag.data[i]->next;
+			free(bag.data[i]);
+			bag.data[i] = n;
+		}
+	}
+
+	free(bag.data);
+	zmq_close(zapsock);
+	return NULL;
+}
+#endif
+
 int handle_startup(int which, void * obj) {
 	struct nebstruct_process_struct *ps = (struct nebstruct_process_struct *)obj;
 	time_t now = ps->timestamp.tv_sec;
@@ -309,7 +580,8 @@ int handle_startup(int which, void * obj) {
 			if(daemon_mode && !sigrestart)
 				return 0;
 		case NEBTYPE_PROCESS_DAEMONIZE: {
-			json_t * pubdef = NULL, *pulldef = NULL, *reqdef = NULL;
+			json_t * pubdef = NULL, *pulldef = NULL,
+				*reqdef = NULL, *curvedef = NULL;
 			int numthreads = 1;
 
 			if(get_values(config,
@@ -317,6 +589,9 @@ int handle_startup(int which, void * obj) {
 				"publish", JSON_OBJECT, 0, &pubdef,
 				"pull", JSON_OBJECT, 0, &pulldef,
 				"reply", JSON_OBJECT, 0, &reqdef,
+#if ZMQ_VERSION_MAJOR > 3
+				"curve", JSON_OBJECT, 0, &curvedef,
+#endif
 				NULL) != 0) {
 				syslog(LOG_ERR, "Parameter error while starting NagMQ");
 				return -1;
@@ -331,6 +606,39 @@ int handle_startup(int which, void * obj) {
 					zmq_strerror(errno));
 				return -1;
 			}
+
+#if ZMQ_VERSION_MAJOR > 3
+			if(curvedef) {
+				if(get_values(curvedef,
+					"publickey", JSON_STRING, 1, &curve_publickey,
+					"privatekey", JSON_STRING, 1, &curve_privatekey,
+					"clientkeyfile", JSON_STRING, 0, &curve_knownhosts,
+					NULL) != 0) {
+					syslog(LOG_ERR, "Error getting public/private key for curve security");
+					return -1;
+				}
+
+				if(curve_knownhosts) {
+					pthread_t tid;
+
+					void * zapsock = zmq_socket(zmq_ctx, ZMQ_REP);
+					if(zapsock == NULL) {
+						syslog(LOG_ERR, "Error creating ZAP socket");
+						return NULL;
+					}
+
+					if(zmq_bind(zapsock, "inproc://zeromq.zap.01") != 0) {
+						syslog(LOG_ERR, "Error binding to ZAP endpoint");
+						return NULL;
+					}
+					int rc = pthread_create(&tid, NULL, zap_handler, zapsock);
+					if(rc != 0) {
+						syslog(LOG_ERR, "Error starting ZAP thread?");
+						return -1;
+					}
+				}
+			}
+#endif
 
 			if(pubdef && handle_pubstartup(pubdef) < 0)
 				return -1;
@@ -415,7 +723,7 @@ int nebmodule_init(int flags, char * localargs, nebmodule * lhandle) {
 
 	neb_set_module_info(handle, NEBMODULE_MODINFO_TITLE, "NagMQ");
 	neb_set_module_info(handle, NEBMODULE_MODINFO_AUTHOR, "Jonathan Reams");
-	neb_set_module_info(handle, NEBMODULE_MODINFO_VERSION, "1.3");
+	neb_set_module_info(handle, NEBMODULE_MODINFO_VERSION, "1.4");
 	neb_set_module_info(handle, NEBMODULE_MODINFO_LICENSE, "Apache v2");
 	neb_set_module_info(handle, NEBMODULE_MODINFO_DESC,
 		"Provides interface into Nagios via ZeroMQ");
