@@ -23,7 +23,14 @@ AC_CHECK_LIB([zmq], [zmq_socket], [],
 
 AC_HEADER_STDC
 AC_CHECK_HEADERS([ctype.h fcntl.h float.h pthread.h signal.h stdarg.h \
-	sys/types.h syslog.h time.h zmq.h jansson.h ev.h libev/ev.h])
+	sys/types.h syslog.h time.h zmq.h ev.h libev/ev.h])
+
+AC_SEARCH_LIBS([ev_sleep], [ev])
+
+AC_CHECK_HEADER([jansson.h], [], AC_MSG_FAILURE([jansson.h not found]), [])
+AC_SEARCH_LIBS([json_loads], [jansson])
+
+AC_SEARCH_LIBS([pthread_create], [pthread])
 
 AC_TYPE_SIZE_T
 AC_TYPE_SIGNAL
@@ -32,7 +39,6 @@ AC_CHECK_FUNCS([malloc realloc memset free strdup])
 AC_FUNC_MALLOC
 AC_FUNC_REALLOC
 AC_FUNC_STRTOD
-
 
 if test "x$PCRE_CONFIG" != "x"; then
 	CFLAGS_SAVE=$CFLAGS
