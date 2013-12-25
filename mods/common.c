@@ -576,14 +576,17 @@ int handle_startup(int which, void * obj) {
 	time_t now = ps->timestamp.tv_sec;
 
 	switch(ps->type) {
-		case NEBTYPE_PROCESS_START:
+		case NEBTYPE_PROCESS_START: {
+#ifndef HAVE_NAGIOS4
 			if(daemon_mode && !sigrestart)
 				return 0;
-		case NEBTYPE_PROCESS_DAEMONIZE: {
+		case NEBTYPE_PROCESS_DAEMONIZE:
+#endif
 			json_t * pubdef = NULL, *pulldef = NULL,
 				*reqdef = NULL, *curvedef = NULL;
 			int numthreads = 1;
 
+			syslog(LOG_INFO, "Initializing NagMQ %lu", getpid());
 			if(get_values(config,
 				"iothreads", JSON_INTEGER, 0, &numthreads,
 				"publish", JSON_OBJECT, 0, &pubdef,
