@@ -14,30 +14,108 @@ AC_PATH_PROG(PCRE_CONFIG, [pcre-config], $pcre_config_prog)
 
 AC_PROG_CC
 AM_PROG_CC_C_O
-AC_PROG_LIBTOOL
-#AM_PROG_AR
-LT_INIT
-
-AC_CHECK_LIB([zmq], [zmq_socket], [],
-	[AC_MSG_FAILURE([Could not find usable ZMQ library])], [])
+LT_PREREQ([2.2.6])
+LT_INIT([disable-static shared])
 
 AC_HEADER_STDC
-AC_CHECK_HEADERS([ctype.h fcntl.h float.h pthread.h signal.h stdarg.h \
-	sys/types.h syslog.h time.h zmq.h ev.h libev/ev.h])
+AC_CHECK_HEADERS([ctype.h fcntl.h float.h signal.h stdarg.h \
+	sys/types.h syslog.h time.h])
 
-AC_SEARCH_LIBS([ev_sleep], [ev])
+AC_ARG_WITH([zmq-include],
+	[AC_HELP_STRING([--with-zmq-include=DIR], [Path to ZeroMQ headers])],
+	[
+		if test -r "${withval}/zmq.h"; then
+			CPPFLAGS="-I${withval} ${CPPFLAGS}"
+		else
+			AC_MSG_FAILURE([Specified ZMQ header directory, but no headers found])
+		fi
+	])
+AC_ARG_WITH([zmq-lib],
+	[AC_HELP_STRING([--with-zmq-lib=DIR], [Path to ZeroMQ library])],
+	[
+		if test -e "${withval}/libzmq.so"; then
+			LDFLAGS="-L${withval} ${LDFLAGS}"
+		else
+			AC_MSG_FAILURE([Specified ZMQ lib directory, but no library found])
+		fi
+	])
 
-AC_CHECK_HEADER([jansson.h], [], AC_MSG_FAILURE([jansson.h not found]), [])
-AC_SEARCH_LIBS([json_loads], [jansson])
+AC_CHECK_HEADER([zmq.h],
+	[
+		AC_CHECK_LIB([zmq], [zmq_socket], [],
+			[AC_MSG_FAILURE([Could not find usable ZMQ library])])
+	],
+	[AC_MSG_FAILURE([Could not find ZMQ header])]
+)
 
+AC_ARG_WITH([libev-include],
+	[AC_HELP_STRING([--with-libev-include=DIR], [Path to libev headers])],
+	[
+		if test -r "${withval}/ev.h"; then
+			CPPFLAGS="-I${withval} ${CPPFLAGS}"
+		else
+			AC_MSG_FAILURE([Specified libev header directory, but no headers found])
+		fi
+	])
+
+AC_ARG_WITH([libev-lib],
+	[AC_HELP_STRING([--with-libev-lib=DIR], [Path to libev library])],
+	[
+		for f in ${withval}/libev.{a,so,dylib}; do
+			test -r $f && break || f=''
+		done
+		if test "$f"; then
+			LDFLAGS="-L${withval} ${CPPFLAGS}"
+		else
+			AC_MSG_FAILURE([Specified libev lib directory, but no library found at ${withval}])
+		fi
+	])
+
+AC_CHECK_HEADER([ev.h],
+	[
+		AC_SEARCH_LIBS([ev_sleep], [ev], [],
+			[AC_MSG_FAILURE([Could not find libev library])])
+	],
+	[AC_MSG_FAILURE([Could not find libev header])]
+)
+
+AC_ARG_WITH([jansson-include],
+	[AC_HELP_STRING([--with-jansson-include=DIR], [Path to libjansson headers])],
+	[
+		if test -r "${withval}/jansson.h"; then
+			CPPFLAGS="-I{withval} ${CPPFLAGS}"
+		else
+			AC_MSG_FAILURE([Specified jansson header directory, but no headers found])
+		fi
+	])
+AC_ARG_WITH([jansson-lib],
+	[AC_HELP_STRING([--with-jansson-lib=DIR], [Path to libjansson library])],
+	[
+		for f in ${withval}/libjansson.{a,so,dylib}; do
+			test -r $f && break || f=''
+		done
+		if test "$f"; then
+			LDFLAGS="-L${withval} ${LDFLAGS}"
+		else
+			AC_MSG_FAILURE([Specified jansson lib directory, but no library found at ${withval}])
+		fi
+	])
+
+AC_CHECK_HEADER([jansson.h], 
+	[
+		AC_SEARCH_LIBS([json_loads], [jansson], [], 
+			[AC_MSG_FAILURE([Could not find Jansson libraries])])
+	], 
+	[AC_MSG_FAILURE([jansson.h not found])]
+)
+
+AC_CHECK_HEADER([pthread.h], [], AC_MSG_FAILURE([pthread.h not found]), [])
 AC_SEARCH_LIBS([pthread_create], [pthread])
 
 AC_TYPE_SIZE_T
 AC_TYPE_SIGNAL
 
-AC_CHECK_FUNCS([malloc realloc memset free strdup])
-AC_FUNC_MALLOC
-AC_FUNC_REALLOC
+AC_CHECK_FUNCS([memset strdup malloc realloc])
 AC_FUNC_STRTOD
 
 if test "x$PCRE_CONFIG" != "x"; then
