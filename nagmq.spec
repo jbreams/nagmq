@@ -1,16 +1,16 @@
 Name: nagmq
-Version: 1.4
+Version: 1.4.1
 Release: 1%{?dist}
 Summary: NagMQ is an event broker that exposes the internal state and events of Nagios
 Group: Utilities/Monitoring
 License: GPL
 Url: https://github.com/jbreams/nagmq
 Source0: %{sourcedir}/nagmq-%{version}.tar.gz
-Packager: Daniel Wittenberg <dwittenberg2008@gmail.com>
+Packager: Jonathan Reams <jbreams@gmail.com>
 Vendor: Jonathan Reams <jbreams@gmail.com>
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
-BuildRequires: zeromq3-devel libev-devel jansson-devel
-Requires: zeromq3 libev jansson
+BuildRequires: zeromq-devel libev-devel jansson-devel
+Requires: zeromq libev jansson
 
 %description 
 NagMQ is an event broker that exposes the internal state and events of Nagios to endpoings on a ZeroMQ message bus.
@@ -37,7 +37,7 @@ NagMQ client package
 %setup -q 
 
 %build
-%configure
+%configure --disable-static
 %{__make} %{?_smp_mflags}
 
 %install
@@ -49,7 +49,6 @@ NagMQ client package
 %{__cp} -a dnxmq/mqexec.init ${RPM_BUILD_ROOT}/%{_initrddir}/mqexec
 %{__cp} -a dnxmq/mqbroker.init ${RPM_BUILD_ROOT}/%{_initrddir}/mqbroker
 %{__rm} ${RPM_BUILD_ROOT}%{_libdir}/nagmq/nagmq.so.0*
-%{__rm} ${RPM_BUILD_ROOT}%{_libdir}/nagmq/nagmq.a
 %{__rm} ${RPM_BUILD_ROOT}%{_libdir}/nagmq/nagmq.la
 
 %files

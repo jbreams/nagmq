@@ -469,7 +469,7 @@ void * zap_handler(void* zapsock) {
 	struct keybaghash bag;
 	bag.buckets = 63;
 	bag.data = calloc(63, sizeof(struct keybag*));
-	bag.count;
+	bag.count = 0;
 	time_t last_refresh = 0;
 	int keeprunning = 1, i;
 	sigset_t sigset;
@@ -501,7 +501,7 @@ void * zap_handler(void* zapsock) {
 			rc = zmq_msg_recv(&curmsg, zapsock, 0);
 			if(rc == -1) {
 				if(errno == ETERM) {
-					keeprunning == 0;
+					keeprunning = 0;
 					break;
 				}
 				else
@@ -587,7 +587,7 @@ int handle_startup(int which, void * obj) {
 				*reqdef = NULL, *curvedef = NULL;
 			int numthreads = 1;
 
-			syslog(LOG_INFO, "Initializing NagMQ %lu", getpid());
+			syslog(LOG_INFO, "Initializing NagMQ %u", getpid());
 			if(get_values(config,
 				"iothreads", JSON_INTEGER, 0, &numthreads,
 				"publish", JSON_OBJECT, 0, &pubdef,
