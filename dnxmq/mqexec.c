@@ -100,6 +100,7 @@ struct filter {
 	char or;
 	int fqdn;
 	int nodename;
+	int isnot;
 	struct filter * next;
 } *filterhead = NULL, *filtertail = NULL;
 
@@ -135,11 +136,11 @@ int parse_filter(json_t * in, int or) {
 		char * match = NULL;
 		int icase = 0, dotall = 0;
 		json_t * orobj = NULL;
-		struct filter * newfilt = malloc(sizeof(struct filter));
-		memset(newfilt, 0, sizeof(struct filter));
-		if(json_unpack(in, "{ s?:s s:s s?:o s?:b s?:b s?:b s?:b }",
+
+		struct filter * newfilt = calloc(1, sizeof(struct filter));
+		if(json_unpack(in, "{ s?:s s:s s?:o s?:b s?:b s?:b s?:b s?b }",
 			"match", &match, "field", &field, "or", &orobj,
-			"caseless", &icase, "dotall", &dotall,
+			"caseless", &icase, "dotall", &dotall, "not", &newfilt->isnot,
 			"fqdn", &newfilt->fqdn, "nodename", &newfilt->nodename) < 0) {
 			logit(ERR, "Error parsing filter definition.");
 			free(newfilt);
@@ -229,6 +230,8 @@ int match_filter(json_t * input) {
 			res = regexec(&cur->regex, tomatch, 33, ovec, 0);
 #endif
 		}
+		if(cur->isnot == 1)
+			res = res == 0 ? 1 : 0;
 		if(cur->or == 1 && res == 0)
 			return 1;
 		else if(cur->or == 0 && res != 0)
@@ -403,8 +406,7 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 	logit(DEBUG, "Received job from upstream: %s %s",
 		type, command_line);
 
-	j = malloc(sizeof(struct child_job));
-	memset(j, 0, sizeof(struct child_job));
+	j = calloc(1, sizeof(struct child_job));
 	if(strcmp(type, "service_check_initiate") == 0)
 		j->service = 1;
 	else if(strcmp(type, "host_check_initiate") == 0)
@@ -527,6 +529,8 @@ void recv_job_cb(struct ev_loop * loop, ev_io * i, int event) {
 			if(errno == EINTR) {
 				if(pullsock)
 					continue;
+				else
+					break;
 			}
 			logit(ERR, "Error receiving message from broker %s",
 				zmq_strerror(errno));
@@ -544,14 +548,20 @@ void recv_job_cb(struct ev_loop * loop, ev_io * i, int event) {
 }
 
 void parse_sock_directive(void * socket, json_t * arg, int bind) {
-	int i;
+	int i, rc;
 	if(!arg)
 		return;
 	if(json_is_string(arg)) {
 		if(bind)
-			zmq_bind(socket, json_string_value(arg));
+			rc = zmq_bind(socket, json_string_value(arg));
 		else
-			zmq_connect(socket, json_string_value(arg));
+			rc = zmq_connect(socket, json_string_value(arg));
+		if(rc == -1) {
+			logit(ERR, "Error %s to %s: %s",
+				bind ? "binding" : "connecting",
+				json_string_value(arg), zmq_strerror(errno));
+			exit(1);
+		}
 #if ZMQ_VERSION_MAJOR > 3
 		if(curve_private) {
 			zmq_setsockopt(socket, ZMQ_CURVE_SECRETKEY,
@@ -582,9 +592,15 @@ void parse_sock_directive(void * socket, json_t * arg, int bind) {
 #endif
 
 		if(bind)
-			zmq_bind(socket, addr);
+			rc = zmq_bind(socket, addr);
 		else
-			zmq_connect(socket, addr);
+			rc = zmq_connect(socket, addr);
+		if(rc == -1) {
+			logit(ERR, "Error %s to %s: %s",
+				bind ? "binding" : "connecting",
+				json_string_value(arg), zmq_strerror(errno));
+			exit(1);
+		}
 		logit(DEBUG, "Socket object def %s (bind: %d)",
 			addr, bind);
 
@@ -622,6 +638,10 @@ void handle_end(struct ev_loop * loop, ev_signal * w, int revents) {
 	pullsock = NULL;
 	ev_io_stop(loop, &pullio);
 	ev_signal_stop(loop, w);
+	if(runningjobs == 0)
+		ev_break(loop, EVBREAK_ALL);
+	else
+		logit(INFO, "Exit signal received. Waiting for %u jobs to finish", runningjobs);
 }
 
 int main(int argc, char ** argv) {
@@ -801,9 +821,9 @@ int main(int argc, char ** argv) {
 	ev_child_start(loop, &child_handler); 
 
 	memset(runningtable, 0, sizeof(runningtable));
-	logit(INFO, "Starting DNXMQ event loop");
+	logit(INFO, "Starting mqexec event loop");
 	ev_run(loop, 0);
-	logit(INFO, "DNXMQ event loop terminated");
+	logit(INFO, "mexec event loop terminated");
 
 	if(pullsock)
 		zmq_close(pullsock);

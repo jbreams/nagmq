@@ -6,6 +6,7 @@
 #include <time.h>
 #include <syslog.h>
 #include <string.h>
+#include <ctype.h>
 #define NSCORE 1
 #include "nebstructs.h"
 #include "nebcallbacks.h"
@@ -346,8 +347,37 @@ uint32_t fnv_hash(uint8_t * key) {
 		hash ^= key[i];
 		hash *= 16777619; //fnv_prime
 	}
+	hash =(hash>>16) ^ (hash & 0xffff);
 
 	return hash;
+}
+
+int rehash_keybags(struct keybaghash * o) {
+	if(!(o->count > o->buckets && o->count < (0xffff)))
+		return 0;
+
+	int kiter;
+	int newsize = ((o->buckets + 1) << 2) - 1;
+
+	struct keybag ** newdata = calloc(newsize + 1, sizeof(struct keybag*));
+	if(newdata == NULL)
+		return -ENOMEM;
+
+	for(kiter = 0; kiter < o->buckets + 1; kiter++) {
+		struct keybag * curkey = o->data[kiter], *savekey;
+		while(curkey) {
+			uint32_t hash = fnv_hash(curkey->key) & newsize;
+			savekey = curkey->next;
+			curkey->next = newdata[hash];
+			newdata[hash] = curkey;
+			curkey = savekey;
+		}
+	}
+
+	free(o->data);
+	o->buckets = newsize;
+	o->data = newdata;
+	return 0;
 }
 
 int read_keyfile(const char * path, struct keybaghash * o) {
@@ -370,23 +400,26 @@ int read_keyfile(const char * path, struct keybaghash * o) {
 	o->count = 0;
 
 	while((readcount = getline(&buf, &buflen, fp)) != -1) {
-		char * kl = buf + readcount, *end, *front = buf;
+		char * end = buf + readcount, *front = buf;
 		buflen = buflen > readcount ? buflen : readcount;
-		if(readcount < 40) // Short lines are useless
+
+		while(front < end && isspace(*front))
+			front++;
+		if(*front == '\0' || *front == '#')
 			continue;
 
-		for(;(*front == ' ' || *front == '\t' || *front == '\0'); front++);
-		if(*front == '\n' || *front == '\0' || *front == '#')
-			continue;
+		while(end - 1 > front && isspace(*(end - 1)))
+			end--;
+		if(isspace(*end))
+			*end = '\0';
+		end -= 40;
 
-		kl--;
-		for(;(*kl == ' ' || *kl == '\t' || *kl == '\n'); kl--)
-		end = kl;
-		for(;kl != buf && end - kl < 40; kl--);
+		if(end < front)
+			continue;
 
 		struct keybag * nk = calloc(1, sizeof(struct keybag));
 
-		if(zmq_z85_decode(nk->key, kl) == NULL) {
+		if(zmq_z85_decode(nk->key, end) == NULL) {
 			free(nk);
 			continue;
 		}
@@ -397,36 +430,8 @@ int read_keyfile(const char * path, struct keybaghash * o) {
 		o->data[hashval] = nk;
 		o->count++;
 
-		if(o->count > o->buckets && o->count < (0xffff)) {
-			int newsize = o->count - 1;
-			newsize |= newsize >> 1;
-			newsize |= newsize >> 2;
-			newsize |= newsize >> 4;
-			newsize |= newsize >> 8;
-			newsize |= newsize >> 16;
-
-			struct keybag ** newdata = calloc(newsize, sizeof(struct keybag*));
-			if(newdata == NULL) {
-				fclose(fp);
-				free(buf);
-				return -ENOMEM;
-			}
-
-			for(i = 0; i < o->buckets; i++) {
-				struct keybag * cur = o->data[i];
-				while(cur) {
-					struct keybag * n = cur->next;
-					hashval = fnv_hash(cur->key) & newsize;
-					cur->next = newdata[hashval];
-					newdata[hashval] = cur;
-					cur = n;
-				}
-			}
-
-			free(o->data);
-			o->buckets = newsize;
-			o->data = newdata;
-		}
+		if(rehash_keybags(o) != 0)
+			return -ENOMEM;
 	}
 
 	fclose(fp);

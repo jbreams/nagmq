@@ -27,8 +27,7 @@ void adjust_payload_len(struct payload * po, size_t len) {
 }
 
 struct payload * payload_new() {
-	struct payload * ret = malloc(sizeof(struct payload));
-	memset(ret, 0, sizeof(struct payload));
+	struct payload * ret = calloc(1, sizeof(struct payload));
 	adjust_payload_len(ret, sizeof("{ "));
 	ret->bufused = sprintf(ret->json_buf, "{ ");
 	ret->keep_auxdata = 1;

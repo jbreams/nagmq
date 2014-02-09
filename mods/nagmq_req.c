@@ -1143,8 +1143,7 @@ void process_req_msg(zmq_msg_t * reqmsg) {
 	struct payload * po;
 	char * for_username = NULL;
 
-	po = malloc(sizeof(struct payload));
-	memset(po, 0, sizeof(struct payload));
+	po = calloc(1, sizeof(struct payload));
 	payload_start_array(po, NULL);
 
 	req = json_loadb(zmq_msg_data(reqmsg), zmq_msg_size(reqmsg), 0, &err);
