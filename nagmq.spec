@@ -1,6 +1,6 @@
 Name: nagmq
-Version: 1.4.1
-Release: 1%{?dist}
+Version: 1.4.2
+Release: 2%{?dist}
 Summary: NagMQ is an event broker that exposes the internal state and events of Nagios
 Group: Utilities/Monitoring
 License: GPL
@@ -37,7 +37,7 @@ NagMQ client package
 %setup -q 
 
 %build
-%configure --disable-static
+%configure --disable-static --with-libev-include=/usr/include/libev
 %{__make} %{?_smp_mflags}
 
 %install
@@ -48,13 +48,11 @@ NagMQ client package
 %{__mkdir} -p ${RPM_BUILD_ROOT}/%{_initrddir}
 %{__cp} -a dnxmq/mqexec.init ${RPM_BUILD_ROOT}/%{_initrddir}/mqexec
 %{__cp} -a dnxmq/mqbroker.init ${RPM_BUILD_ROOT}/%{_initrddir}/mqbroker
-%{__rm} ${RPM_BUILD_ROOT}%{_libdir}/nagmq/nagmq.so.0*
-%{__rm} ${RPM_BUILD_ROOT}%{_libdir}/nagmq/nagmq.la
 
 %files
 %defattr(-,root,root)
 %attr(0775,root,root) %dir %{_libdir}/nagmq/
-%attr(0664,root,root) %{_libdir}/nagmq/nagmq.so
+%attr(0664,root,root) %{_libdir}/nagmq/nagmq.*
 %attr(0664,root,root) %{_docdir}/%{name}-%{version}/*
 %attr(0755,root,root) %{_bindir}/nag.py
 
@@ -66,51 +64,6 @@ NagMQ client package
 
 %clean
 %__rm -rf $RPM_BUILD_ROOT
-
-
-%pre
-# Don't do all this stuff if we are upgrading
-#if [ $1 = 1 ] ; then
-#	/usr/sbin/groupadd snort 2> /dev/null || true
-#	/usr/sbin/useradd -M -d %{_var}/log/snort -s %{noShell} -c "Snort" -g snort snort 2>/dev/null || true
-#fi
-
-%post
-# Make a symlink if there is no link for snort-plain
-#if [ -L %{_sbindir}/snort ] || [ ! -e %{_sbindir}/snort ] ; then \
-#	%__rm -f %{_sbindir}/snort; %__ln_s %{_sbindir}/%{name}-plain %{_sbindir}/snort; fi
-
-# We should restart it to activate the new binary if it was upgraded
-#%{_initrddir}/snortd condrestart 1>/dev/null 2>/dev/null
-
-# Don't do all this stuff if we are upgrading
-#if [ $1 = 1 ] ; then
-#	%__chown -R snort.snort %{_var}/log/snort
-#	/sbin/chkconfig --add snortd
-#fi
-
-
-
-%preun
-#if [ $1 = 0 ] ; then
-#	# We get errors about not running, but we don't care
-#	%{_initrddir}/snortd stop 2>/dev/null 1>/dev/null
-#	/sbin/chkconfig --del snortd
-#fi
-
-%postun
-# Try and restart, but don't bail if it fails
-#if [ $1 -ge 1 ] ; then
-#	%{_initrddir}/snortd condrestart  1>/dev/null 2>/dev/null || :
-#fi
-
-# Only do this if we are actually removing snort
-#if [ $1 = 0 ] ; then
-#	if [ -L %{_sbindir}/snort ]; then %__rm -f %{_sbindir}/snort; fi
-#	/usr/sbin/userdel snort 2>/dev/null
-#fi
-
-
 
 %changelog
 * Sat Apr 14 2012 Daniel Wittenberg <dwittenberg2008@gmail.com> 1.2.2-1
