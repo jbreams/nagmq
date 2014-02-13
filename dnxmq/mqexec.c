@@ -552,16 +552,6 @@ void parse_sock_directive(void * socket, json_t * arg, int bind) {
 	if(!arg)
 		return;
 	if(json_is_string(arg)) {
-		if(bind)
-			rc = zmq_bind(socket, json_string_value(arg));
-		else
-			rc = zmq_connect(socket, json_string_value(arg));
-		if(rc == -1) {
-			logit(ERR, "Error %s to %s: %s",
-				bind ? "binding" : "connecting",
-				json_string_value(arg), zmq_strerror(errno));
-			exit(1);
-		}
 #if ZMQ_VERSION_MAJOR > 3
 		if(curve_private) {
 			zmq_setsockopt(socket, ZMQ_CURVE_SECRETKEY,
@@ -572,6 +562,17 @@ void parse_sock_directive(void * socket, json_t * arg, int bind) {
 				curve_server, strlen(curve_server));
 		}
 #endif
+
+		if(bind)
+			rc = zmq_bind(socket, json_string_value(arg));
+		else
+			rc = zmq_connect(socket, json_string_value(arg));
+		if(rc == -1) {
+			logit(ERR, "Error %s to %s: %s",
+				bind ? "binding" : "connecting",
+				json_string_value(arg), zmq_strerror(errno));
+			exit(1);
+		}
 	} else if(json_is_object(arg)) {
 		char * addr = NULL;
 		json_t * subscribe = NULL;
