@@ -581,12 +581,7 @@ int handle_startup(int which, void * obj) {
 	time_t now = ps->timestamp.tv_sec;
 
 	switch(ps->type) {
-		case NEBTYPE_PROCESS_START:
-#ifndef HAVE_NAGIOS4
-			if(daemon_mode && !sigrestart)
-				return 0;
-		case NEBTYPE_PROCESS_DAEMONIZE:
-#endif
+		case NEBTYPE_PROCESS_EVENTLOOPSTART:
 		{
 			json_t * pubdef = NULL, *pulldef = NULL,
 				*reqdef = NULL, *curvedef = NULL;
@@ -617,6 +612,7 @@ int handle_startup(int which, void * obj) {
 			}
 
 #if ZMQ_VERSION_MAJOR > 3
+
 			if(curvedef) {
 				if(get_values(curvedef,
 					"publickey", JSON_STRING, 1, &curve_publickey,
@@ -694,8 +690,15 @@ int handle_startup(int which, void * obj) {
 #endif
 			break;
 		}
-		case NEBTYPE_PROCESS_SHUTDOWN:
-		case NEBTYPE_PROCESS_RESTART:
+		case NEBTYPE_PROCESS_EVENTLOOPEND:
+			if(pubext) {
+				struct payload * payload;
+				payload = payload_new();
+				payload_new_string(payload, "type", "eventloopend");
+				payload_new_timestamp(payload, "timestamp", &ps->timestamp);
+				payload_finalize(payload);
+				process_payload(payload);
+			}
 			if(pullsock)
 				zmq_close(pullsock);
 			if(reqsock)
@@ -703,24 +706,6 @@ int handle_startup(int which, void * obj) {
 			if(pubext)
 				zmq_close(pubext);
 			zmq_term(zmq_ctx);
-			break;
-		case NEBTYPE_PROCESS_EVENTLOOPSTART:
-		case NEBTYPE_PROCESS_EVENTLOOPEND:
-			if(pubext) {
-				struct payload * payload;
-				payload = payload_new();
-				switch(ps->type) {
-					case NEBTYPE_PROCESS_EVENTLOOPSTART:
-						payload_new_string(payload, "type", "eventloopstart");
-						break;
-					case NEBTYPE_PROCESS_EVENTLOOPEND:
-						payload_new_string(payload, "type", "eventloopend");
-						break;
-				}
-				payload_new_timestamp(payload, "timestamp", &ps->timestamp);
-				payload_finalize(payload);
-				process_payload(payload);
-			}
 			break;
 	}
 	return 0;
