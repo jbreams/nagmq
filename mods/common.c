@@ -699,10 +699,24 @@ int handle_startup(int which, void * obj) {
 				payload_finalize(payload);
 				process_payload(payload);
 			}
-			if(pullsock)
+			if(pullsock) {
+#ifdef HAVE_NAGIOS4
+				int fd;
+				size_t throwaway = sizeof(fd);
+				zmq_getsockopt(pullsock, ZMQ_FD, &fd, &throwaway);
+				iobroker_unregister(nagios_iobs, fd);
+#endif
 				zmq_close(pullsock);
-			if(reqsock)
+			}
+			if(reqsock) {
+#ifdef HAVE_NAGIOS4
+				int fd;
+				size_t throwaway = sizeof(fd);
+				zmq_getsockopt(reqsock, ZMQ_FD, &fd, &throwaway);
+				iobroker_unregister(nagios_iobs, fd);
+#endif
 				zmq_close(reqsock);
+			}
 			if(pubext)
 				zmq_close(pubext);
 			zmq_term(zmq_ctx);
