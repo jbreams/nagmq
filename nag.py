@@ -222,7 +222,7 @@ def add_downtime(obj):
 
 	starttime, endtime, duration = tuple([None] * 3)
 	if(opts.starttime):
-		starttime = datetime.strptime(opts.starttime, '%m-%d %H:%M')
+		starttime = datetime.strptime(opts.starttime, '%y-%m-%d %H:%M')
 	else:
 		starttime = datetime.now()
 
@@ -243,7 +243,7 @@ def add_downtime(obj):
 			return
 		endtime = starttime + duration
 	elif(opts.endtime):
-		endtime = datetime.strptime(opts.endtime, '%m-%d %H:%M')
+		endtime = datetime.strptime(opts.endtime, '%y-%m-%d %H:%M')
 		duration = endtime - starttime
 
 	if not duration and not endtime:
