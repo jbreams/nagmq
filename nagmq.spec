@@ -1,5 +1,5 @@
 Name: nagmq
-Version: 1.4.3
+Version: 1.4.4
 Release: 2%{?dist}
 Summary: NagMQ is an event broker that exposes the internal state and events of Nagios
 Group: Utilities/Monitoring
