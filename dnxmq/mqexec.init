@@ -33,7 +33,21 @@ start() {
 
 	for i in `eval echo {0..$EXECUTORCOUNT}`; do
 		echo -n $"Starting $prog worker #$i: "
-		daemon mqexec -d $NAGMQCONFIG
+
+		USERARG=""
+		if [ -n "$RUNASUSER" ]; then
+			USERARG="--user=$RUNASUSER"
+		fi
+
+		CONFIGARG=NAGMQCONFIG$i
+		CONFIGARG=${!CONFIGARG}
+		if [ -n "$CONFIGARG" ]; then
+			CONFIGARG=$CONFIGARG
+		else
+			CONFIGARG=$NAGMQCONFIG
+		fi
+
+		daemon $USERARG mqexec -d $CONFIGARG
 		RETVAL=$?
 		[ $RETVAL -eq 0 ] || return $RETVAL
 		echo

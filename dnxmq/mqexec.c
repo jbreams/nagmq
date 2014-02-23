@@ -225,13 +225,16 @@ int match_filter(json_t * input) {
 			int ovec[33];
 			res = pcre_exec(cur->regex, cur->extra,
 				tomatch, strlen(tomatch), 0, 0, ovec, 33);
+			res = res < 0 ? 1 : 0;
 #else
 			regmatch_t ovec[33];
 			res = regexec(&cur->regex, tomatch, 33, ovec, 0);
 #endif
 		}
-		if(cur->isnot == 1)
+		if(cur->isnot == 1) {
 			res = res == 0 ? 1 : 0;
+			logit(DEBUG, "Inverting filter because of not clause");
+		}
 		if(cur->or == 1 && res == 0)
 			return 1;
 		else if(cur->or == 0 && res != 0)
@@ -396,6 +399,7 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 	}
 
 	if(filterhead != NULL && match_filter(input) != 1) {
+		logit(DEBUG, "Not running %s because of filtering", command_line);
 		json_decref(input);
 		return;
 	}
