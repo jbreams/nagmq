@@ -427,15 +427,15 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 		return;
 	}
 
-	if(pipe(fds) < 0) {
+	if(pipe(fds) < 0 ||
+		fcntl(fds[0], F_SETFL, O_NONBLOCK) < 0) {
 		logit(ERR, "Error creating pipe for %s: %s",
 			command_line, strerror(errno));
 		obj_for_ending(j, "Error creating pipe", 3, 0, 0);
 		free(j);
 		json_decref(input);
 		return;		
-	};
-	fcntl(fds[0], F_SETFL, O_NONBLOCK);
+	}
 
 	ev_io_init(&j->io, child_io_cb, fds[0], EV_READ);
 	j->io.data = j;
@@ -446,6 +446,10 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 	if(pid == 0) {
 		wordexp_t expvec;
 		int dn = open("/dev/null", O_RDONLY);
+		if(dn < 0) {
+			printf("Error redirecting stdin: %s\n", strerror(errno));
+			exit(127);
+		}
 		dup2(fds[1], fileno(stdout));
 		dup2(fds[1], fileno(stderr));
 		dup2(dn, fileno(stdin));
