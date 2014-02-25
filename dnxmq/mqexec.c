@@ -614,11 +614,17 @@ void parse_sock_directive(void * socket, json_t * arg, int bind) {
 			addr, bind);
 
 		if(subscribe) {
-			int type;
-			size_t ts = sizeof(type);
-			zmq_getsockopt(socket, ZMQ_TYPE, &type, &ts);
-			if(type != ZMQ_SUB)
+			int opt;
+			size_t optsize = sizeof(opt);
+			zmq_getsockopt(socket, ZMQ_TYPE, &opt, &optsize);
+			if(opt != ZMQ_SUB)
 				return;
+			opt = 1;
+#if ZMQ_VERSION_MAJOR < 3
+			zmq_setsockopt(socket, ZMQ_DELAY_ATTACH_ON_CONNECT, &opt, &optsize);
+#else
+			zmq_setsockopt(socket, ZMQ_IMMEDIATE, &opt, optsize);
+#endif
 			if(json_is_string(subscribe)) {
 				const char * opt = json_string_value(subscribe);
 				zmq_setsockopt(socket, ZMQ_SUBSCRIBE, opt, strlen(opt));
@@ -827,7 +833,7 @@ int main(int argc, char ** argv) {
 	ev_signal_init(&huphandler, handle_end, SIGHUP);
 	ev_signal_start(loop, &huphandler);
 	ev_child_init(&child_handler, child_end_cb, 0, 0);
-	ev_child_start(loop, &child_handler); 
+	ev_child_start(loop, &child_handler);
 
 	memset(runningtable, 0, sizeof(runningtable));
 	logit(INFO, "Starting mqexec event loop");
