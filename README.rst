@@ -52,11 +52,9 @@ Depending on what version/flavor of Nagios you want to compile against, you will
 	--with-nagios4-src=DIR
 	--with-naemon-src=DIR
 
-NagMQ comes with some Nagios headers included, but their use is heavily deprecated and they will be removed very very soon. The Nagios sources need to be configured, but not built.
+If the configure flag ends in "src" you should point to a full nagios source tree, otherwise, just the header files from the nagios "include" directory will do. Previous versions of NagMQ came with Nagios headers - they have been removed to reduce confusion.
 
 Support for Icinga and Naemon is experimental and not tested very well, so results may vary. If you're a big Icinga or Naemon user and find something wrong, pull requests are greatly appreciated!
-
-If you are running Nagios 4, install the nagios-devel package to get the header files in /usr/include.
 
 Compilation and Installation
 ----------------------------

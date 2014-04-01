@@ -186,8 +186,7 @@ AC_ARG_WITH([naemon-src],
 
 CFLAGS_BAK=$CFLAGS
 if test "$WITHHEADERS" = "no"; then
-	WITHHEADERS="-I./naginclude"
-	CFLAGS="$CFLAGS $WITHHEADERS"
+	AC_MSG_FAILURE([Must supply headers/source to Nagios - see the README requirements section.])
 fi
 
 AC_SUBST([WITHHEADERS])
