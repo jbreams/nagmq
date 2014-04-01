@@ -12,6 +12,7 @@ AC_ARG_WITH([pcre-config],
 	[pcre_config_prog=$withval])
 AC_PATH_PROG(PCRE_CONFIG, [pcre-config], $pcre_config_prog)
 
+AM_PROG_AR
 AC_PROG_CC
 AM_PROG_CC_C_O
 
