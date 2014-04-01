@@ -620,7 +620,7 @@ void parse_sock_directive(void * socket, json_t * arg, int bind) {
 			if(opt != ZMQ_SUB)
 				return;
 			opt = 1;
-#if ZMQ_VERSION_MAJOR < 3
+#if ZMQ_VERSION < 30300
 			zmq_setsockopt(socket, ZMQ_DELAY_ATTACH_ON_CONNECT, &opt, &optsize);
 #else
 			zmq_setsockopt(socket, ZMQ_IMMEDIATE, &opt, optsize);
