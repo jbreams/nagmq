@@ -14,6 +14,13 @@ AC_PATH_PROG(PCRE_CONFIG, [pcre-config], $pcre_config_prog)
 
 AC_PROG_CC
 AM_PROG_CC_C_O
+
+dnl AM_PROG_AR is needed for some linker stuff
+dnl AC_USE_SYSTEM_EXTENSIONS requires autoconf 2.60
+m4_ifdef([AC_USE_SYSTEM_EXTENSIONS], [AC_USE_SYSTEM_EXTENSIONS])
+dnl AM_PROG_AR requires automake 1.11 (and uses AC_COMPILE_IFELSE which wants AC_USE_SYSTEM_EXTENSIONS)
+m4_ifdef([AM_PROG_AR], [AM_PROG_AR])
+
 LT_PREREQ([2.2.6])
 LT_INIT([disable-static shared])
 
