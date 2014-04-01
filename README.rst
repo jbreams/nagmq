@@ -31,15 +31,18 @@ Requirements
 ------------
 
 The NagMQ event broker requires the following libraries to compile
+
 - jansson >= v2.4 (http://jansson.readthedocs.org)
 - zeromq >= v2.2 (http://zeromq.org/)
 - Nagios source/header files >= v3.1 (http://nagios.org)
 
 The mqexec check executor requires the following additional libraries to compile
+
 - pcre (optional) (http://www.pcre.org/)
 - libev (http://software.schmorp.de/pkg/libev.html)
 
 The utility python scripts included require
+
 - pyzmq 
 
 Depending on what version/flavor of Nagios you want to compile against, you will have to use one of the following configure flags::
