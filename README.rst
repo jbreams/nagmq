@@ -27,13 +27,41 @@ the source distribution for details.
 
 Visit https://groups.google.com/d/forum/nagmq for questions and announcements.
 
+Requirements
+------------
+
+The NagMQ event broker requires the following libraries to compile
+- jansson >= v2.4 (http://jansson.readthedocs.org)
+- zeromq >= v2.2 (http://zeromq.org/)
+- Nagios source/header files >= v3.1 (http://nagios.org)
+
+The mqexec check executor requires the following additional libraries to compile
+- pcre (optional) (http://www.pcre.org/)
+- libev (http://software.schmorp.de/pkg/libev.html)
+
+The utility python scripts included require
+- pyzmq 
+
+Depending on what version/flavor of Nagios you want to compile against, you will have to use one of the following configure flags::
+
+	--with-icinga-headers=DIR
+	--with-nagios3-headers=DIR
+	--with-nagios4-src=DIR
+	--with-naemon-src=DIR
+
+NagMQ comes with some Nagios headers included, but their use is heavily deprecated and they will be removed very very soon. The Nagios sources need to be configured, but not built.
+
+Support for Icinga and Naemon is experimental and not tested very well, so results may vary. If you're a big Icinga or Naemon user and find something wrong, pull requests are greatly appreciated!
+
+If you are running Nagios 4, install the nagios-devel package to get the header files in /usr/include.
+
 Compilation and Installation
 ----------------------------
 
 Compile this from the Git repo by running::
 
 	$ autoreconf -i
-	$ ./configure
+	$ ./configure --with-nagios4-src=/tmp/nagios-sources
 	$ make
 	$ make install
 
