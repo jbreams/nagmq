@@ -671,6 +671,7 @@ int main(int argc, char ** argv) {
 	char ch, *configobj = "executor", *tmprootpath = NULL,
 		*tmpunprivpath = NULL, *tmpunprivuser = NULL;
 	json_error_t jsonerr;
+	int reconnect_ivl = 1000;
 
 	while((ch = getopt(argc, argv, "vsdhc:")) != -1) {
 		switch(ch) {
@@ -720,25 +721,26 @@ int main(int argc, char ** argv) {
 
 #if ZMQ_VERSION_MAJOR < 4
 	if(json_unpack_ex(config, &jsonerr, 0,
-		"{s:{s?:o s:o s?i s?b s?b s?:o s?o s?s s?s s?s}}",
+		"{s:{s?:o s:o s?i s?b s?b s?:o s?o s?s s?s s?s s?i}}",
 		configobj, "jobs", &jobs, "results", &results,
 		"iothreads", &iothreads, "verbose", &verbose,
 		"syslog", &usesyslog, "filter", &filter,
 		"publisher", &publisher, "rootpath", &tmprootpath,
-		"unprivpath", &tmpunprivpath, "unprivuser", &tmpunprivuser) != 0) {
+		"unprivpath", &tmpunprivpath, "unprivuser", &tmpunprivuser,
+		"reconnect_ivl", &reconnect_ivl) != 0) {
 		logit(ERR, "Error getting config %s", jsonerr.text);
 		exit(-1);
 	}
 #else
 	if(json_unpack_ex(config, &jsonerr, 0,
-		"{s:{s?:o s:o s?i s?b s?b s?:o s?o s?s s?s s?s s?{s:s s:s s:s}}}",
+		"{s:{s?:o s:o s?i s?b s?b s?:o s?o s?s s?s s?s s?{s:s s:s s:s} s?i}}",
 		configobj, "jobs", &jobs, "results", &results,
 		"iothreads", &iothreads, "verbose", &verbose,
 		"syslog", &usesyslog, "filter", &filter,
 		"publisher", &publisher, "rootpath", &tmprootpath,
 		"unprivpath", &tmpunprivpath, "unprivuser", &tmpunprivuser,
 		"curve", "publickey", &curve_public, "privatekey", &curve_private,
-		"serverkey", &curve_server) != 0) {
+		"serverkey", &curve_server, "reconnect_ivl", &reconnect_ivl) != 0) {
 		logit(ERR, "Error getting config: %s", jsonerr.text);
 		exit(-1);
 	}
@@ -817,6 +819,9 @@ int main(int argc, char ** argv) {
 		logit(ERR, "Must supply either a jobs or publisher socket for worker");
 		exit(-1);
 	}
+
+	zmq_setsockopt(pullsock, ZMQ_RECONNECT_IVL, &reconnect_ivl, sizeof(int));
+	zmq_setsockopt(pushsock, ZMQ_RECONNECT_IVL, &reconnect_ivl, sizeof(int));
 
 	zmq_getsockopt(pullsock, ZMQ_FD, &pullfd, &pullfds);
 	if(pullfd == -1) {

@@ -367,8 +367,6 @@ int rehash_keybags(struct keybaghash * o) {
 		struct keybag * curkey = o->data[kiter], *savekey;
 		while(curkey) {
 			uint32_t hash = fnv_hash(curkey->key) & newsize;
-			if(hash == newsize)
-				hash -= 1;
 			savekey = curkey->next;
 			curkey->next = newdata[hash];
 			newdata[hash] = curkey;
@@ -427,8 +425,6 @@ int read_keyfile(const char * path, struct keybaghash * o) {
 		}
 
 		uint32_t hashval = fnv_hash(nk->key) & o->buckets;
-		if(hashval == o->buckets)
-			hashval -= 1;
 
 		nk->next = o->data[hashval];
 		o->data[hashval] = nk;
@@ -477,7 +473,7 @@ int send_zap_resp(zmq_msg_t * reqid, char * code, char * text,
 void * zap_handler(void* zapsock) {
 	struct keybaghash bag;
 	bag.buckets = 63;
-	bag.data = calloc(63, sizeof(struct keybag*));
+	bag.data = calloc(64, sizeof(struct keybag*));
 	bag.count = 0;
 	time_t last_refresh = 0;
 	int keeprunning = 1, i;
@@ -544,8 +540,6 @@ void * zap_handler(void* zapsock) {
 
 		uint32_t hashval = fnv_hash(creds);
 		hashval &= bag.buckets;
-		if(hashval == bag.buckets)
-			hashval -= 1;
 
 		struct keybag * search = bag.data[hashval];
 
