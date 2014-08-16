@@ -57,6 +57,7 @@ struct child_job {
 	char buffer[MAX_PLUGIN_OUTPUT_LENGTH];
 	size_t bufused;
 	struct timeval start;
+	double latency;
 	int service;
 	int timeout;
 	pid_t pid;
@@ -271,7 +272,7 @@ void obj_for_ending(struct child_job * j, const char * output,
 	zmq_msg_t outmsg;
 	const char * keys[] = { "host_name", "service_description",
 		"check_options", "scheduled_check", "reschedule_check",
-		"latency", "early_timeout", "check_type", NULL };
+		"early_timeout", "check_type", NULL };
 	struct timeval finish;
 	int i, rc;
 
@@ -279,13 +280,14 @@ void obj_for_ending(struct child_job * j, const char * output,
 		gettimeofday(&j->start, NULL);
 	gettimeofday(&finish, NULL);
 	json_t * jout = json_pack(
-		"{ s:s s:i s:i s:i s:{ s:i s:i } s:{ s:i s:i } s:s }",
+		"{ s:s s:i s:i s:i s:{ s:i s:i } s:{ s:i s:i } s:s s:f }",
 		"output", output, "return_code", return_code,
 		"exited_ok", exited_ok, "early_timeout", early_timeout,
 		"start_time", "tv_sec", j->start.tv_sec,
 		"tv_usec", j->start.tv_usec, "finish_time", "tv_sec",
 		finish.tv_sec, "tv_usec", finish.tv_usec, "type",
-		j->service ? "service_check_processed":"host_check_processed");
+		j->service ? "service_check_processed":"host_check_processed",
+		"latency", j->latency);
 
 	for(i = 0; keys[i] != NULL; i++) {
 		json_t * val = json_object_get(j->input, keys[i]);
@@ -389,6 +391,36 @@ int check_jail(const char * cmdline) {
 	return 0;
 }
 
+// Taken from http://www.gnu.org/software/libc/manual/html_node/Elapsed-Time.html
+/* Subtract the `struct timeval' values X and Y,
+storing the result in RESULT.
+Return 1 if the difference is negative, otherwise 0. */
+
+int
+timeval_subtract (result, x, y)
+struct timeval *result, *x, *y;
+{
+/* Perform the carry for the later subtraction by updating y. */
+	if (x->tv_usec < y->tv_usec) {
+		int nsec = (y->tv_usec - x->tv_usec) / 1000000 + 1;
+		y->tv_usec -= 1000000 * nsec;
+		y->tv_sec += nsec;
+	}
+	if (x->tv_usec - y->tv_usec > 1000000) {
+		int nsec = (x->tv_usec - y->tv_usec) / 1000000;
+		y->tv_usec += 1000000 * nsec;
+		y->tv_sec -= nsec;
+	}
+
+/* Compute the time remaining to wait.
+  tv_usec is certainly positive. */
+	result->tv_sec = x->tv_sec - y->tv_sec;
+	result->tv_usec = x->tv_usec - y->tv_usec;
+
+/* Return 1 if result is negative. */
+	return x->tv_sec < y->tv_sec;
+}
+
 void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 	json_t * input;
 	struct child_job * j;
@@ -397,6 +429,8 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 	int fds[2];
 	pid_t pid;
 	int timeout = 0, okay_to_run;
+	struct timeval server_starttime = {0, 0}, latencytv = { 0, 0 };
+	double server_latency = 0.0;
 
 	input = json_loadb(zmq_msg_data(inmsg), zmq_msg_size(inmsg), 0, &err);
 	zmq_msg_close(inmsg);
@@ -406,10 +440,13 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 		return;
 	}
 
-	if(json_unpack(input, "{ s:s s:s s?:i s?:s s?:s }",
+	if(json_unpack(input, "{ s:s s:s s?:i s?:s s?:s s:{ s:i s:i } s?:f}",
 		"type", &type, "command_line", &command_line,
 		"timeout", &timeout, "host_name", &hostname,
-		"service_description", &svcdesc) != 0) {
+		"service_description", &svcdesc,
+		"timestamp", "tv_sec", &server_starttime.tv_sec,
+		"tv_usec", &server_starttime.tv_usec,
+		"latency", &server_latency) != 0) {
 		logit(ERR, "Error unpacking JSON payload during kickoff");
 		json_decref(input);
 		return;
@@ -522,6 +559,15 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 		free(j);
 		return;
 	}
+
+	if(timeval_subtract(&latencytv, &j->start, &server_starttime) == 1) {
+		logit(INFO, "Time skew detected in latency calculation: tv_sec: %d, tv_usec: %d",
+			latencytv.tv_sec, latencytv.tv_usec);
+	} else {
+		server_latency += latencytv.tv_sec + (latencytv.tv_usec / 1000000.0);
+		logit(DEBUG, "Network latency was %f seconds", server_latency);
+	}
+
 	j->pid = pid;
 	add_child(j);
 	close(fds[1]);
