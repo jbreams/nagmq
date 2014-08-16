@@ -25,6 +25,7 @@
 #endif
 #include "zmq3compat.h"
 #include <wordexp.h>
+#include <time.h>
 
 #ifndef MAX_PLUGIN_OUTPUT_LENGTH
 #define MAX_PLUGIN_OUTPUT_LENGTH 8192
@@ -46,6 +47,10 @@ uid_t runas = 0;
 #if ZMQ_VERSION_MAJOR > 3
 char * curve_private = NULL, *curve_public = NULL, *curve_server = NULL;
 #endif
+#if ZMQ_VERSION_MAJOR >= 3
+ev_io pullmonio, pushmonio;
+#endif
+int reconnect_ivl = 1000, reconnect_ivl_max = 0;
 
 struct child_job {
 	json_t * input;
@@ -110,20 +115,32 @@ struct filter {
 void logit(int level, char * fmt, ...) {
 	int err;
 	va_list ap;
+	char * levelstr;
 
-	if(level == 0)
+	if(level == 0) {
 		err = LOG_INFO;
+		levelstr = "INFO";
+	}
 	else if(level == 1) {
 		if(verbose == 0)
 			return;
 		err = LOG_DEBUG;
+		levelstr = "DEBUG";
 	}
-	else
+	else {
 		err = LOG_ERR;
+		levelstr = "ERROR";
+	}
 	va_start(ap, fmt);
 	if(usesyslog)
 		vsyslog(err, fmt, ap);
 	else {
+		char datebuf[26];
+		time_t now = time(NULL);
+		ctime_r(&now, datebuf);
+		datebuf[24] = '\0';
+
+		fprintf(stderr, "%s %s: ", datebuf, levelstr);
 		vfprintf(stderr, fmt, ap); 
 		fprintf(stderr, "\n");
 	}
@@ -555,6 +572,132 @@ void recv_job_cb(struct ev_loop * loop, ev_io * i, int event) {
 	}
 }
 
+#if ZMQ_VERSION_MAJOR >= 3
+void sock_monitor_cb(struct ev_loop * loop, ev_io * i, int event) {
+	while(1) {
+		void * sock = i->data;
+		zmq_event_t sockevent;
+		zmq_msg_t addrmsg, eventmsg;
+		int rc, shouldlog = 1;
+
+		zmq_msg_init(&eventmsg);
+		rc = zmq_msg_recv(&eventmsg, sock, ZMQ_DONTWAIT);
+		if(rc == -1) {
+			if(errno == EAGAIN || errno == ETERM)
+				break;
+			else if(errno == EINTR)
+				continue;
+			else {
+				logit(ERR, "Error receiving socket monitor message %s",
+					zmq_strerror(errno));
+				break;
+			}
+		}
+
+		if(!zmq_msg_more(&eventmsg)) {
+			logit(ERR, "Message should have been multipart, is only one part");
+			break;
+		}
+
+		const char* eventdata = (char*)zmq_msg_data(&eventmsg);
+		memcpy(&(sockevent.event), eventdata, sizeof(sockevent.event));
+		memcpy(&(sockevent.value), eventdata + sizeof(sockevent.event),
+			sizeof(sockevent.value));
+		zmq_msg_close(&eventmsg);
+
+		zmq_msg_init(&addrmsg);
+		rc = zmq_msg_recv(&addrmsg, sock, ZMQ_DONTWAIT);
+		if(rc == -1) {
+			if(errno == EAGAIN || errno == ETERM)
+				break;
+			else if(errno == EINTR)
+				continue;
+			else {
+				logit(ERR, "Error receiving socket monitor message %s",
+					zmq_strerror(errno));
+				break;
+			}
+		}
+
+		// These are super chatting log messages, skip em.
+		switch(sockevent.event) {
+			case ZMQ_EVENT_CLOSED:
+			case ZMQ_EVENT_CONNECT_DELAYED:
+				shouldlog = 0;
+				break;
+		}
+
+		if(!shouldlog)
+			continue;
+
+		char * event_string;
+		switch(sockevent.event) {
+			case ZMQ_EVENT_CONNECTED:
+				event_string = "Socket event on %.*s: connection established (fd: %d)";
+				break;
+			// This is super chatty. Commenting it out to reduce log chattyness
+			// case ZMQ_EVENT_CONNECT_DELAYED:
+			// 	event_string = "Socket event on %.*s: synchronous connect failed, it's being polled";
+			// 	break;
+			case ZMQ_EVENT_CONNECT_RETRIED:
+				event_string = "Socket event on %.*s: asynchronous connect / reconnection attempt (ivl: %d)";
+				break;
+			case ZMQ_EVENT_LISTENING:
+				event_string = "Socket event on %.*s: socket bound to an address, ready to accept (fd: %d)";
+				break;
+			case ZMQ_EVENT_BIND_FAILED:
+				event_string = "Socket event on %.*s: socket could not bind to an address (errno: %d)";
+				break;
+			case ZMQ_EVENT_ACCEPTED:
+				event_string = "Socket event on %.*s: connection accepted to bound interface (fd: %d)";
+				break;
+			case ZMQ_EVENT_ACCEPT_FAILED:
+				event_string = "Socket event on %.*s: could not accept client connection (errno: %d)";
+				break;
+			// This is super chatty. Commenting it out to reduce log chattyness
+			// case ZMQ_EVENT_CLOSED:
+			// 	event_string = "Socket event on %.*s: connection closed (fd: %d)";
+			// 	break;
+			case ZMQ_EVENT_CLOSE_FAILED:
+				event_string = "Socket event on %.*s: connection couldn't be closed (errno: %d)";
+				break;
+			case ZMQ_EVENT_DISCONNECTED:
+				event_string = "Socket event on %.*s: broken session (fd: %d)";
+				break;
+			default:
+				event_string = "Unknown socket event on %.*s: %d";
+				break;
+		}
+
+		logit(INFO, event_string, zmq_msg_size(&addrmsg),
+			(char*)zmq_msg_data(&addrmsg), sockevent.value);
+		zmq_msg_close(&addrmsg);
+	}
+}
+
+void setup_sockmonitor(struct ev_loop * loop, ev_io * ioev, void * sock) {
+	char channel[64];
+	snprintf(channel, 64, "inproc://monitor_%p", sock);
+
+	zmq_socket_monitor(sock, channel, ZMQ_EVENT_ALL);
+	int fd = 0;
+	size_t fdsize = sizeof(fd);
+
+	void * monsock = zmq_socket(zmqctx, ZMQ_PAIR);
+	zmq_connect(monsock, channel);
+	zmq_getsockopt(monsock, ZMQ_FD, &fd, &fdsize);
+	ev_io_init(ioev, sock_monitor_cb, fd, EV_READ);
+	ioev->data = monsock;
+	ev_io_start(loop, ioev);
+
+	logit(DEBUG, "Registered %s for socket monitoring on %d", channel, fd);
+
+	// Because the events are edge triggered, we have to empty the queue
+	// before starting the libev loop.
+	sock_monitor_cb(loop, ioev, EV_READ);
+}
+#endif
+
 void parse_sock_directive(void * socket, json_t * arg, int bind) {
 	int i, rc;
 	if(!arg)
@@ -570,6 +713,10 @@ void parse_sock_directive(void * socket, json_t * arg, int bind) {
 				curve_server, strlen(curve_server));
 		}
 #endif
+		zmq_setsockopt(socket, ZMQ_RECONNECT_IVL,
+			&reconnect_ivl, sizeof(reconnect_ivl));
+		zmq_setsockopt(socket, ZMQ_RECONNECT_IVL_MAX,
+			&reconnect_ivl_max, sizeof(reconnect_ivl_max));
 
 		if(bind)
 			rc = zmq_bind(socket, json_string_value(arg));
@@ -599,6 +746,11 @@ void parse_sock_directive(void * socket, json_t * arg, int bind) {
 				curve_server, strlen(curve_server));
 		}
 #endif
+
+		zmq_setsockopt(socket, ZMQ_RECONNECT_IVL,
+			&reconnect_ivl, sizeof(reconnect_ivl));
+		zmq_setsockopt(socket, ZMQ_RECONNECT_IVL_MAX,
+			&reconnect_ivl_max, sizeof(reconnect_ivl_max));
 
 		if(bind)
 			rc = zmq_bind(socket, addr);
@@ -671,7 +823,6 @@ int main(int argc, char ** argv) {
 	char ch, *configobj = "executor", *tmprootpath = NULL,
 		*tmpunprivpath = NULL, *tmpunprivuser = NULL;
 	json_error_t jsonerr;
-	int reconnect_ivl = 1000;
 
 	while((ch = getopt(argc, argv, "vsdhc:")) != -1) {
 		switch(ch) {
@@ -721,26 +872,28 @@ int main(int argc, char ** argv) {
 
 #if ZMQ_VERSION_MAJOR < 4
 	if(json_unpack_ex(config, &jsonerr, 0,
-		"{s:{s?:o s:o s?i s?b s?b s?:o s?o s?s s?s s?s s?i}}",
+		"{s:{s?:o s:o s?i s?b s?b s?:o s?o s?s s?s s?s s?i s?i}}",
 		configobj, "jobs", &jobs, "results", &results,
 		"iothreads", &iothreads, "verbose", &verbose,
 		"syslog", &usesyslog, "filter", &filter,
 		"publisher", &publisher, "rootpath", &tmprootpath,
 		"unprivpath", &tmpunprivpath, "unprivuser", &tmpunprivuser,
-		"reconnect_ivl", &reconnect_ivl) != 0) {
+		"reconnect_ivl", &reconnect_ivl,
+		"reconnect_ivl_max", &reconnect_ivl_max) != 0) {
 		logit(ERR, "Error getting config %s", jsonerr.text);
 		exit(-1);
 	}
 #else
 	if(json_unpack_ex(config, &jsonerr, 0,
-		"{s:{s?:o s:o s?i s?b s?b s?:o s?o s?s s?s s?s s?{s:s s:s s:s} s?i}}",
+		"{s:{s?:o s:o s?i s?b s?b s?:o s?o s?s s?s s?s s?{s:s s:s s:s} s?i s?i}}",
 		configobj, "jobs", &jobs, "results", &results,
 		"iothreads", &iothreads, "verbose", &verbose,
 		"syslog", &usesyslog, "filter", &filter,
 		"publisher", &publisher, "rootpath", &tmprootpath,
 		"unprivpath", &tmpunprivpath, "unprivuser", &tmpunprivuser,
 		"curve", "publickey", &curve_public, "privatekey", &curve_private,
-		"serverkey", &curve_server, "reconnect_ivl", &reconnect_ivl) != 0) {
+		"serverkey", &curve_server, "reconnect_ivl", &reconnect_ivl,
+		"reconnect_ivl_max", &reconnect_ivl_max) != 0) {
 		logit(ERR, "Error getting config: %s", jsonerr.text);
 		exit(-1);
 	}
@@ -820,8 +973,12 @@ int main(int argc, char ** argv) {
 		exit(-1);
 	}
 
-	zmq_setsockopt(pullsock, ZMQ_RECONNECT_IVL, &reconnect_ivl, sizeof(int));
-	zmq_setsockopt(pushsock, ZMQ_RECONNECT_IVL, &reconnect_ivl, sizeof(int));
+	int ivl;
+	size_t ivlsize = sizeof(ivl);
+	zmq_getsockopt(pullsock, ZMQ_RECONNECT_IVL, &ivl, &ivlsize);
+	logit(DEBUG, "Set pull reconnect interval to %d", ivl);
+	zmq_getsockopt(pushsock, ZMQ_RECONNECT_IVL, &ivl, &ivlsize);
+	logit(DEBUG, "Set push reconnect interval to %d", ivl);
 
 	zmq_getsockopt(pullsock, ZMQ_FD, &pullfd, &pullfds);
 	if(pullfd == -1) {
@@ -839,6 +996,11 @@ int main(int argc, char ** argv) {
 	ev_signal_start(loop, &huphandler);
 	ev_child_init(&child_handler, child_end_cb, 0, 0);
 	ev_child_start(loop, &child_handler);
+
+#if ZMQ_VERSION_MAJOR >= 3
+	setup_sockmonitor(loop, &pullmonio, pullsock);
+	setup_sockmonitor(loop, &pushmonio, pushsock);
+#endif
 
 	memset(runningtable, 0, sizeof(runningtable));
 	logit(INFO, "Starting mqexec event loop");
