@@ -579,6 +579,7 @@ cleanup:
 int handle_startup(int which, void * obj) {
 	struct nebstruct_process_struct *ps = (struct nebstruct_process_struct *)obj;
 	time_t now = ps->timestamp.tv_sec;
+	int rc;
 
 	switch(ps->type) {
 		case NEBTYPE_PROCESS_EVENTLOOPSTART:
@@ -719,7 +720,15 @@ int handle_startup(int which, void * obj) {
 			}
 			if(pubext)
 				zmq_close(pubext);
-			zmq_term(zmq_ctx);
+
+			while((rc = zmq_term(zmq_ctx)) != 0) {
+				if(errno == EINTR) {
+					syslog(LOG_DEBUG, "NagMQ ZeroMQ context termination was interrupted");
+					continue;
+				}
+				else
+					break;
+			}
 			break;
 	}
 	return 0;
