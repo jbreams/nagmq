@@ -36,6 +36,10 @@ char * curve_publickey = NULL, *curve_privatekey = NULL,
 	*curve_knownhosts = NULL;
 int keyfile_refresh_interval = 60;
 
+// This is defined in nagios's objects.c, it should match the current
+// ABI version of the nagios nagmq is loaded into.
+extern int __nagios_object_structure_version;
+
 int nebmodule_deinit(int flags, int reason) {
 	neb_deregister_module_callbacks(nagmq_handle);
 	if(config)
@@ -630,12 +634,12 @@ int handle_startup(int which, void * obj) {
 					void * zapsock = zmq_socket(zmq_ctx, ZMQ_REP);
 					if(zapsock == NULL) {
 						syslog(LOG_ERR, "Error creating ZAP socket");
-						return NULL;
+						return -1;
 					}
 
 					if(zmq_bind(zapsock, "inproc://zeromq.zap.01") != 0) {
 						syslog(LOG_ERR, "Error binding to ZAP endpoint");
-						return NULL;
+						return -1;
 					}
 					int rc = pthread_create(&tid, NULL, zap_handler, zapsock);
 					if(rc != 0) {
@@ -737,6 +741,13 @@ int handle_startup(int which, void * obj) {
 int nebmodule_init(int flags, char * localargs, nebmodule * lhandle) {
 	json_error_t loaderr;
 	handle = lhandle;
+
+	if(__nagios_object_structure_version != CURRENT_OBJECT_STRUCTURE_VERSION) {
+		syslog(LOG_ERR, "NagMQ is loaded into a version of nagios with a different ABI " \
+			"than it was compiled for! You need to recompile NagMQ against the current " \
+			"nagios headers!");
+		return -1;
+	}
 
 	neb_set_module_info(handle, NEBMODULE_MODINFO_TITLE, "NagMQ");
 	neb_set_module_info(handle, NEBMODULE_MODINFO_AUTHOR, "Jonathan Reams");
