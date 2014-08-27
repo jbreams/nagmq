@@ -947,7 +947,7 @@ int main(int argc, char ** argv) {
 
 #if ZMQ_VERSION_MAJOR < 4
 	if(json_unpack_ex(config, &jsonerr, 0,
-		"{s:{s?:o s:o s?i s?b s?b s?:o s?o s?s s?s s?s s?i s?i}}",
+		"{s:{s?:o s:o s?i s?b s?b s?:o s?o s?s s?s s?s s?i s?i s?b s?i}}",
 		configobj, "jobs", &jobs, "results", &results,
 		"iothreads", &iothreads, "verbose", &verbose,
 		"syslog", &usesyslog, "filter", &filter,
@@ -962,7 +962,7 @@ int main(int argc, char ** argv) {
 	}
 #else
 	if(json_unpack_ex(config, &jsonerr, 0,
-		"{s:{s?:o s:o s?i s?b s?b s?:o s?o s?s s?s s?s s?{s:s s:s s:s} s?i s?i}}",
+		"{s:{s?:o s:o s?i s?b s?b s?:o s?o s?s s?s s?s s?{s:s s:s s:s} s?i s?i s?b s?i}}",
 		configobj, "jobs", &jobs, "results", &results,
 		"iothreads", &iothreads, "verbose", &verbose,
 		"syslog", &usesyslog, "filter", &filter,
@@ -970,7 +970,9 @@ int main(int argc, char ** argv) {
 		"unprivpath", &tmpunprivpath, "unprivuser", &tmpunprivuser,
 		"curve", "publickey", &curve_public, "privatekey", &curve_private,
 		"serverkey", &curve_server, "reconnect_ivl", &reconnect_ivl,
-		"reconnect_ivl_max", &reconnect_ivl_max) != 0) {
+		"reconnect_ivl_max", &reconnect_ivl_max,
+		"reset_sockets_on_error", &reset_sockets_on_error,
+		"send_retries", &send_retries) != 0) {
 		logit(ERR, "Error getting config: %s", jsonerr.text);
 		exit(-1);
 	}
