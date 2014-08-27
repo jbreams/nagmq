@@ -52,6 +52,14 @@ ev_io pullmonio, pushmonio;
 #endif
 int reconnect_ivl = 1000, reconnect_ivl_max = 0;
 
+// For reconnecting sockets after error
+json_t * pullsockdef = NULL, *pushsockdef = NULL;
+int reset_sockets_on_error = 0;
+int send_retries = 3;
+
+// Forward function declaration
+void parse_sock_directive(void * socket, json_t * arg, int bind);
+
 struct child_job {
 	json_t * input;
 	char buffer[MAX_PLUGIN_OUTPUT_LENGTH];
@@ -274,7 +282,7 @@ void obj_for_ending(struct child_job * j, const char * output,
 		"check_options", "scheduled_check", "reschedule_check",
 		"early_timeout", "check_type", NULL };
 	struct timeval finish;
-	int i, rc;
+	int i, rc, retry_count = 0;
 
 	if(j->start.tv_sec == 0)
 		gettimeofday(&j->start, NULL);
@@ -304,9 +312,22 @@ void obj_for_ending(struct child_job * j, const char * output,
 		rc = zmq_msg_send(&outmsg, pushsock, 0);
 		if(rc == -1 && errno != EINTR) {
 			logit(ERR, "Error sending message: %s", zmq_strerror(errno));
-			break;
+			if(reset_sockets_on_error) {
+				logit(DEBUG, "Resetting push socket after failure");
+				zmq_close(pushsock);
+				pushsock = zmq_socket(zmqctx, ZMQ_PUSH);
+				if(pushsock == NULL) {
+					logit(ERR, "Unable to create new PUSH socket. Cannot continue! Error: %s",
+						zmq_strerror(errno));
+					exit(1);
+				}
+				parse_sock_directive(pushsock, pushsockdef, 0);
+			}
+			else {
+				break;
+			}
 		}
-	} while(rc < 0);
+	} while(rc != 0 && retry_count++ < send_retries);
 	zmq_msg_close(&outmsg);
 }
 
@@ -933,7 +954,9 @@ int main(int argc, char ** argv) {
 		"publisher", &publisher, "rootpath", &tmprootpath,
 		"unprivpath", &tmpunprivpath, "unprivuser", &tmpunprivuser,
 		"reconnect_ivl", &reconnect_ivl,
-		"reconnect_ivl_max", &reconnect_ivl_max) != 0) {
+		"reconnect_ivl_max", &reconnect_ivl_max,
+		"reset_sockets_on_error", &reset_sockets_on_error,
+		"send_retries", &send_retries) != 0) {
 		logit(ERR, "Error getting config %s", jsonerr.text);
 		exit(-1);
 	}
@@ -1004,6 +1027,7 @@ int main(int argc, char ** argv) {
 		exit(-1);
 	}
 	parse_sock_directive(pushsock, results, 0);
+	pushsockdef = results;
 	logit(DEBUG, "Setup worker push socket");
 
 	if(jobs) {
@@ -1013,6 +1037,7 @@ int main(int argc, char ** argv) {
 			exit(-1);
 		}
 		parse_sock_directive(pullsock, jobs, 0);
+		pullsockdef = jobs;
 		logit(DEBUG, "Setup worker pull sock");
 	} else if(publisher) {
 		pullsock = zmq_socket(zmqctx, ZMQ_SUB);
@@ -1021,18 +1046,12 @@ int main(int argc, char ** argv) {
 			exit(-1);
 		}
 		parse_sock_directive(pullsock, publisher, 0);
+		pullsockdef = publisher;
 		logit(DEBUG, "Setup worker pull sock");
 	} else {
 		logit(ERR, "Must supply either a jobs or publisher socket for worker");
 		exit(-1);
 	}
-
-	int ivl;
-	size_t ivlsize = sizeof(ivl);
-	zmq_getsockopt(pullsock, ZMQ_RECONNECT_IVL, &ivl, &ivlsize);
-	logit(DEBUG, "Set pull reconnect interval to %d", ivl);
-	zmq_getsockopt(pushsock, ZMQ_RECONNECT_IVL, &ivl, &ivlsize);
-	logit(DEBUG, "Set push reconnect interval to %d", ivl);
 
 	zmq_getsockopt(pullsock, ZMQ_FD, &pullfd, &pullfds);
 	if(pullfd == -1) {
@@ -1043,7 +1062,6 @@ int main(int argc, char ** argv) {
 	pullio.data = pullsock;
 	ev_io_start(loop, &pullio);
 
-	json_decref(config);
 	ev_signal_init(&termhandler, handle_end, SIGTERM);
 	ev_signal_start(loop, &termhandler);
 	ev_signal_init(&huphandler, handle_end, SIGHUP);
@@ -1065,5 +1083,7 @@ int main(int argc, char ** argv) {
 		zmq_close(pullsock);
 	zmq_close(pushsock);
 	zmq_term(zmqctx);
+
+	json_decref(config);
 	return 0;
 }
