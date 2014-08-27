@@ -776,10 +776,14 @@ void parse_sock_directive(void * socket, json_t * arg, int bind) {
 		}
 	} else if(json_is_object(arg)) {
 		char * addr = NULL;
+		int sndtimeo = -1, rcvtimeo = -1;
 		json_t * subscribe = NULL;
-		if(json_unpack(arg, "{s:s s?:b s?:o}", 
-			"address", &addr, "bind", &bind, "subscribe",
-			&subscribe) != 0)
+		if(json_unpack(arg, "{s:s s?:b s?:o s?i s?i}",
+			"address", &addr,
+			"bind", &bind,
+			"subscribe",&subscribe,
+			"sndtimeo", &sndtimeo,
+			"rcvtimeo", &rcvtimeo) != 0)
 			return;
 
 #if ZMQ_VERSION_MAJOR > 3
@@ -797,6 +801,10 @@ void parse_sock_directive(void * socket, json_t * arg, int bind) {
 			&reconnect_ivl, sizeof(reconnect_ivl));
 		zmq_setsockopt(socket, ZMQ_RECONNECT_IVL_MAX,
 			&reconnect_ivl_max, sizeof(reconnect_ivl_max));
+		zmq_setsockopt(socket, ZMQ_SNDTIMEO,
+			&sndtimeo, sizeof(sndtimeo));
+		zmq_setsockopt(socket, ZMQ_RCVTIMEO,
+			&rcvtimeo, sizeof(rcvtimeo));
 
 		if(bind)
 			rc = zmq_bind(socket, addr);
