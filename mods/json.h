@@ -5,6 +5,7 @@ struct payload {
 	char * type;
 	char * host_name;
 	char * service_description;
+	char * pong_target;
 	char * json_buf;
 	uint32_t hashed_keys[24];
 	char use_hash;

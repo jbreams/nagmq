@@ -3,6 +3,7 @@ int handle_timedevent(int which, void * obj);
 void free_cb(void * ptr, void * hint);
 void process_req_msg(zmq_msg_t * reqmsg);
 void * getsock(char * what, int type, json_t * def);
+void process_payload(struct payload * payload);
 
 #ifndef ZMQ_DONTWAIT
 #   define ZMQ_DONTWAIT     ZMQ_NOBLOCK

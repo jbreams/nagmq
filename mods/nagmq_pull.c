@@ -25,6 +25,40 @@
 
 extern int errno;
 
+static void process_ping(json_t * payload) {
+	char * target;
+	int64_t seq;
+	char * extra = NULL;
+	struct timeval curtime;
+
+	if(get_values(payload,
+		"replyto", JSON_STRING, 1, &target,
+		"sequence", JSON_INTEGER, 1, &seq,
+		"extra", JSON_STRING, 0, &extra,
+		NULL) != 0) {
+		json_decref(payload);
+		return;
+	}
+
+	struct payload * po = payload_new();
+	if(po == NULL) {
+		json_decref(payload);
+		return;
+	}
+
+	gettimeofday(&curtime, NULL);
+
+	payload_new_string(po, "type", "pong");
+	payload_new_string(po, "pong_target", target);
+	payload_new_integer(po, "sequence", seq);
+	payload_new_string(po, "extra", extra);
+	payload_new_timestamp(po, "timestamp", &curtime);
+
+	payload_finalize(po);
+	process_payload(po);
+	json_decref(payload);
+}
+
 static void process_bulkstate(json_t * payload) {
 	size_t max, i;
 	json_t * statedata;
@@ -526,5 +560,7 @@ void process_pull_msg(zmq_msg_t * payload_msg) {
 		process_downtime(payload);
 	else if(strcmp(type, "state_data") == 0)
 		process_bulkstate(payload);
+	else if(strcmp(type, "ping") == 0)
+		process_ping(payload);
 	return;
 }

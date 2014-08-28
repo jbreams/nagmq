@@ -107,6 +107,8 @@ void payload_new_string(struct payload * po, char * key, char * val) {
 			po->host_name = strdup(save);
 		else if(key && strcmp(key, "service_description") == 0)
 			po->service_description = strdup(save);
+		else if(key && strcmp(key, "pong_target") == 0)
+			po->pong_target = strdup(save);
 	}
 	po->bufused += out - save;
 	po->bufused += sprintf(po->json_buf + po->bufused, "\", ");

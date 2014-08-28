@@ -654,6 +654,13 @@ void process_payload(struct payload * payload) {
 			payload->host_name);
 		free(payload->host_name);
 		free(payload->type);
+	} else if(payload->pong_target) {
+		header = malloc(headerlen +
+			strlen(payload->pong_target) + sizeof(" "));
+		headerlen = sprintf(header, "%s %s", payload->type,
+			payload->pong_target);
+		free(payload->type);
+		free(payload->pong_target);
 	} else
 		header = payload->type;
 
