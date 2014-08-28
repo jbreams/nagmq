@@ -669,6 +669,9 @@ int handle_startup(int which, void * obj) {
 				schedule_new_event(EVENT_USER_FUNCTION, 1, now, 1, interval,
 					NULL, 1, input_reaper, pullsock, 0);
 #endif
+				// Call the input_reaper once manually to clear out any
+				// level-triggered polling problems.
+				input_reaper(pullsock);
 			}
 
 			if(reqdef) {
@@ -687,6 +690,9 @@ int handle_startup(int which, void * obj) {
 				schedule_new_event(EVENT_USER_FUNCTION, 1, now, 1, interval,
 					NULL, 1, input_reaper, reqsock, 0);
 #endif
+				// Call the input_reaper once manually to clear out any
+				// level-triggered polling problems.
+				input_reaper(reqsock);
 			}
 
 #ifndef HAVE_NAGIOS4
