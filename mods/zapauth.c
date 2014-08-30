@@ -2,9 +2,9 @@
 #include "json.h"
 #include <string.h>
 #include <stdint.h>
-#include <syslog.h>
 #include <pthread.h>
 #include <signal.h>
+#include "nagios.h"
 
 extern int keyfile_refresh_interval;
 extern char * curve_knownhosts;
@@ -162,16 +162,19 @@ void * zap_handler(void* zapsock) {
 	sigfillset(&sigset);
 	pthread_sigmask(SIG_SETMASK, &sigset, NULL);
 
-	syslog(LOG_DEBUG, "Starting ZeroMQ Authentication Thread");
+	log_debug_info(DEBUGL_IPC, DEBUGV_BASIC, "Starting NagMQ curve authentication thread\n");
 
 	for(;;) {
 		time_t now = time(NULL);
 		int rc;
 		if(rc = now - last_refresh > keyfile_refresh_interval) {
 			if((rc = read_keyfile(curve_knownhosts, &bag)) != 0)
-				syslog(LOG_ERR, "Error reading clients file: %s", strerror(rc));
+				logit(NSLOG_RUNTIME_ERROR, TRUE,
+					"Error reading known hosts file for NagMQ curve authentication",
+					strerror(rc));
 			last_refresh = now;
-			syslog(LOG_DEBUG, "Read in key file for ZeroMQ Curve Auth");
+			log_debug_info(DEBUGL_IPC, DEBUGV_BASIC,
+				"Read known hosts file for NagMQ curve authentication\n");
 		}
 
 		zmq_msg_t reqid;
@@ -191,7 +194,8 @@ void * zap_handler(void* zapsock) {
 				}
 				else
 					break;
-				syslog(LOG_DEBUG, "Error receiving auth packet");
+				logit(NSLOG_RUNTIME_ERROR, FALSE,
+					"Error receiving NagMQ authentication packet");
 			}
 
 			if(i == 1) {
@@ -214,7 +218,8 @@ void * zap_handler(void* zapsock) {
 		if(strcmp(mech, "CURVE") != 0) {
 			rc = send_zap_resp(&reqid, "400",
 				"Must use curve auth", "", zapsock);
-			syslog(LOG_DEBUG, "Mechanism wasn't curve: %s", mech);
+			log_debug_info(DEBUGL_IPC, DEBUGV_BASIC,
+				"NagMQ authentication request mechanism wasn't curve: %s\n", mech);
 			goto cleanup;
 		}
 
@@ -229,13 +234,16 @@ void * zap_handler(void* zapsock) {
 		if(search == NULL) {
 			rc = send_zap_resp(&reqid, "400",
 				"No authorized key found", "", zapsock);
-			syslog(LOG_DEBUG, "Client not found in ZeroMQ authorized keys file!");
+			log_debug_info(DEBUGL_IPC, DEBUGV_BASIC,
+				"Client not found in NagMQ authorized keys file!\n");
 			goto cleanup;
 		}
 
 		rc = send_zap_resp(&reqid, "200",
 			"Authentication successful", "Authenticated User", zapsock);
-		syslog(LOG_DEBUG, "Successfully authenticated client from authorized keys file!");
+
+		log_debug_info(DEBUGL_IPC, DEBUGV_BASIC,
+			"Successfully authenticated client from authorized keys file!\n");
 cleanup:
 		zmq_msg_close(&reqid);
 		if(rc == ETERM)
@@ -250,6 +258,8 @@ cleanup:
 		}
 	}
 
+	log_debug_info(DEBUGL_IPC, DEBUGV_BASIC,
+		"Ending NagMQ curve authentication thread\n");
 	free(bag.data);
 	zmq_close(zapsock);
 	return NULL;

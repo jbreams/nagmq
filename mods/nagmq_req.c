@@ -3,7 +3,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
-#include <syslog.h>
 #include <string.h>
 #define NSCORE 1
 #include "nebstructs.h"
@@ -1102,7 +1101,8 @@ static void send_msg(struct payload * po) {
 	zmq_msg_init_data(&outmsg, po->json_buf, po->bufused, free_cb, NULL);
 	do {
 		if((rc = zmq_msg_send(&outmsg, reqsock, 0)) == -1 && errno != EINTR) {
-			syslog(LOG_ERR, "Error sending state response: %s", zmq_strerror(errno));
+			logit(NSLOG_RUNTIME_WARNING, FALSE,
+				"Error sending state response: %s", zmq_strerror(errno));
 			break;
 		}
 	} while(rc == -1);
@@ -1123,12 +1123,26 @@ static void err_msg(struct payload * po, char * msg, ...) {
 	payload_new_string(po, "msg", msg);
 	va_list ap;
 	
+	char * log_error_msg = malloc(1024);
+	size_t log_error_msg_size = snprintf(log_error_msg, sizeof(log_error_msg),
+		"There was an error in a NagMQ state request: %s Parameters: ",
+		msg);
+	size_t log_error_msg_left = sizeof(log_error_msg) - log_error_msg_size - 1;
+
 	char * key, *val;
 	va_start(ap, msg);
 	while((key = va_arg(ap, char*)) != NULL &&
 		(val = va_arg(ap, char*)) != NULL) {
 		payload_new_string(po, key, val);
+		size_t kvsize = sizeof(": , ") + strlen(key) + strlen(val) + 1;
+		if(log_error_msg_left >= kvsize) {
+			log_error_msg_size += snprintf(log_error_msg + log_error_msg_size,
+				log_error_msg_left, "%s: %s, ", key, val);
+			log_error_msg_left -= kvsize;
+		}
 	}
+
+	logit(NSLOG_RUNTIME_WARNING, FALSE, log_error_msg);
 	payload_end_object(po);
 }
 
@@ -1188,6 +1202,7 @@ void process_req_msg(zmq_msg_t * reqmsg) {
 		err_msg(po, "Error finding contact for authorization",
 			"contact_name", for_user);
 		send_msg(po);
+		json_decref(req);
 		return;
 	}
 
@@ -1206,6 +1221,7 @@ void process_req_msg(zmq_msg_t * reqmsg) {
 			err_msg(po, "No host specified for service", "service_description",
 				service_description, NULL);
 			send_msg(po);
+
 			json_decref(req);
 			return;
 		}
@@ -1289,6 +1305,8 @@ void process_req_msg(zmq_msg_t * reqmsg) {
 	do_list_servicegroups(po, req);
 	do_list_comments(po, req);
 	do_list_downtimes(po, req);
+
+	log_debug_info(DEBUGL_IPC, DEBUGV_BASIC, "Processed a NagMQ state request\n");
 
 end:
 	json_decref(req);

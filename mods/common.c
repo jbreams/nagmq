@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
-#include <syslog.h>
 #include <string.h>
 #include <ctype.h>
 #define NSCORE 1
@@ -94,9 +93,13 @@ int handle_timedevent(int which, void * obj) {
 			zmq_msg_t input;
 			zmq_msg_init(&input);
 			if(zmq_msg_recv(&input, pollables[j].socket, ZMQ_DONTWAIT) == -1) {
-				if(errno != EAGAIN)
-					syslog(LOG_ERR, "Error receiving message in sleep handler: %s",
-						zmq_strerror(errno));
+				if(errno != EAGAIN) {
+					const char * whichsockstr = (pollables[j].socket == pullsock) ?
+						"command" : "state";
+					logit(NSLOG_RUNTIME_ERROR, TRUE,
+						"Error receiving message for %s socket in sleep handler: %s",
+						whichsockstr, zmq_strerror(errno));
+				}
 				continue;
 			}
 
@@ -138,8 +141,10 @@ void input_reaper(void * insock) {
 				break;
 			else if(errno == EINTR)
 				continue;
-			syslog(LOG_ERR, "Error receiving message from interface: %s",
-				zmq_strerror(errno));
+			const char * whichsockstr = (insock == pullsock) ? "command" : "state";
+			logit(NSLOG_RUNTIME_WARNING, TRUE,
+				"Error receiving message from %s socket: %s",
+				whichsockstr, zmq_strerror(errno));
 			continue;
 		}
 
@@ -173,7 +178,8 @@ int handle_startup(int which, void * obj) {
 				*reqdef = NULL, *curvedef = NULL;
 			int numthreads = 1;
 
-			syslog(LOG_INFO, "Initializing NagMQ %u", getpid());
+			log_debug_info(DEBUGL_PROCESS, DEBUGV_BASIC,
+			 	"Initializing NagMQ in process %u\n", getpid());
 			if(get_values(config,
 				"iothreads", JSON_INTEGER, 0, &numthreads,
 				"publish", JSON_OBJECT, 0, &pubdef,
@@ -183,7 +189,8 @@ int handle_startup(int which, void * obj) {
 				"curve", JSON_OBJECT, 0, &curvedef,
 #endif
 				NULL) != 0) {
-				syslog(LOG_ERR, "Parameter error while starting NagMQ");
+				logit(NSLOG_CONFIG_ERROR, TRUE,
+					"Invalid parameters in NagMQ configuration");
 				return -1;
 			}
 		
@@ -192,8 +199,8 @@ int handle_startup(int which, void * obj) {
 			
 			zmq_ctx = zmq_init(numthreads);
 			if(zmq_ctx == NULL) {
-				syslog(LOG_ERR, "Error initialzing ZMQ: %s",
-					zmq_strerror(errno));
+				logit(NSLOG_RUNTIME_ERROR, TRUE,
+					"Error initialzing ZMQ: %s", zmq_strerror(errno));
 				return -1;
 			}
 
@@ -205,7 +212,8 @@ int handle_startup(int which, void * obj) {
 					"privatekey", JSON_STRING, 1, &curve_privatekey,
 					"clientkeyfile", JSON_STRING, 0, &curve_knownhosts,
 					NULL) != 0) {
-					syslog(LOG_ERR, "Error getting public/private key for curve security");
+					logit(NSLOG_RUNTIME_ERROR, TRUE,
+						"Error getting public/private key for NagMQ curve security");
 					return -1;
 				}
 
@@ -214,17 +222,23 @@ int handle_startup(int which, void * obj) {
 
 					void * zapsock = zmq_socket(zmq_ctx, ZMQ_REP);
 					if(zapsock == NULL) {
-						syslog(LOG_ERR, "Error creating ZAP socket");
+						logit(NSLOG_RUNTIME_ERROR, TRUE,
+							"Error creating NagMQ authentication socket: %s",
+							zmq_strerror(errno));
 						return -1;
 					}
 
 					if(zmq_bind(zapsock, "inproc://zeromq.zap.01") != 0) {
-						syslog(LOG_ERR, "Error binding to ZAP endpoint");
+						logit(NSLOG_RUNTIME_ERROR, TRUE,
+							"Error binding to NagMQ authentication endpoint: %s",
+							zmq_strerror(errno));
 						return -1;
 					}
 					int rc = pthread_create(&tid, NULL, zap_handler, zapsock);
 					if(rc != 0) {
-						syslog(LOG_ERR, "Error starting ZAP thread?");
+						logit(NSLOG_RUNTIME_ERROR, TRUE,
+							"Error starting NagMQ authentication thread?: %s",
+							strerror(errno));
 						return -1;
 					}
 				}
@@ -316,7 +330,8 @@ int handle_startup(int which, void * obj) {
 
 			while((rc = zmq_term(zmq_ctx)) != 0) {
 				if(errno == EINTR) {
-					syslog(LOG_DEBUG, "NagMQ ZeroMQ context termination was interrupted");
+					logit(NSLOG_RUNTIME_WARNING, FALSE,
+						"NagMQ ZeroMQ context termination was interrupted");
 					continue;
 				}
 				else
@@ -332,7 +347,8 @@ int nebmodule_init(int flags, char * localargs, nebmodule * lhandle) {
 	handle = lhandle;
 
 	if(__nagios_object_structure_version != CURRENT_OBJECT_STRUCTURE_VERSION) {
-		syslog(LOG_ERR, "NagMQ is loaded into a version of nagios with a different ABI " \
+		logit(NSLOG_RUNTIME_ERROR, TRUE,
+			"NagMQ is loaded into a version of nagios with a different ABI " \
 			"than it was compiled for! You need to recompile NagMQ against the current " \
 			"nagios headers!");
 		return -1;
@@ -347,7 +363,7 @@ int nebmodule_init(int flags, char * localargs, nebmodule * lhandle) {
 
 	config = json_load_file(localargs, 0, &loaderr);
 	if(config == NULL) {
-		syslog(LOG_ERR, "Error loading NagMQ config: %s (at %d:%d)",
+		logit(NSLOG_RUNTIME_ERROR, TRUE, "Error loading NagMQ config: %s (at %d:%d)",
 			loaderr.text, loaderr.line, loaderr.column);
 		return -1;
 	}

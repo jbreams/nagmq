@@ -3,7 +3,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
-#include <syslog.h>
 #include <string.h>
 #include <math.h>
 #define NSCORE 1
@@ -625,7 +624,8 @@ static int safe_msg_send(zmq_msg_t * msg, void * sock, int flags) {
 	int rc;
 	do {
 		if((rc = zmq_msg_send(msg, sock, flags)) == -1 && errno != EINTR) {
-			syslog(LOG_ERR, "Error publishing event: %s", zmq_strerror(errno));
+			logit(NSLOG_RUNTIME_WARNING, FALSE,
+				"Error publishing event: %s", zmq_strerror(errno));
 			return -1;
 		}
 	} while(rc == -1);
@@ -759,6 +759,10 @@ int handle_nagdata(int which, void * obj) {
 	payload_new_timestamp(payload, "timestamp", &raw->timestamp);
 	payload_finalize(payload);
 	process_payload(payload);
+	if(rc == NEBERROR_CALLBACKOVERRIDE) {
+		log_debug_info(DEBUGL_CHECKS, DEBUGV_MORE,
+			"Overriding event for event %d\n", which);
+	}
 	return rc;
 }
 
@@ -786,7 +790,8 @@ int handle_pubstartup(json_t * def) {
 		"override", JSON_ARRAY, 0, &override,
 		"startupdelay", JSON_REAL, 0, &sleeptime,
 		NULL) != 0) {
-		syslog(LOG_ERR, "Parameter error during publisher startup");
+		logit(NSLOG_RUNTIME_ERROR, TRUE,
+			"Invalid parameters to NagMQ events socket");
 		return -1;
 	}
 
