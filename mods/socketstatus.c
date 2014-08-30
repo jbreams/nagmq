@@ -3,10 +3,12 @@
 #include <string.h>
 #include "config.h"
 
-extern void * zmq_ctx;
+extern void * zmq_ctx, *pullsock, *reqsock, *pubext;
+void * pullmon = NULL, *reqmon = NULL, *pubmon = NULL;
+int pullmonfd = -1, reqmonfd = -1, pubmonfd;
 
 #if ZMQ_VERSION_MAJOR >= 3 && defined(HAVE_NAGIOS4)
-void sock_monitor_cb(int sd, int events, void * sock) {
+int sock_monitor_cb(int sd, int events, void * sock) {
 	while(1) {
 		zmq_event_t sockevent;
 		zmq_msg_t addrmsg, eventmsg;
@@ -51,11 +53,6 @@ void sock_monitor_cb(int sd, int events, void * sock) {
 			}
 		}
 
-		if(sockevent.event == 0) {
-			zmq_close(sock);
-			return;
-		}
-
 		// These are super chatting log messages, skip em.
 		switch(sockevent.event) {
 			case ZMQ_EVENT_CLOSED:
@@ -72,39 +69,39 @@ void sock_monitor_cb(int sd, int events, void * sock) {
 		char * event_string;
 		switch(sockevent.event) {
 			case ZMQ_EVENT_CONNECTED:
-				event_string = "Socket event on %.*s: connection established (fd: %d)";
+				event_string = "NagMQ socket event on %.*s: connection established (fd: %d)";
 				break;
 			// This is super chatty. Commenting it out to reduce log chattyness
 			// case ZMQ_EVENT_CONNECT_DELAYED:
-			// 	event_string = "Socket event on %.*s: synchronous connect failed, it's being polled";
+			// 	event_string = "NagMQ socket event on %.*s: synchronous connect failed, it's being polled";
 			// 	break;
 			case ZMQ_EVENT_CONNECT_RETRIED:
-				event_string = "Socket event on %.*s: asynchronous connect / reconnection attempt (ivl: %d)";
+				event_string = "NagMQ socket event on %.*s: asynchronous connect / reconnection attempt (ivl: %d)";
 				break;
 			case ZMQ_EVENT_LISTENING:
-				event_string = "Socket event on %.*s: socket bound to an address, ready to accept (fd: %d)";
+				event_string = "NagMQ socket event on %.*s: socket bound to an address, ready to accept (fd: %d)";
 				break;
 			case ZMQ_EVENT_BIND_FAILED:
-				event_string = "Socket event on %.*s: socket could not bind to an address (errno: %d)";
+				event_string = "NagMQ socket event on %.*s: socket could not bind to an address (errno: %d)";
 				break;
 			case ZMQ_EVENT_ACCEPTED:
-				event_string = "Socket event on %.*s: connection accepted to bound interface (fd: %d)";
+				event_string = "NagMQ socket event on %.*s: connection accepted to bound interface (fd: %d)";
 				break;
 			case ZMQ_EVENT_ACCEPT_FAILED:
-				event_string = "Socket event on %.*s: could not accept client connection (errno: %d)";
+				event_string = "NagMQ socket event on %.*s: could not accept client connection (errno: %d)";
 				break;
 			// This is super chatty. Commenting it out to reduce log chattyness
 			// case ZMQ_EVENT_CLOSED:
-			// 	event_string = "Socket event on %.*s: connection closed (fd: %d)";
+			// 	event_string = "NagMQ socket event on %.*s: connection closed (fd: %d)";
 			// 	break;
 			case ZMQ_EVENT_CLOSE_FAILED:
-				event_string = "Socket event on %.*s: connection couldn't be closed (errno: %d)";
+				event_string = "NagMQ socket event on %.*s: connection couldn't be closed (errno: %d)";
 				break;
 			case ZMQ_EVENT_DISCONNECTED:
-				event_string = "Socket event on %.*s: broken session (fd: %d)";
+				event_string = "NagMQ socket event on %.*s: broken session (fd: %d)";
 				break;
 			default:
-				event_string = "Unknown socket event on %.*s: %d";
+				event_string = "Unknown NagMQ socket event on %.*s: %d";
 				break;
 		}
 
@@ -112,6 +109,7 @@ void sock_monitor_cb(int sd, int events, void * sock) {
 			(char*)zmq_msg_data(&addrmsg), sockevent.value);
 		zmq_msg_close(&addrmsg);
 	}
+	return 0;
 }
 
 extern iobroker_set *nagios_iobs;
@@ -127,6 +125,19 @@ void setup_sockmonitor(void * sock) {
 	void * monsock = zmq_socket(zmq_ctx, ZMQ_PAIR);
 	zmq_connect(monsock, channel);
 	zmq_getsockopt(monsock, ZMQ_FD, &fd, &fdsize);
+
+	if(sock == pullsock) {
+		pullmon = monsock;
+		pullmonfd = fd;
+	}
+	else if(sock == reqsock) {
+		reqmon = monsock;
+		reqmonfd = fd;
+	}
+	else if(sock == pubext) {
+		pubmon = monsock;
+		pubmonfd = fd;
+	}
 
 	iobroker_register(nagios_iobs, fd, monsock, sock_monitor_cb);
 

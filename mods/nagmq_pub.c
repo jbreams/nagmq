@@ -781,7 +781,9 @@ int handle_pubstartup(json_t * def) {
 	pubext = getsock("publish", ZMQ_PUB, def);
 	if(pubext == NULL)
 		return -1;
+#ifdef HAVE_NAGIOS4
 	setup_sockmonitor(pubext);
+#endif
 
 	json_t * override = NULL;
 	double sleeptime = 0.0;

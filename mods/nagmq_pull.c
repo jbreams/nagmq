@@ -35,15 +35,12 @@ static void process_ping(json_t * payload) {
 		"sequence", JSON_INTEGER, 1, &seq,
 		"extra", JSON_STRING, 0, &extra,
 		NULL) != 0) {
-		json_decref(payload);
 		return;
 	}
 
 	struct payload * po = payload_new();
-	if(po == NULL) {
-		json_decref(payload);
+	if(po == NULL)
 		return;
-	}
 
 	gettimeofday(&curtime, NULL);
 
@@ -59,7 +56,6 @@ static void process_ping(json_t * payload) {
 
 	payload_finalize(po);
 	process_payload(po);
-	json_decref(payload);
 }
 
 static void process_bulkstate(json_t * payload) {
@@ -69,7 +65,6 @@ static void process_bulkstate(json_t * payload) {
 	if(get_values(payload,
 		"data", JSON_ARRAY, 1, &statedata,
 		NULL) != 0) {
-		json_decref(payload);
 		return;
 	}
 
@@ -195,8 +190,6 @@ static void process_bulkstate(json_t * payload) {
 			hsttarget->execution_time = execution_time;
 		}
 	}
-
-	json_decref(payload);
 }
 
 #ifdef HAVE_ADD_CHECK_RESULT_TWO
@@ -236,16 +229,16 @@ static void process_status(json_t * payload) {
 		"early_timeout", JSON_INTEGER, 0, &t.early_timeout,
 		"exited_ok", JSON_INTEGER, 0, &t.exited_ok,
 		NULL) != 0) {
-		json_decref(payload);
+		logit(NSLOG_RUNTIME_WARNING, FALSE, "Invalid parameters in NagMQ check result");
 		return;
 	}
-
 	service * service_target = NULL;
 	if(service_description)
 		service_target = find_service(host_name, service_description);
 	host * host_target = find_host(host_name);
 	if(host_target == NULL || (service_description && !service_target)) {
-		json_decref(payload);
+		logit(NSLOG_RUNTIME_WARNING, FALSE,
+			"NagMQ received a check result for an invalid object");
 		return;
 	}
 
@@ -264,7 +257,6 @@ static void process_status(json_t * payload) {
 		"Received a check result via NagMQ for %s %s\n",
 		newcr->host_name, debug_service_name);
 
-	json_decref(payload);
 #ifdef HAVE_NAGIOS4
 	newcr->engine = &nagmq_check_engine;
 	process_check_result(newcr);
@@ -297,7 +289,8 @@ static void process_acknowledgement(json_t * payload) {
 		"end_time", JSON_INTEGER, 0, &end_time,
 #endif
 		NULL) != 0) {
-		json_decref(payload);
+		logit(NSLOG_RUNTIME_WARNING, FALSE,
+			"NagMQ received an acknowledgement with invalid parameters");
 		return;
 	}
 
@@ -324,7 +317,6 @@ static void process_acknowledgement(json_t * payload) {
 	log_debug_info(DEBUGL_EXTERNALCOMMANDS, DEBUGV_BASIC,
 		"Received acknowledgement via NagMQ for %s %s\n",
 		host_name, service_description ? service_description : "(n/a)");
-	json_decref(payload);
 }
 
 static void process_comment(json_t * payload) {
@@ -342,7 +334,8 @@ static void process_comment(json_t * payload) {
 		"expires", JSON_TRUE, 1, &expires,
 		"expire_time", JSON_INTEGER, 0, &expire_time,
 		NULL) != 0) {
-		json_decref(payload);
+		logit(NSLOG_RUNTIME_WARNING, FALSE,
+			"NagMQ received a comment with invalid parameters");
 		return;
 	}
 
@@ -353,7 +346,6 @@ static void process_comment(json_t * payload) {
 	log_debug_info(DEBUGL_EXTERNALCOMMANDS, DEBUGV_BASIC,
 		"Received comment via NagMQ for %s %s\n",
 		host_name, service_description ? service_description : "(n/a)");
-	json_decref(payload);
 }
 
 static void process_downtime(json_t * payload) {
@@ -375,7 +367,8 @@ static void process_downtime(json_t * payload) {
 		"duration", JSON_INTEGER, 1, &duration,
 		"triggered_by", JSON_INTEGER, 0, &triggered_by,
 		NULL) != 0) {
-		json_decref(payload);
+		logit(NSLOG_RUNTIME_WARNING, FALSE,
+			"NagMQ receieved a downtime request with invalid parameters");
 		return;
 	}
 
@@ -386,7 +379,6 @@ static void process_downtime(json_t * payload) {
 	log_debug_info(DEBUGL_EXTERNALCOMMANDS, DEBUGV_BASIC,
 		"Received downtime via NagMQ for %s %s\n",
 		host_name, service_description ? service_description : "(n/a)");
-	json_decref(payload);
 }
 
 static void process_cmd(json_t * payload) {
@@ -399,7 +391,8 @@ static void process_cmd(json_t * payload) {
 		"service_description", JSON_STRING, 0, &service_description,
 		"command_name", JSON_STRING, 1, &cmd_name,
 		NULL) != 0) {
-		json_decref(payload);
+		logit(NSLOG_RUNTIME_WARNING, FALSE,
+			"NagMQ received a command with invalid parameters");
 		return;
 	}
 
@@ -409,17 +402,21 @@ static void process_cmd(json_t * payload) {
 
 	if(host_name) {
 		host_target = find_host(host_name);
-		if(host_target == NULL)
+		if(host_target == NULL) {
 			logit(NSLOG_RUNTIME_WARNING, FALSE,
 				"NagMQ received command %s for host %s, but host isn't defined",
 				cmd_name, host_name);
+			return;
+		}
 	}
 	if(host_target && service_description) {
 		service_target = find_service(host_name, service_description);
-		if(service_target == NULL)
+		if(service_target == NULL) {
 			logit(NSLOG_RUNTIME_WARNING, FALSE,
 				"NagMQ received command %s for service %s %s, but service isn't defined",
 				cmd_name, host_name, service_description);
+			return;
+		}
 	}
 
 	if(strcmp(cmd_name, "disable_service_checks") == 0 && service_target)
@@ -517,7 +514,6 @@ static void process_cmd(json_t * payload) {
 			logit(NSLOG_RUNTIME_WARNING, FALSE,
 				"Received a %s request via NagMQ for %s %s, but a parameter was missing or invalid",
 				cmd_name, host_name, service_description ? service_description : "(n/a)");
-			json_decref(payload);
 			return;
 		}
 		int flags = CHECK_OPTION_NONE;
@@ -546,7 +542,6 @@ static void process_cmd(json_t * payload) {
 			logit(NSLOG_RUNTIME_WARNING, FALSE,
 				"Received a %s request via NagMQ for %s %s, but a parameter was missing or invalid",
 				cmd_name, host_name, service_description ? service_description : "(n/a)");
-			json_decref(payload);
 			return;
 		}
 		if(strcmp(cmd_name, "disable_and_propagate_notifications") == 0)
@@ -568,8 +563,6 @@ static void process_cmd(json_t * payload) {
 			host_name, service_description, start_time, comment);
 	}
 #endif
-
-	json_decref(payload);
 }
 
 void process_pull_msg(zmq_msg_t * payload_msg) {
@@ -607,5 +600,6 @@ void process_pull_msg(zmq_msg_t * payload_msg) {
 		process_bulkstate(payload);
 	else if(strcmp(type, "ping") == 0)
 		process_ping(payload);
+	json_decref(payload);
 	return;
 }

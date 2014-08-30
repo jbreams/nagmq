@@ -48,6 +48,8 @@ int nebmodule_deinit(int flags, int reason) {
 
 void * pullsock = NULL, * reqsock = NULL;
 extern void * pubext;
+extern int pullmonfd, reqmonfd, pubmonfd;
+extern void * pullmon, *reqmon, *pubmon;
 
 #ifndef HAVE_NAGIOS4
 int handle_timedevent(int which, void * obj) {
@@ -205,7 +207,6 @@ int handle_startup(int which, void * obj) {
 			}
 
 #if ZMQ_VERSION_MAJOR > 3
-
 			if(curvedef) {
 				if(get_values(curvedef,
 					"publickey", JSON_STRING, 1, &curve_publickey,
@@ -313,8 +314,15 @@ int handle_startup(int which, void * obj) {
 				size_t throwaway = sizeof(fd);
 				zmq_getsockopt(pullsock, ZMQ_FD, &fd, &throwaway);
 				iobroker_unregister(nagios_iobs, fd);
+				iobroker_unregister(nagios_iobs, pullmonfd);
+				zmq_close(pullmon);
 #endif
-				zmq_close(pullsock);
+				rc = zmq_close(pullsock);
+				if(rc == -1) {
+					logit(NSLOG_RUNTIME_ERROR, TRUE, "Error closing NagMQ command socket: %s",
+						zmq_strerror(errno));
+				}
+				pullsock = NULL;
 			}
 			if(reqsock) {
 #ifdef HAVE_NAGIOS4
@@ -322,11 +330,28 @@ int handle_startup(int which, void * obj) {
 				size_t throwaway = sizeof(fd);
 				zmq_getsockopt(reqsock, ZMQ_FD, &fd, &throwaway);
 				iobroker_unregister(nagios_iobs, fd);
+				iobroker_unregister(nagios_iobs, reqmonfd);
+				zmq_close(reqmon);
 #endif
-				zmq_close(reqsock);
+				rc = zmq_close(reqsock);
+				if(rc == -1) {
+					logit(NSLOG_RUNTIME_ERROR, TRUE, "Error closing NagMQ state socket: %s",
+						zmq_strerror(errno));
+				}
+				pullsock = NULL;
 			}
-			if(pubext)
-				zmq_close(pubext);
+			if(pubext) {
+#ifdef HAVE_NAGIOS4
+				iobroker_unregister(nagios_iobs, pubmonfd);
+				zmq_close(pubmon);
+#endif
+				rc = zmq_close(pubext);
+				if(rc == -1) {
+					logit(NSLOG_RUNTIME_ERROR, TRUE, "Error closing NagMQ state socket: %s",
+						zmq_strerror(errno));
+				}
+				pubext = NULL;
+			}
 
 			while((rc = zmq_term(zmq_ctx)) != 0) {
 				if(errno == EINTR) {
