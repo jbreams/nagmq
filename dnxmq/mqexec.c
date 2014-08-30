@@ -8,28 +8,11 @@
 #include <stdint.h>
 #include <fcntl.h>
 #include <pwd.h>
-#ifdef HAVE_LIBEV_EV_H
-#include <libev/ev.h>
-#else
-#include <ev.h>
-#endif
-#include <zmq.h>
-#include <jansson.h>
 #include <syslog.h>
 #include <limits.h>
 #include <sys/types.h>
-#ifdef HAVE_PCRE
-#include <pcre.h>
-#else
-#include <regex.h>
-#endif
-#include "zmq3compat.h"
-#include <wordexp.h>
 #include <time.h>
-
-#ifndef MAX_PLUGIN_OUTPUT_LENGTH
-#define MAX_PLUGIN_OUTPUT_LENGTH 8192
-#endif
+#include "mqexec.h"
 
 void * zmqctx;
 // Worker Sockets
@@ -58,79 +41,8 @@ json_t * pullsockdef = NULL, *pushsockdef = NULL;
 int reset_sockets_on_error = 0;
 int send_retries = 3;
 
-// Forward function declaration
-void parse_sock_directive(void * socket, json_t * arg, int bind);
-void send_heartbeat(struct ev_loop * loop);
-
-// For heartbeating
-int64_t last_sent_seq = -1, last_recv_seq = -1;
-int32_t heartbeat_interval = -1, heartbeat_curr_interval = -1;
-time_t last_heartbeat = 0;
-char heartbeat_reply_string[255];
-ev_timer heartbeat_timer;
 int pull_connected = 0, push_connected = 0;
 
-struct child_job {
-	json_t * input;
-	char buffer[MAX_PLUGIN_OUTPUT_LENGTH];
-	size_t bufused;
-	struct timeval start;
-	double latency;
-	int service;
-	int timeout;
-	pid_t pid;
-	ev_io io;
-	ev_timer timer;
-	struct child_job * next;
-	char * host_name;
-	char * service_description;
-	char * type;
-};
-
-struct child_job * runningtable[2048];
-
-void add_child(struct child_job * job) {
-	uint32_t hash = job->pid * 0x9e370001UL;
-	hash >>= 21;
-	job->next = runningtable[hash];
-	runningtable[hash] = job;
-}
-
-struct child_job * get_child(pid_t pid) {
-	uint32_t hash = pid * 0x9e370001UL;
-	hash >>= 21; //(32 bits - 11)
-	struct child_job * ret = runningtable[hash], *last = NULL;
-	while(ret && ret->pid != pid) {
-		last = ret;
-		ret = ret->next;
-	}
-	if(!ret)
-		return NULL;
-	if(last == NULL)
-		runningtable[hash] = ret->next;
-	else
-		last->next = ret->next;
-	return ret; 
-}
-
-struct filter {
-#ifdef HAVE_PCRE
-	pcre * regex;
-	pcre_extra * extra;
-#else
-	regex_t regex;
-#endif
-	char field[64];
-	char or;
-	int fqdn;
-	int nodename;
-	int isnot;
-	struct filter * next;
-} *filterhead = NULL, *filtertail = NULL;
-
-#define ERR 2
-#define DEBUG 1
-#define INFO 0
 void logit(int level, char * fmt, ...) {
 	int err;
 	va_list ap;
@@ -164,121 +76,6 @@ void logit(int level, char * fmt, ...) {
 		fprintf(stderr, "\n");
 	}
 	va_end(ap);
-}
-
-int parse_filter(json_t * in, int or) {
-	if(json_is_object(in)) {
-		char * field = NULL;
-		char * match = NULL;
-		int icase = 0, dotall = 0;
-		json_t * orobj = NULL;
-
-		struct filter * newfilt = calloc(1, sizeof(struct filter));
-		if(json_unpack(in, "{ s?:s s:s s?:o s?:b s?:b s?:b s?:b s?b }",
-			"match", &match, "field", &field, "or", &orobj,
-			"caseless", &icase, "dotall", &dotall, "not", &newfilt->isnot,
-			"fqdn", &newfilt->fqdn, "nodename", &newfilt->nodename) < 0) {
-			logit(ERR, "Error parsing filter definition.");
-			free(newfilt);
-			return -1;
-		}
-
-		strncpy(newfilt->field, field, sizeof(newfilt->field) - 1);
-		if(match) {
-#ifdef HAVE_PCRE
-			const char * errptr = NULL;
-			int errofft = 0, options = PCRE_NO_AUTO_CAPTURE;
-			if(icase)
-				options |= PCRE_CASELESS;
-			if(dotall)
-				options |= PCRE_DOTALL;
-			newfilt->regex = pcre_compile(match, options, &errptr,
-				&errofft, NULL);
-			if(newfilt->regex == NULL) {
-				logit(ERR, "Error compiling regex for %s at position %d: %s",
-					field, errptr, errofft);
-				free(newfilt);
-				return -1;
-			}
-			
-			newfilt->extra = pcre_study(newfilt->regex, 0, &errptr);
-			if(errptr != NULL) {
-				logit(ERR, "Error studying regex: %s", errptr);
-				free(newfilt);
-				return -1;
-			}
-#else
-			int options = REG_EXTENDED | REG_NOSUB;
-			if(icase)
-				options |= REG_ICASE;
-			int rc = regcomp(&newfilt->regex, match, options);
-			if(rc != 0) {
-				logit(ERR, "Error compiling regex for %s: %s",
-					field, strerror(rc));
-				free(newfilt);
-				return -1;
-			}
-#endif
-		}
-		if(!filterhead) {
-			filterhead = newfilt;
-			filtertail = newfilt;
-		} else
-			filtertail->next = newfilt;
-
-		if(json_is_true(orobj))
-			newfilt->or = 1;	
-		else if(orobj)
-			parse_filter(orobj, 1);
-	} else if(json_is_array(in)) {
-		int x;
-		for(x = 0; x < json_array_size(in); x++) {
-			json_t * t = json_array_get(in, x);
-			if(parse_filter(t, or) < 0)
-				return -1;
-		}
-	}
-	return 0;
-}
-
-int match_filter(json_t * input) {
-	struct filter *cur;
-	for(cur = filterhead; cur != NULL; cur = cur->next) {
-		int res = 1;
-		const char * tomatch;
-		json_t * field;
-		if((field = json_object_get(input, cur->field)) == NULL)
-			continue;
-		if(!json_is_string(field))
-			continue;
-		tomatch = json_string_value(field);
-		if(cur->fqdn)
-			res = strcasecmp(tomatch, myfqdn);
-		else if(cur->nodename)
-			res = strcasecmp(tomatch, mynodename);
-		else {
-#ifdef HAVE_PCRE
-			int ovec[33];
-			res = pcre_exec(cur->regex, cur->extra,
-				tomatch, strlen(tomatch), 0, 0, ovec, 33);
-			res = res < 0 ? 1 : 0;
-#else
-			regmatch_t ovec[33];
-			res = regexec(&cur->regex, tomatch, 33, ovec, 0);
-#endif
-		}
-		if(cur->isnot == 1) {
-			res = res == 0 ? 1 : 0;
-			logit(DEBUG, "Inverting filter because of not clause");
-		}
-		if(cur->or == 1 && res == 0)
-			return 1;
-		else if(cur->or == 0 && res != 0)
-			return 0;
-		else
-			break;
-	}
-	return 1;
 }
 
 void free_cb(void * data, void * hint) {
@@ -412,237 +209,7 @@ void child_end_cb(struct ev_loop * loop, ev_child * c, int event) {
 		ev_break(loop, EVBREAK_ALL);
 }
 
-int check_jail(const char * cmdline) {
-	if(!unprivpath && !rootpath)
-		return 1;
-	if(rootpath && strncmp(cmdline, rootpath, rootpathlen) == 0)
-		return 1;
-	else if(unprivpath && strncmp(cmdline, unprivpath, unprivpathlen) == 0)
-		return 2;
-	return 0;
-}
 
-// Taken from http://www.gnu.org/software/libc/manual/html_node/Elapsed-Time.html
-/* Subtract the `struct timeval' values X and Y,
-storing the result in RESULT.
-Return 1 if the difference is negative, otherwise 0. */
-
-int
-timeval_subtract (result, x, y)
-struct timeval *result, *x, *y;
-{
-/* Perform the carry for the later subtraction by updating y. */
-	if (x->tv_usec < y->tv_usec) {
-		int nsec = (y->tv_usec - x->tv_usec) / 1000000 + 1;
-		y->tv_usec -= 1000000 * nsec;
-		y->tv_sec += nsec;
-	}
-	if (x->tv_usec - y->tv_usec > 1000000) {
-		int nsec = (x->tv_usec - y->tv_usec) / 1000000;
-		y->tv_usec += 1000000 * nsec;
-		y->tv_sec -= nsec;
-	}
-
-/* Compute the time remaining to wait.
-  tv_usec is certainly positive. */
-	result->tv_sec = x->tv_sec - y->tv_sec;
-	result->tv_usec = x->tv_usec - y->tv_usec;
-
-/* Return 1 if result is negative. */
-	return x->tv_sec < y->tv_sec;
-}
-
-void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
-	json_t * input;
-	struct child_job * j;
-	char * type, *command_line, *hostname = NULL, *svcdesc = NULL;
-	json_error_t err;
-	int fds[2];
-	pid_t pid;
-	int timeout = 0, okay_to_run;
-	struct timeval server_starttime = {0, 0}, latencytv = { 0, 0 };
-	double server_latency = 0.0;
-
-	input = json_loadb(zmq_msg_data(inmsg), zmq_msg_size(inmsg), 0, &err);
-	zmq_msg_close(inmsg);
-	if(input == NULL) {
-		logit(ERR, "Error loading request from broker: %s (line %d col %d)",
-			err.text, err.line, err.column);
-		return;
-	}
-
-	if(json_unpack(input, "{ s:s }", "type", &type) != 0) {
-		logit(ERR, "Job message doesn't have a type header");
-		json_decref(input);
-		return;
-	}
-
-	if(strcmp(type, "pong") == 0) {
-		char * replyto;
-		int64_t sequence;
-		if(json_unpack(input, "{ s:s s:i }",
-			"pong_target", &replyto,
-			"sequence", &sequence) != 0) {
-			logit(ERR, "Error unpacking pong message");
-			json_decref(input);
-			return;
-		}
-
-		if(strcmp(replyto, heartbeat_reply_string) != 0) {
-			logit(DEBUG, "Received someone else's pong message? %s != %s",
-				replyto, heartbeat_reply_string);
-			json_decref(input);
-			return;
-		}
-
-		last_recv_seq = sequence;
-		logit(DEBUG, "Received pong message (sequence: %08x)", last_recv_seq);
-		json_decref(input);
-		return;
-	}
-
-	if(json_unpack(input, "{ s:s s?:i s?:s s?:s s:{ s:i s:i } s?:f}",
-		"command_line", &command_line,
-		"timeout", &timeout, "host_name", &hostname,
-		"service_description", &svcdesc,
-		"timestamp", "tv_sec", &server_starttime.tv_sec,
-		"tv_usec", &server_starttime.tv_usec,
-		"latency", &server_latency) != 0) {
-		logit(ERR, "Error unpacking JSON payload during kickoff");
-		json_decref(input);
-		return;
-	}
-
-	if(filterhead != NULL && match_filter(input) != 1) {
-		logit(DEBUG, "Not running %s because of filtering", command_line);
-		json_decref(input);
-		return;
-	}
-
-	if(!svcdesc)
-		svcdesc = "(none)";
-
-	logit(DEBUG, "Received job from upstream: %s %s",
-		type, command_line);
-
-	j = calloc(1, sizeof(struct child_job));
-	if(strcmp(type, "service_check_initiate") == 0)
-		j->service = 1;
-	else if(strcmp(type, "host_check_initiate") == 0)
-		j->service = 0;
-	else
-		j->service = -1;
-	j->input = input;
-	j->type = type;
-	j->host_name = hostname;
-	j->service_description = svcdesc;
-
-	okay_to_run = check_jail(command_line);
-	if(okay_to_run == 0) {
-		logit(ERR, "Refusing to execute job outside sandbox %s", command_line);
-		obj_for_ending(j, "Command line outside sandbox", 3, 0, 0);
-		free(j);
-		json_decref(input);
-		return;
-	}
-
-	if(pipe(fds) < 0 ||
-		fcntl(fds[0], F_SETFL, O_NONBLOCK) < 0) {
-		logit(ERR, "Error creating pipe for %s: %s",
-			command_line, strerror(errno));
-		obj_for_ending(j, "Error creating pipe", 3, 0, 0);
-		free(j);
-		json_decref(input);
-		return;		
-	}
-
-	ev_io_init(&j->io, child_io_cb, fds[0], EV_READ);
-	j->io.data = j;
-	ev_io_start(loop, &j->io);
-
-	gettimeofday(&j->start, NULL);
-	pid = fork();
-	if(pid == 0) {
-		wordexp_t expvec;
-		int dn = open("/dev/null", O_RDONLY);
-		if(dn < 0) {
-			printf("Error redirecting stdin: %s\n", strerror(errno));
-			exit(127);
-		}
-		dup2(fds[1], fileno(stdout));
-		dup2(fds[1], fileno(stderr));
-		dup2(dn, fileno(stdin));
-		close(dn);
-		close(fds[1]);
-#ifdef TEST
-		printf("Testing testing testing!\n");
-		exit(0);
-#else
-
-		if(geteuid() == 0 && runas != 0 && okay_to_run == 2)
-			setuid(runas);
-
-		switch(wordexp(command_line, &expvec, WRDE_NOCMD)) {
-			case 0:
-				break;
-			case WRDE_SYNTAX:
-				printf("Error executing \"%s\". Bad syntax\n", command_line);
-				exit(127);
-				break;
-			case WRDE_CMDSUB:
-				printf("Command \"%s\" uses unsafe command substitution.\n", command_line);
-				exit(127);
-				break;
-			case WRDE_BADVAL:
-			case WRDE_BADCHAR:
-				printf("Command \"%s\" uses invalid characters or variables\n", command_line);
-				exit(127);
-				break;
-			case WRDE_NOSPACE:
-				printf("Out of memory while parsing command line\n");
-				exit(127);
-				break;
-		}
-
-		execv(expvec.we_wordv[0], expvec.we_wordv);
-		printf("Error executing shell for %s: %m", command_line);
-		exit(127);
-#endif
-	}
-	else if(pid < 0) {
-		logit(ERR, "Error forking for %s: %s",
-			command_line, strerror(errno));
-		obj_for_ending(j, "Error forking", 3, 0, 0);
-		json_decref(input);
-		ev_io_stop(loop, &j->io);
-		close(fds[1]);
-		close(fds[0]);
-		free(j);
-		return;
-	}
-
-	if(timeval_subtract(&latencytv, &j->start, &server_starttime) == 1) {
-		logit(INFO, "Time skew detected in latency calculation: tv_sec: %d, tv_usec: %d",
-			latencytv.tv_sec, latencytv.tv_usec);
-	} else {
-		server_latency += latencytv.tv_sec + (latencytv.tv_usec / 1000000.0);
-		logit(DEBUG, "Network latency was %f seconds", server_latency);
-	}
-
-	j->pid = pid;
-	add_child(j);
-	close(fds[1]);
-
-	if(timeout > 0) {
-		ev_timer_init(&j->timer, child_timeout_cb, timeout, 0);
-		j->timer.data = j;
-		ev_timer_start(loop, &j->timer);
-		j->timeout = timeout;
-	}
-	
-	logit(DEBUG, "Kicked off %d for %s %s", pid, hostname, svcdesc);
-	runningjobs++;
-}
 
 void recv_job_cb(struct ev_loop * loop, ev_io * i, int event) {
 	while(1) {
@@ -821,240 +388,6 @@ void setup_sockmonitor(struct ev_loop * loop, ev_io * ioev, void * sock) {
 }
 #endif
 
-void heartbeat_timeout_cb(struct ev_loop * loop, ev_timer * t, int event) {
-	ev_tstamp after = (ev_now(loop) - last_heartbeat);
-	int pullfd;
-	size_t pullfds = sizeof(pullfd);
-
-	if(after < heartbeat_curr_interval) {
-		ev_timer_set(t, heartbeat_curr_interval - after, 0);
-		ev_timer_start(loop, t);
-		return;
-	} else
-		ev_timer_stop(loop, t);
-
-	if(last_recv_seq < 0) {
-		if(pull_connected)
-			heartbeat_curr_interval = 1;
-		logit(DEBUG, "We haven't received anything yet");
-		send_heartbeat(loop);
-		return;
-	}
-	heartbeat_curr_interval = heartbeat_interval;
-
-	if(last_recv_seq == last_sent_seq -1) {
-		logit(DEBUG, "Heartbeat didn't time out! Resetting timer.");
-		send_heartbeat(loop);
-		return;
-	}
-
-	if(last_recv_seq != -1) {
-		logit(DEBUG, "We recieved a pong message, but it wasn't right. Retrying.");
-		send_heartbeat(loop);
-		return;
-	}
-
-	logit(INFO, "Heartbeat timed out. Resetting sockets. (%08x != %08x)",
-		last_recv_seq, last_sent_seq);
-	zmq_close(pushsock);
-	pushsock = zmq_socket(zmqctx, ZMQ_PUSH);
-	if(pushsock == NULL) {
-		logit(ERR, "Unable to create new results socket. Cannot continue: %s",
-			zmq_strerror(errno));
-		exit(1);
-	}
-	parse_sock_directive(pushsock, pushsockdef, 0);
-
-	ev_io_stop(loop, &pullio);
-	recv_job_cb(loop, &pullio, EV_READ);
-	zmq_close(pullsock);
-	pullsock = zmq_socket(zmqctx, pullsock_type);
-	if(pullsock == NULL) {
-		logit(ERR, "Unable to create new jobs socket. Cannot continue: %s",
-			zmq_strerror(errno));
-		exit(1);
-	}
-	parse_sock_directive(pullsock, pullsockdef, 0);
-	zmq_getsockopt(pullsock, ZMQ_FD, &pullfd, &pullfds);
-	if(pullfd == -1) {
-		logit(ERR, "Error getting fd for pullsock");
-		exit(-1);
-	}
-	ev_io_init(&pullio, recv_job_cb, pullfd, EV_READ);
-	pullio.data = pullsock;
-	ev_io_start(loop, &pullio);
-
-#if ZMQ_VERSION_MAJOR >= 3
-	setup_sockmonitor(loop, &pullmonio, pullsock);
-	setup_sockmonitor(loop, &pushmonio, pushsock);
-#endif
-	last_recv_seq = -1;
-
-	send_heartbeat(loop);
-}
-
-void send_heartbeat(struct ev_loop * loop) {
-	json_t * output;
-	zmq_msg_t outputmsg;
-	int rc;
-
-	if(!push_connected) {
-		logit(DEBUG, "Results socket isn't connected. Not sending heartbeat.");
-		last_heartbeat = ev_now(loop);
-
-		if(ev_is_active(&heartbeat_timer))
-			ev_timer_stop(loop, &heartbeat_timer);
-		ev_timer_init(&heartbeat_timer, heartbeat_timeout_cb, heartbeat_curr_interval, 0);
-		ev_timer_start(loop, &heartbeat_timer);
-		return;
-	}
-
-	output = json_pack("{s:s s:i s:s}",
-		"type", "ping",
-		"sequence", last_sent_seq++,
-		"replyto", heartbeat_reply_string
-	);
-	if(output == NULL) {
-		logit(ERR, "Error allocating heartbeat message payload");
-		return;
-	}
-	char * strout= json_dumps(output, JSON_COMPACT);
-	json_decref(output);
-	zmq_msg_init_data(&outputmsg, strout, strlen(strout), free_cb, NULL);
-
-	last_heartbeat = ev_now(loop);
-
-	if(ev_is_active(&heartbeat_timer))
-		ev_timer_stop(loop, &heartbeat_timer);
-	ev_timer_init(&heartbeat_timer, heartbeat_timeout_cb, heartbeat_curr_interval, 0);
-	ev_timer_start(loop, &heartbeat_timer);
-
-	if(zmq_msg_send(&outputmsg, pushsock, ZMQ_DONTWAIT) == -1)
-		logit(ERR, "Error sending heartbeat message: %s", zmq_strerror(errno));
-	else {
-		logit(DEBUG, "Sent heartbeat message. Next timeout in %d seconds. (Sequence: %08x)",
-			heartbeat_curr_interval, last_sent_seq);
-	}
-	zmq_msg_close(&outputmsg);
-}
-
-void parse_sock_directive(void * socket, json_t * arg, int bind) {
-	int i, rc;
-	if(!arg)
-		return;
-	if(json_is_string(arg)) {
-#if ZMQ_VERSION_MAJOR > 3
-		if(curve_private) {
-			zmq_setsockopt(socket, ZMQ_CURVE_SECRETKEY,
-				curve_private, strlen(curve_private));
-			zmq_setsockopt(socket, ZMQ_CURVE_PUBLICKEY,
-				curve_public, strlen(curve_public));
-			zmq_setsockopt(socket, ZMQ_CURVE_SERVERKEY,
-				curve_server, strlen(curve_server));
-		}
-#endif
-		zmq_setsockopt(socket, ZMQ_RECONNECT_IVL,
-			&reconnect_ivl, sizeof(reconnect_ivl));
-		zmq_setsockopt(socket, ZMQ_RECONNECT_IVL_MAX,
-			&reconnect_ivl_max, sizeof(reconnect_ivl_max));
-
-		if(bind)
-			rc = zmq_bind(socket, json_string_value(arg));
-		else
-			rc = zmq_connect(socket, json_string_value(arg));
-		if(rc == -1) {
-			logit(ERR, "Error %s to %s: %s",
-				bind ? "binding" : "connecting",
-				json_string_value(arg), zmq_strerror(errno));
-			exit(1);
-		}
-	} else if(json_is_object(arg)) {
-		char * addr = NULL;
-		int sndtimeo = -1, rcvtimeo = -1;
-		json_t * subscribe = NULL;
-		if(json_unpack(arg, "{s:s s?:b s?:o s?i s?i}",
-			"address", &addr,
-			"bind", &bind,
-			"subscribe",&subscribe,
-			"sndtimeo", &sndtimeo,
-			"rcvtimeo", &rcvtimeo) != 0)
-			return;
-
-#if ZMQ_VERSION_MAJOR > 3
-		if(curve_private) {
-			zmq_setsockopt(socket, ZMQ_CURVE_SECRETKEY,
-				curve_private, strlen(curve_private));
-			zmq_setsockopt(socket, ZMQ_CURVE_PUBLICKEY,
-				curve_public, strlen(curve_public));
-			zmq_setsockopt(socket, ZMQ_CURVE_SERVERKEY,
-				curve_server, strlen(curve_server));
-		}
-#endif
-
-		zmq_setsockopt(socket, ZMQ_RECONNECT_IVL,
-			&reconnect_ivl, sizeof(reconnect_ivl));
-		zmq_setsockopt(socket, ZMQ_RECONNECT_IVL_MAX,
-			&reconnect_ivl_max, sizeof(reconnect_ivl_max));
-		zmq_setsockopt(socket, ZMQ_SNDTIMEO,
-			&sndtimeo, sizeof(sndtimeo));
-		zmq_setsockopt(socket, ZMQ_RCVTIMEO,
-			&rcvtimeo, sizeof(rcvtimeo));
-
-		if(bind)
-			rc = zmq_bind(socket, addr);
-		else
-			rc = zmq_connect(socket, addr);
-		if(rc == -1) {
-			logit(ERR, "Error %s to %s: %s",
-				bind ? "binding" : "connecting",
-				json_string_value(arg), zmq_strerror(errno));
-			exit(1);
-		}
-		logit(DEBUG, "Socket object def %s (bind: %d)",
-			addr, bind);
-
-		if(subscribe) {
-			int opt;
-			size_t optsize = sizeof(opt);
-			zmq_getsockopt(socket, ZMQ_TYPE, &opt, &optsize);
-			if(opt != ZMQ_SUB)
-				return;
-			opt = 1;
-#if ZMQ_VERSION < 30300
-			zmq_setsockopt(socket, ZMQ_DELAY_ATTACH_ON_CONNECT, &opt, &optsize);
-#else
-			zmq_setsockopt(socket, ZMQ_IMMEDIATE, &opt, optsize);
-#endif
-			if(json_is_string(subscribe)) {
-				const char * opt = json_string_value(subscribe);
-				zmq_setsockopt(socket, ZMQ_SUBSCRIBE, opt, strlen(opt));
-				logit(DEBUG, "Subscribing to %s", opt);
-			}
-			else if(json_is_array(subscribe)) {
-				for(i = 0; i < json_array_size(subscribe); i++) {
-					json_t * tmp = json_array_get(subscribe, i);
-					const char * opt = json_string_value(tmp);
-					zmq_setsockopt(socket, ZMQ_SUBSCRIBE,
-						opt, strlen(opt));
-					logit(DEBUG, "Subscribing to %s", opt);
-				}
-			}
-			if(heartbeat_interval > 0) {
-				char * heartbeat_subscribe = malloc(
-					sizeof(heartbeat_reply_string) + sizeof("pong  "));
-				size_t hbslen = sprintf(heartbeat_subscribe, "pong %s", heartbeat_reply_string);
-				zmq_setsockopt(socket, ZMQ_SUBSCRIBE, heartbeat_subscribe, hbslen);
-				free(heartbeat_subscribe);
-			}
-		}
-	} else if(json_is_array(arg)) {
-		for(i = 0; i < json_array_size(arg); i++) {
-			json_t * tmp = json_array_get(arg, i);
-			parse_sock_directive(socket, tmp, bind);
-		}
-	}
-}
-
 void handle_end(struct ev_loop * loop, ev_signal * w, int revents) {
 	zmq_close(pullsock);
 	pullsock = NULL;
@@ -1078,6 +411,7 @@ int main(int argc, char ** argv) {
 	char ch, *configobj = "executor", *tmprootpath = NULL,
 		*tmpunprivpath = NULL, *tmpunprivuser = NULL;
 	json_error_t jsonerr;
+	int32_t config_heartbeat_interval;
 
 	while((ch = getopt(argc, argv, "vsdhc:")) != -1) {
 		switch(ch) {
@@ -1137,7 +471,7 @@ int main(int argc, char ** argv) {
 		"reconnect_ivl_max", &reconnect_ivl_max,
 		"reset_sockets_on_error", &reset_sockets_on_error,
 		"send_retries", &send_retries,
-		"heartbeat", &heartbeat_interval) != 0) {
+		"heartbeat", &config_heartbeat_interval) != 0) {
 		logit(ERR, "Error getting config %s", jsonerr.text);
 		exit(-1);
 	}
@@ -1154,7 +488,7 @@ int main(int argc, char ** argv) {
 		"reconnect_ivl_max", &reconnect_ivl_max,
 		"reset_sockets_on_error", &reset_sockets_on_error,
 		"send_retries", &send_retries,
-		"heartbeat", &heartbeat_interval) != 0) {
+		"heartbeat", &config_heartbeat_interval) != 0) {
 		logit(ERR, "Error getting config: %s", jsonerr.text);
 		exit(-1);
 	}
@@ -1171,17 +505,7 @@ int main(int argc, char ** argv) {
 		}
 	}
 
-	if(heartbeat_interval > 0) {
-		struct timeval randseed;
-		gettimeofday(&randseed, NULL);
-		randseed.tv_sec ^= randseed.tv_usec;
-		srand((unsigned int)randseed.tv_sec);
-		snprintf(heartbeat_reply_string, sizeof(heartbeat_reply_string),
-			"%s-%08x", myfqdn, rand());
-		logit(DEBUG, "Setting heartbeat reply-to name to \"%s\"", heartbeat_reply_string);
-		last_sent_seq = rand();
-		heartbeat_curr_interval = 1;
-	}
+	init_heartbeat(config_heartbeat_interval);
 
 	if(tmprootpath) {
 		rootpath = strdup(tmprootpath);
@@ -1271,10 +595,9 @@ int main(int argc, char ** argv) {
 	setup_sockmonitor(loop, &pushmonio, pushsock);
 #endif
 
-	if(heartbeat_interval > 0)
+	if(config_heartbeat_interval > 0)
 		send_heartbeat(loop);
 
-	memset(runningtable, 0, sizeof(runningtable));
 	logit(INFO, "Starting mqexec event loop");
 	ev_run(loop, 0);
 	logit(INFO, "mexec event loop terminated");
