@@ -5,6 +5,7 @@ void process_req_msg(zmq_msg_t * reqmsg);
 void * getsock(char * what, int type, json_t * def);
 void process_payload(struct payload * payload);
 void * zap_handler(void* zapsock);
+void setup_sockmonitor(void * sock);
 
 #ifndef ZMQ_DONTWAIT
 #   define ZMQ_DONTWAIT     ZMQ_NOBLOCK

@@ -47,9 +47,6 @@ int nebmodule_deinit(int flags, int reason) {
 	return 0;
 }
 
-int handle_pubstartup();
-void process_payload(struct payload * payload);
-
 void * pullsock = NULL, * reqsock = NULL;
 extern void * pubext;
 
@@ -253,6 +250,7 @@ int handle_startup(int which, void * obj) {
 				schedule_new_event(EVENT_USER_FUNCTION, 1, now, 1, interval,
 					NULL, 1, input_reaper, pullsock, 0);
 #endif
+				setup_sockmonitor(pullsock);
 				// Call the input_reaper once manually to clear out any
 				// level-triggered polling problems.
 				input_reaper(pullsock);
@@ -274,6 +272,7 @@ int handle_startup(int which, void * obj) {
 				schedule_new_event(EVENT_USER_FUNCTION, 1, now, 1, interval,
 					NULL, 1, input_reaper, reqsock, 0);
 #endif
+				setup_sockmonitor(reqsock);
 				// Call the input_reaper once manually to clear out any
 				// level-triggered polling problems.
 				input_reaper(reqsock);

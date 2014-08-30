@@ -777,6 +777,7 @@ int handle_pubstartup(json_t * def) {
 	pubext = getsock("publish", ZMQ_PUB, def);
 	if(pubext == NULL)
 		return -1;
+	setup_sockmonitor(pubext);
 
 	json_t * override = NULL;
 	double sleeptime = 0.0;
