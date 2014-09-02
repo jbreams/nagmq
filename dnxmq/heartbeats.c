@@ -8,7 +8,7 @@
 #include <time.h>
 #include "mqexec.h"
 
-int64_t last_sent_seq = -1, last_recv_seq = -1;
+int32_t last_sent_seq = -1, last_recv_seq = -1;
 int32_t heartbeat_interval = -1, heartbeat_curr_interval = -1;
 time_t last_heartbeat = 0;
 char heartbeat_reply_string[255];
@@ -55,7 +55,7 @@ void subscribe_heartbeat(void * sock) {
 
 void process_heartbeat(json_t * inputmsg) {
 	char * replyto;
-	int64_t sequence;
+	int32_t sequence;
 	if(json_unpack(inputmsg, "{ s:s s:i }",
 		"pong_target", &replyto,
 		"sequence", &sequence) != 0) {
@@ -93,14 +93,15 @@ void heartbeat_timeout_cb(struct ev_loop * loop, ev_timer * t, int event) {
 	}
 	heartbeat_curr_interval = heartbeat_interval;
 
-	if(last_recv_seq == last_sent_seq -1) {
+	if(last_recv_seq == last_sent_seq) {
 		logit(DEBUG, "Heartbeat didn't time out! Resetting timer.");
 		send_heartbeat(loop);
 		return;
 	}
 
 	if(last_recv_seq != -1) {
-		logit(DEBUG, "We recieved a pong message, but it wasn't right. Retrying.");
+		logit(DEBUG, "We recieved a pong message, but it wasn't right. Retrying. (%08x != %08x)",
+			last_recv_seq, last_sent_seq, last_recv_seq);
 		send_heartbeat(loop);
 		return;
 	}
@@ -162,7 +163,7 @@ void send_heartbeat(struct ev_loop * loop) {
 
 	output = json_pack("{s:s s:i s:s}",
 		"type", "ping",
-		"sequence", last_sent_seq++,
+		"sequence", ++last_sent_seq,
 		"replyto", heartbeat_reply_string
 	);
 	if(output == NULL) {

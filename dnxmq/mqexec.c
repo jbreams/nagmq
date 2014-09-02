@@ -250,7 +250,8 @@ void recv_job_cb(struct ev_loop * loop, ev_io * i, int event) {
 void sock_monitor_cb(struct ev_loop * loop, ev_io * i, int event) {
 	while(1) {
 		void * sock = i->data;
-		zmq_event_t sockevent;
+		uint16_t event;
+		int32_t value;
 		zmq_msg_t addrmsg, eventmsg;
 		int rc, shouldlog = 1;
 
@@ -274,9 +275,8 @@ void sock_monitor_cb(struct ev_loop * loop, ev_io * i, int event) {
 		}
 
 		const char* eventdata = (char*)zmq_msg_data(&eventmsg);
-		memcpy(&(sockevent.event), eventdata, sizeof(sockevent.event));
-		memcpy(&(sockevent.value), eventdata + sizeof(sockevent.event),
-			sizeof(sockevent.value));
+		memcpy(&event, eventdata, sizeof(event));
+		memcpy(&value, eventdata + sizeof(event), sizeof(value));
 		zmq_msg_close(&eventmsg);
 
 		zmq_msg_init(&addrmsg);
@@ -293,14 +293,14 @@ void sock_monitor_cb(struct ev_loop * loop, ev_io * i, int event) {
 			}
 		}
 
-		if(sockevent.event == 0) {
+		if(event == 0) {
 			zmq_close(sock);
 			ev_io_stop(loop, i);
 			return;
 		}
 
 		// These are super chatting log messages, skip em.
-		switch(sockevent.event) {
+		switch(event) {
 			case ZMQ_EVENT_CLOSED:
 			case ZMQ_EVENT_CONNECT_DELAYED:
 				shouldlog = 0;
@@ -313,7 +313,7 @@ void sock_monitor_cb(struct ev_loop * loop, ev_io * i, int event) {
 		}
 
 		char * event_string;
-		switch(sockevent.event) {
+		switch(event) {
 			case ZMQ_EVENT_CONNECTED:
 				event_string = "Socket event on %.*s: connection established (fd: %d)";
 				if(i == &pullmonio)
@@ -360,7 +360,7 @@ void sock_monitor_cb(struct ev_loop * loop, ev_io * i, int event) {
 		}
 
 		logit(INFO, event_string, zmq_msg_size(&addrmsg),
-			(char*)zmq_msg_data(&addrmsg), sockevent.value);
+			(char*)zmq_msg_data(&addrmsg), value);
 		zmq_msg_close(&addrmsg);
 	}
 }

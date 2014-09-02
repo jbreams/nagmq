@@ -10,9 +10,10 @@ int pullmonfd = -1, reqmonfd = -1, pubmonfd;
 #if ZMQ_VERSION_MAJOR >= 3 && defined(HAVE_NAGIOS4)
 int sock_monitor_cb(int sd, int events, void * sock) {
 	while(1) {
-		zmq_event_t sockevent;
 		zmq_msg_t addrmsg, eventmsg;
 		int rc, shouldlog = 1;
+		uint16_t event;
+		int32_t value;
 
 		zmq_msg_init(&eventmsg);
 		rc = zmq_msg_recv(&eventmsg, sock, ZMQ_DONTWAIT);
@@ -34,9 +35,8 @@ int sock_monitor_cb(int sd, int events, void * sock) {
 		}
 
 		const char* eventdata = (char*)zmq_msg_data(&eventmsg);
-		memcpy(&(sockevent.event), eventdata, sizeof(sockevent.event));
-		memcpy(&(sockevent.value), eventdata + sizeof(sockevent.event),
-			sizeof(sockevent.value));
+		memcpy(&event, eventdata, sizeof(event));
+		memcpy(&value, eventdata + sizeof(event), sizeof(value));
 		zmq_msg_close(&eventmsg);
 
 		zmq_msg_init(&addrmsg);
@@ -54,7 +54,7 @@ int sock_monitor_cb(int sd, int events, void * sock) {
 		}
 
 		// These are super chatting log messages, skip em.
-		switch(sockevent.event) {
+		switch(event) {
 			case ZMQ_EVENT_CLOSED:
 			case ZMQ_EVENT_CONNECT_DELAYED:
 				shouldlog = 0;
@@ -67,7 +67,7 @@ int sock_monitor_cb(int sd, int events, void * sock) {
 		}
 
 		char * event_string;
-		switch(sockevent.event) {
+		switch(event) {
 			case ZMQ_EVENT_CONNECTED:
 				event_string = "NagMQ socket event on %.*s: connection established (fd: %d)";
 				break;
@@ -106,7 +106,7 @@ int sock_monitor_cb(int sd, int events, void * sock) {
 		}
 
 		logit(NSLOG_INFO_MESSAGE, TRUE, event_string, zmq_msg_size(&addrmsg),
-			(char*)zmq_msg_data(&addrmsg), sockevent.value);
+			(char*)zmq_msg_data(&addrmsg), value);
 		zmq_msg_close(&addrmsg);
 	}
 	return 0;

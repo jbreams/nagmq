@@ -3,8 +3,10 @@
 *.a
 *.i
 *.s
+*.tar.gz
 .libs
 .deps
+m4/*
 Makefile
 Makefile.in
 aclocal.m4

@@ -26,7 +26,7 @@ extern int errno;
 
 static void process_ping(json_t * payload) {
 	char * target;
-	int64_t seq;
+	int32_t seq;
 	char * extra = NULL;
 	struct timeval curtime;
 
