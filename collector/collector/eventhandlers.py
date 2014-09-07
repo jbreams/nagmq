@@ -6,6 +6,7 @@ import logging
 logger = logging.getLogger('nagmq-collector')
 
 class EventBase:
+    timestamp_keys = set()
     def __init__(self, objectin):
         self.event_object = objectin
         for i in self.event_object.keys():
@@ -15,6 +16,8 @@ class EventBase:
                     self.event_object[i]["tv_usec"] / 1000000
                 )
                 self.event_object[i] = timestampval
+            if i in self.timestamp_keys:
+                self.event_object[i] = datetime.fromtimestamp(self.event_object[i])
         pass
 
     def event_collection(self):
@@ -72,6 +75,7 @@ class EventLoopEndEvent(EventBase):
         return "Nagios event loop has stopped"
 
 class StateChangeEvent(EventBase):
+    timestamp_keys = set(['last_check', 'last_state_change'])
     def event_collection(self):
         return "statechanges"
 
@@ -91,6 +95,8 @@ class StateChangeEvent(EventBase):
         )
 
 class CommentEvent(EventBase):
+    timestamp_keys = set(['entry_time', 'expire_time'])
+
     def event_collection(self):
         return "comments"
 
@@ -104,6 +110,8 @@ class CommentEvent(EventBase):
         )
 
 class DowntimeAddEvent(EventBase):
+    timestamp_keys = set(['start_time', 'end_time', 'entry_time'])
+
     def event_collection(self):
         return "downtimes"
 
@@ -153,6 +161,7 @@ class DowntimeDeleteEvent(EventBase):
         return "Downtime was deleted for {0}".format(self.event_objectname())
 
 class NotificationEvent(EventBase):
+    timestamp_keys = set(['last_check', 'last_state_change', 'last_notification'])
     def event_collection(self):
         return "notifications"
 
@@ -203,6 +212,7 @@ class AcknowledgementEvent(EventBase):
         )
 
 class CheckResultEvent(EventBase):
+    timestamp_keys = set(['last_check', 'last_state_change'])
     def event_collection(self):
         return "checkresults"
 
