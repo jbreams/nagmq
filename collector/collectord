@@ -1,0 +1,42 @@
+#!/usr/bin/env python
+
+import argparse
+import logging
+from collector import main
+
+logger = logging.getLogger('nagmq-collector')
+
+if __name__ == "__main__":
+	parser = argparse.ArgumentParser(description="NagMQ Collector Daemon")
+	parser.add_argument("--verbose", action="store_true",
+		help="Log verbosely")
+	parser.add_argument("--log", metavar="LOGFILE|SYSLOG",
+		help="Path to log file")
+	parser.add_argument("configfile",
+		help="Path to config file")
+	args = parser.parse_args()
+
+	loglevel = logging.INFO
+	if args.verbose:
+		loglevel = logging.DEBUG
+	logger.setLevel(loglevel)
+	ch = None
+	# Print logs to console if we're not a deamon and there is no explicit
+	# logging configuration
+	if not args.log:
+		ch = logging.StreamHandler()
+		formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+		ch.setFormatter(formatter)
+	# Send logs to syslog if explicitly set or we're a deamon and there is
+	# no explicit logging configuration
+	elif args.log.lower() == 'syslog':
+		ch = logging.SysLogHandler()
+	# Send logs to a file
+	else:
+		ch = logging.FileHandler(args.log)
+		formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+		ch.setFormatter(formatter)
+
+	logger.addHandler(ch)
+
+	main(args.configfile)

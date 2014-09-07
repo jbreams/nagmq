@@ -1,0 +1,9 @@
+# This is an example config file for the NagMQ collector
+
+mongouri: mongodb://localhost:27017/nagiosdb
+eventsource: tcp://localhost:5555
+curve:
+  # These are example keys. Place your own curve keys here
+  serverkey: "@QxA0C]V9/xwyF?yrLuzJgB4:>lTetaO(EYM%5eD"
+  publickey: "M1[UsNhTl$p5h:]n{yrb(0qZIp+^=oLbeiueJjjG"
+  secretkey: "tGn4Lk%@VnZc#.rlAofGPu/Y.&!H@Ew5B3!w.4tt"
