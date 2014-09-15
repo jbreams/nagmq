@@ -211,13 +211,15 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 		return;
 	}
 
-	if(timeval_subtract(&latencytv, &j->start, &server_starttime) == 1) {
+	if(timeval_subtract(&latencytv, &j->start, &server_starttime) == 1 &&
+		latencytv.tv_sec < -1) {
 		logit(INFO, "Time skew detected in latency calculation: tv_sec: %d, tv_usec: %d",
 			latencytv.tv_sec, latencytv.tv_usec);
 	} else {
 		server_latency += latencytv.tv_sec + (latencytv.tv_usec / 1000000.0);
 		logit(DEBUG, "Network latency was %f seconds", server_latency);
 	}
+	j->latency = server_latency;
 
 	j->pid = pid;
 	add_child(j);
