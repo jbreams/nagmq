@@ -1,10 +1,15 @@
+#include "config.h"
 #include <zmq.h>
 #include "json.h"
 #include <string.h>
 #include <stdint.h>
 #include <pthread.h>
 #include <signal.h>
+#ifdef HAVE_ICINGA
+#include "icinga.h"
+#else
 #include "nagios.h"
+#endif
 
 extern int keyfile_refresh_interval;
 extern char * curve_knownhosts;

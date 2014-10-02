@@ -1,7 +1,11 @@
-#include <zmq.h>
-#include "nagios.h"
-#include <string.h>
 #include "config.h"
+#include <zmq.h>
+#ifdef HAVE_ICINGA
+#include "icinga.h"
+#else
+#include "nagios.h"
+#endif
+#include <string.h>
 
 extern void * zmq_ctx, *pullsock, *reqsock, *pubext;
 void * pullmon = NULL, *reqmon = NULL, *pubmon = NULL;

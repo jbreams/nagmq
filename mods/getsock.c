@@ -1,7 +1,12 @@
+#include "config.h"
 #include <zmq.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef HAVE_ICINGA
+#include "icinga.h"
+#else
 #include "nagios.h"
+#endif
 #include "json.h"
 
 extern void * zmq_ctx;

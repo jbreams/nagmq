@@ -468,7 +468,7 @@ static void process_cmd(json_t * payload) {
 	else if(strcmp(cmd_name, "disable_host_checks") == 0 && host_target)
 		disable_host_checks(host_target);
 	else if(strcmp(cmd_name, "enable_service_freshness_checks") == 0)
-		enable_service_freshness_checks();
+		enable_service_freshness_checks(service_target);
 	else if(strcmp(cmd_name, "start_obsessing_over_service") == 0 && service_target)
 		start_obsessing_over_service(service_target);
 	else if(strcmp(cmd_name, "stop_obsessing_over_service") == 0 && service_target)
