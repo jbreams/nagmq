@@ -111,14 +111,66 @@ static struct payload * parse_event_handler(nebstruct_event_handler_data * state
 extern check_result check_result_info;
 #endif
 
+// This function does what run_sync_host_check in checks.c of Nagios would
+// do between HOSTCHECK_ASYNC_PRE_CHECK and HOSTCHECK_INITIATE.
+// It's here to fix things up and produce the fully parsed command line.
+int fixup_async_presync_hostcheck(host * hst, char ** processed_command) {
+	nagios_macros mac;
+	char * raw_command = NULL;
+	int macro_options = STRIP_ILLEGAL_MACRO_CHARS | ESCAPE_MACRO_CHARS;
+
+	/* clear check options - we don't want old check options retained */
+	/* only clear options if this was a scheduled check - on demand check options shouldn't affect retained info */
+	// The above comments don't many any sense. As of Nagios 4.0.8, all checks that reach
+	// this code path are scheduled checks - so I've taken out the if statement.
+	hst->check_options = CHECK_OPTION_NONE;
+
+	/* adjust host check attempt */
+	adjust_host_check_attempt(hst, TRUE);
+
+	/* grab the host macro variables */
+	memset(&mac, 0, sizeof(mac));
+	grab_host_macros_r(&mac, hst);
+
+	/* get the raw command line */
+	get_raw_command_line_r(&mac, hst->check_command_ptr, hst->check_command, &raw_command, macro_options);
+	if(raw_command == NULL) {
+		clear_volatile_macros_r(&mac);
+		log_debug_info(DEBUGL_CHECKS, 0, "Raw check command for host '%s' was NULL - aborting.\n", hst->name);
+		return ERROR;
+	}
+
+	/* process any macros contained in the argument */
+	process_macros_r(&mac, raw_command, processed_command, macro_options);
+	my_free(raw_command);
+	if(processed_command == NULL) {
+		clear_volatile_macros_r(&mac);
+		log_debug_info(DEBUGL_CHECKS, 0, "Processed check command for host '%s' was NULL - aborting.\n", hst->name);
+		return ERROR;
+	}
+
+	clear_volatile_macros_r(&mac);
+
+	return 0;
+}
+
 static struct payload * parse_host_check(nebstruct_host_check_data * state) {
 	struct payload * ret = payload_new();
 	host * obj = (host*)state->object_ptr;
-#ifdef HAVE_NAGIOS4
-	check_result * cri = state->check_result_ptr;
-#else
-	check_result * cri = &check_result_info;
-#endif
+
+	// Find the command args in the raw command line
+	char * command_args = strchr(obj->check_command, '!');
+	// If we found the ! we should advance one character to find the start
+	// of the actual arguments list
+	if(command_args != NULL)
+		command_args++;
+
+	double old_latency = obj->latency;
+	obj->latency = state->latency;
+	char * processed_command = NULL;
+	int old_current_attempt = obj->current_attempt;
+	if(fixup_async_presync_hostcheck(obj, &processed_command) != 0)
+		return NULL;
 
 	payload_new_string(ret, "host_name", state->host_name);
 	payload_new_integer(ret, "check_type", state->check_type);
@@ -135,17 +187,22 @@ static struct payload * parse_host_check(nebstruct_host_check_data * state) {
 	payload_new_double(ret, "latency", state->latency);
 	payload_new_integer(ret, "timeout", state->timeout);
 
-	if(state->type == NEBTYPE_HOSTCHECK_INITIATE) {
+	if(state->type == NEBTYPE_HOSTCHECK_ASYNC_PRECHECK) {
 		payload_new_string(ret, "type", "host_check_initiate");
-		payload_new_string(ret, "command_name", state->command_name);
-		payload_new_string(ret, "command_args", state->command_args);
-		payload_new_string(ret, "command_line", state->command_line);
+		payload_new_string(ret, "command_name", obj->check_command_ptr->name);
+		payload_new_string(ret, "command_args", command_args);
+		payload_new_string(ret, "command_line", processed_command);
 		payload_new_boolean(ret, "has_been_checked", obj->has_been_checked);
 		payload_new_integer(ret, "check_interval", obj->check_interval);
 		payload_new_integer(ret, "retry_interval", obj->retry_interval);
-		payload_new_integer(ret, "check_options", cri->check_options);
-		payload_new_integer(ret, "scheduled_check", cri->scheduled_check);
-		payload_new_integer(ret, "reschedule_check", cri->reschedule_check);
+
+		// We used to get this from the check_result_info, but this code
+		// path always gets scheduled_check and rescheduled_check set to
+		// 1, and check_options is cached in the host object. I'm keeping
+		// them here for compatibilities sake. They are deprecated though.
+		payload_new_integer(ret, "check_options", obj->check_options);
+		payload_new_integer(ret, "scheduled_check", 1);
+		payload_new_integer(ret, "reschedule_check", 1);
 #ifdef HAVE_NAGIOS4
 		payload_new_boolean(ret, "accept_passive_checks", obj->accept_passive_checks);
 #else
@@ -161,6 +218,16 @@ static struct payload * parse_host_check(nebstruct_host_check_data * state) {
 		payload_new_string(ret, "output", state->output);
 		payload_new_string(ret, "long_output", state->long_output);
 		payload_new_string(ret, "perf_data", state->perf_data);
+	}
+
+	if (state->type == NEBTYPE_HOSTCHECK_ASYNC_PRECHECK) {
+		free(processed_command);
+		obj->latency = old_latency;
+
+		// This gets overriden by adjust_host_check_attempt, restore it
+		// if we aren't going to override the check so that it makes sense.
+		if(!overrides[OR_HOSTCHECK_INITIATE])
+			obj->current_attempt = old_current_attempt;
 	}
 	return ret;
 }
@@ -694,10 +761,10 @@ int handle_nagdata(int which, void * obj) {
 		break;
 	case NEBCALLBACK_HOST_CHECK_DATA:
 		switch(raw->type) {
-			case NEBTYPE_HOSTCHECK_INITIATE:
+			case NEBTYPE_HOSTCHECK_ASYNC_PRECHECK:
 			case NEBTYPE_HOSTCHECK_PROCESSED:
 				payload = parse_host_check(obj);
-				if(raw->type == NEBTYPE_HOSTCHECK_INITIATE &&
+				if(raw->type == NEBTYPE_HOSTCHECK_ASYNC_PRECHECK &&
 					overrides[OR_HOSTCHECK_INITIATE])
 					rc = NEBERROR_CALLBACKOVERRIDE;
 				break;
@@ -755,6 +822,9 @@ int handle_nagdata(int which, void * obj) {
 		payload = parse_adaptivechange(obj);
 		break;
 	}
+
+	if(payload == NULL)
+		return ERROR;
 
 	payload_new_timestamp(payload, "timestamp", &raw->timestamp);
 	payload_finalize(payload);
