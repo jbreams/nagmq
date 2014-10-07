@@ -1,4 +1,4 @@
-EXTRA_DIST = fakeworker.py zmq3compat.h mqexec.init mqbroker.init
+EXTRA_DIST = fakeworker.py zmq3compat.h mqexec.init mqbroker.init mqexec.h
 
 sbin_PROGRAMS = mqexec mqbroker
 
