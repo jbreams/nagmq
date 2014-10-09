@@ -11,7 +11,7 @@ serverkey = u"@QxA0C]V9/xwyF?yrLuzJgB4:>lTetaO(EYM%5eD"
 reqs.setsockopt_string(zmq.CURVE_PUBLICKEY, pubkey)
 reqs.setsockopt_string(zmq.CURVE_SECRETKEY, privkey)
 reqs.setsockopt_string(zmq.CURVE_SERVERKEY, serverkey)
-reqs.connect('tcp://localhost:3234')
+reqs.connect('tcp://localhost:5557')
 
 while True:
 	s = raw_input('--> ')

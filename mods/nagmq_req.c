@@ -1094,6 +1094,37 @@ static void do_list_servicegroups(struct payload * po, json_t * req) {
 	}
 }
 
+static void do_program_status(struct payload * po, json_t * req) {
+	int get_programstatus = 0;
+	get_values(req,
+		"program_status", JSON_TRUE, 0, &get_programstatus,
+		NULL);
+	if(!get_programstatus)
+		return;
+
+	payload_start_object(po, NULL);
+	payload_new_string(po, "type", "program_status");
+	payload_new_integer(po, "program_start", program_start);
+	payload_new_integer(po, "pid", nagios_pid);
+	payload_new_boolean(po, "daemon_mode", daemon_mode);
+	payload_new_integer(po, "last_log_rotation", last_log_rotation);
+	payload_new_boolean(po, "notifications_enabled", enable_notifications);
+	payload_new_boolean(po, "active_service_checks_enabled", execute_service_checks);
+	payload_new_boolean(po, "passive_service_checks_enabled", accept_passive_service_checks);
+	payload_new_boolean(po, "active_host_checks_enabled", execute_host_checks);
+	payload_new_boolean(po, "passive_host_checks_enabled", accept_passive_host_checks);
+	payload_new_boolean(po, "event_handlers_enabled", enable_event_handlers);
+	payload_new_boolean(po, "flap_detection_enabled", enable_flap_detection);
+	payload_new_boolean(po, "process_performance_data", process_performance_data);
+	payload_new_boolean(po, "obsess_over_hosts", obsess_over_hosts);
+	payload_new_boolean(po, "obsess_over_services", obsess_over_services);
+	payload_new_integer(po, "modified_host_attributes", modified_host_process_attributes);
+	payload_new_integer(po, "modified_service_attributes", modified_service_process_attributes);
+	payload_new_string(po, "global_host_event_handler", global_host_event_handler);
+	payload_new_string(po, "global_service_event_handler", global_service_event_handler);
+	payload_end_object(po);
+}
+
 static void send_msg(struct payload * po) {
 	int rc;
 	payload_finalize(po);
@@ -1215,6 +1246,8 @@ void process_req_msg(zmq_msg_t * reqmsg) {
 			payload_hash_key(po, json_string_value(keytmp));
 		}
 	}
+
+	do_program_status(po, req);
 
 	if(service_description) {
 		if(!host_name) {

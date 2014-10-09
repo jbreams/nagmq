@@ -7,7 +7,7 @@ struct payload {
 	char * service_description;
 	char * pong_target;
 	char * json_buf;
-	uint32_t hashed_keys[24];
+	uint32_t hashed_keys[23];
 	char use_hash;
 	size_t buflen, bufused;
 	char keep_auxdata;
