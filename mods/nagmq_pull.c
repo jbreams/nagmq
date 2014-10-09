@@ -567,12 +567,18 @@ static void process_cmd(json_t * payload) {
 
 void process_pull_msg(zmq_msg_t * payload_msg) {
 	char * type = NULL;
+	json_error_t errobj;
+
+	// Silently discard any empty messages.
+	if(zmq_msg_size(payload_msg) == 0)
+		return;
 
 	json_t * payload = json_loadb(zmq_msg_data(payload_msg),
-		zmq_msg_size(payload_msg), 0, NULL);
+		zmq_msg_size(payload_msg), 0, &errobj);
 	if(payload == NULL) {
 		logit(NSLOG_RUNTIME_WARNING, FALSE,
-			"NagMQ received a command, but it wasn't valid JSON.");
+			"NagMQ received a command, but it wasn't valid JSON. %s at position %d",
+			errobj.text, errobj.position);
 		return;
 	}
 
