@@ -24,11 +24,11 @@ status() {
 }
 
 start() {
-	if [ -e /var/lock/subsys/mqexec ]; then
-		echo -n $"cannot start mqexec. It is already running.";
-		failure $"cannot start mqexec. mqexec is already running.";
-		echo
-		return 1
+	pids=$(pidof $prog)
+	running=$?
+	if [ $running -eq 0 ]; then
+		echo "$prog is already running $pids"
+		return 0
 	fi
 
 	for i in `eval echo {0..$EXECUTORCOUNT}`; do
@@ -58,13 +58,7 @@ start() {
 
 stop() {
 	echo -n $"Stopping $prog: "
-	if [ ! -e /var/lock/subsys/mqexec ]; then
-		echo -n $"cannot stop mqexec: it is not running."
-		failure $"cannot stop mqexec: it is not running."
-		echo
-		return 1
-	fi
-	killproc mqexec
+	killproc $prog
 	RETVAL=$?
 	echo
 	[ $RETVAL -eq 0 ] && rm -f /var/lock/subsys/mqexec
