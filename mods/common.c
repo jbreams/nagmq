@@ -193,6 +193,7 @@ int handle_startup(int which, void * obj) {
 				NULL) != 0) {
 				logit(NSLOG_CONFIG_ERROR, TRUE,
 					"Invalid parameters in NagMQ configuration");
+				exit(1);
 				return -1;
 			}
 		
@@ -203,6 +204,7 @@ int handle_startup(int which, void * obj) {
 			if(zmq_ctx == NULL) {
 				logit(NSLOG_RUNTIME_ERROR, TRUE,
 					"Error initialzing ZMQ: %s", zmq_strerror(errno));
+				exit(1);
 				return -1;
 			}
 
@@ -215,6 +217,7 @@ int handle_startup(int which, void * obj) {
 					NULL) != 0) {
 					logit(NSLOG_RUNTIME_ERROR, TRUE,
 						"Error getting public/private key for NagMQ curve security");
+					exit(1);
 					return -1;
 				}
 
@@ -226,6 +229,7 @@ int handle_startup(int which, void * obj) {
 						logit(NSLOG_RUNTIME_ERROR, TRUE,
 							"Error creating NagMQ authentication socket: %s",
 							zmq_strerror(errno));
+						exit(1);
 						return -1;
 					}
 
@@ -233,6 +237,7 @@ int handle_startup(int which, void * obj) {
 						logit(NSLOG_RUNTIME_ERROR, TRUE,
 							"Error binding to NagMQ authentication endpoint: %s",
 							zmq_strerror(errno));
+						exit(1);
 						return -1;
 					}
 					int rc = pthread_create(&tid, NULL, zap_handler, zapsock);
@@ -240,22 +245,27 @@ int handle_startup(int which, void * obj) {
 						logit(NSLOG_RUNTIME_ERROR, TRUE,
 							"Error starting NagMQ authentication thread?: %s",
 							strerror(errno));
+						exit(1);
 						return -1;
 					}
 				}
 			}
 #endif
 
-			if(pubdef && handle_pubstartup(pubdef) < 0)
+			if(pubdef && handle_pubstartup(pubdef) < 0) {
+				exit(1);
 				return -1;
+			}
 
 			if(pulldef) {
 				unsigned long interval = 2;
 				get_values(pulldef,
 					"interval", JSON_INTEGER, 0, &interval,
 					NULL);
-				if((pullsock = getsock("pull", ZMQ_PULL, pulldef)) == NULL)
+				if((pullsock = getsock("pull", ZMQ_PULL, pulldef)) == NULL) {
+					exit(1);
 					return -1;
+				}
 #ifdef HAVE_NAGIOS4
 				int fd;
 				size_t throwaway = sizeof(fd);
@@ -276,8 +286,10 @@ int handle_startup(int which, void * obj) {
 				get_values(reqdef,
 					"interval", JSON_INTEGER, 0, &interval,
 					NULL);
-				if((reqsock = getsock("reply", ZMQ_REP, reqdef)) == NULL)
+				if((reqsock = getsock("reply", ZMQ_REP, reqdef)) == NULL) {
+					exit(1);
 					return -1;
+				}
 #ifdef HAVE_NAGIOS4
 				int fd;
 				size_t throwaway = sizeof(fd);
@@ -390,6 +402,7 @@ int nebmodule_init(int flags, char * localargs, nebmodule * lhandle) {
 	if(config == NULL) {
 		logit(NSLOG_RUNTIME_ERROR, TRUE, "Error loading NagMQ config: %s (at %d:%d)",
 			loaderr.text, loaderr.line, loaderr.column);
+		exit(1);
 		return -1;
 	}
 
