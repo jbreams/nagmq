@@ -10,6 +10,7 @@
 
 int32_t last_sent_seq = -1, last_recv_seq = -1;
 int32_t heartbeat_interval = -1, heartbeat_curr_interval = -1;
+int waiting_for_pong_sync = 0;
 time_t last_heartbeat = 0;
 char heartbeat_reply_string[255];
 ev_timer heartbeat_timer;
@@ -99,9 +100,11 @@ void heartbeat_timeout_cb(struct ev_loop * loop, ev_timer * t, int event) {
 		return;
 	}
 
-	if(last_recv_seq != -1) {
+	if(last_recv_seq != -1 && waiting_for_pong_sync == 0) {
 		logit(DEBUG, "We recieved a pong message, but it wasn't right. Retrying. (%08x != %08x)",
 			last_recv_seq, last_sent_seq, last_recv_seq);
+		last_recv_seq = -1;
+		waiting_for_pong_sync = 1;
 		send_heartbeat(loop);
 		return;
 	}
@@ -141,6 +144,7 @@ void heartbeat_timeout_cb(struct ev_loop * loop, ev_timer * t, int event) {
 	setup_sockmonitor(loop, &pushmonio, pushsock);
 #endif
 	last_recv_seq = -1;
+	waiting_for_pong_sync = 0;
 
 	send_heartbeat(loop);
 }
