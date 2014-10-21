@@ -209,29 +209,31 @@ struct check_engine nagmq_check_engine = {
 
 static void process_status(json_t * payload) {
 	char * host_name, *service_description = NULL, *output = NULL;
-	check_result * newcr = NULL, t;
+	check_result newcr;
 
-	init_check_result(&t);
-	t.output_file = NULL;
-	t.output_file_fp = NULL;
+	init_check_result(&newcr);
+	newcr.output_file = NULL;
+	newcr.output_file_fp = NULL;
+
 	if(get_values(payload,
 		"host_name", JSON_STRING, 1, &host_name,
 		"service_description", JSON_STRING, 0, &service_description,
 		"output", JSON_STRING, 1, &output,
-		"return_code", JSON_INTEGER, 1, &t.return_code,
-		"start_time", JSON_TIMEVAL, 0, &t.start_time,
-		"finish_time", JSON_TIMEVAL, 1, &t.finish_time,
-		"check_type", JSON_INTEGER, 1, &t.check_type,
-		"check_options", JSON_INTEGER, 0, &t.check_options,
-		"scheduled_check", JSON_INTEGER, 0, &t.scheduled_check,
-		"reschedule_check", JSON_INTEGER, 0, &t.reschedule_check,
-		"latency", JSON_REAL, 0, &t.latency,
-		"early_timeout", JSON_INTEGER, 0, &t.early_timeout,
-		"exited_ok", JSON_INTEGER, 0, &t.exited_ok,
+		"return_code", JSON_INTEGER, 1, &newcr.return_code,
+		"start_time", JSON_TIMEVAL, 0, &newcr.start_time,
+		"finish_time", JSON_TIMEVAL, 1, &newcr.finish_time,
+		"check_type", JSON_INTEGER, 1, &newcr.check_type,
+		"check_options", JSON_INTEGER, 0, &newcr.check_options,
+		"scheduled_check", JSON_INTEGER, 0, &newcr.scheduled_check,
+		"reschedule_check", JSON_INTEGER, 0, &newcr.reschedule_check,
+		"latency", JSON_REAL, 0, &newcr.latency,
+		"early_timeout", JSON_INTEGER, 0, &newcr.early_timeout,
+		"exited_ok", JSON_INTEGER, 0, &newcr.exited_ok,
 		NULL) != 0) {
 		logit(NSLOG_RUNTIME_WARNING, FALSE, "Invalid parameters in NagMQ check result");
 		return;
 	}
+
 	service * service_target = NULL;
 	if(service_description)
 		service_target = find_service(host_name, service_description);
@@ -242,29 +244,31 @@ static void process_status(json_t * payload) {
 		return;
 	}
 
-	newcr = malloc(sizeof(check_result));
-	memcpy(newcr, &t, sizeof(check_result));
-	newcr->host_name = strdup(host_name);
+	newcr.host_name = strdup(host_name);
 	if(service_target) {
-		newcr->service_description = strdup(service_description);
-		newcr->object_check_type = SERVICE_CHECK;
+		newcr.service_description = strdup(service_description);
+		newcr.object_check_type = SERVICE_CHECK;
 	}
-	newcr->output = strdup(output);
+	newcr.output = strdup(output);
 
 	const char * debug_service_name = service_target ? 
-		newcr->service_description : "(N/A)";
+		newcr.service_description : "(N/A)";
 	log_debug_info(DEBUGL_CHECKS, DEBUGV_BASIC,
 		"Received a check result via NagMQ for %s %s\n",
-		newcr->host_name, debug_service_name);
+		newcr.host_name, debug_service_name);
 
 #ifdef HAVE_NAGIOS4
-	newcr->engine = &nagmq_check_engine;
-	process_check_result(newcr);
+	newcr.engine = &nagmq_check_engine;
+	process_check_result(&newcr);
+	free_check_result(&newcr);
 #else
+	check_result *crcopy = NULL;
+	crcopy = calloc(1, sizeof(check_result));
+	memcpy(crcopy, &newcr, sizeof(check_result));
 #ifdef HAVE_ADD_CHECK_RESULT_ONE
-	add_check_result_to_list(newcr);
+	add_check_result_to_list(crcopy);
 #elif defined(HAVE_ADD_CHECK_RESULT_TWO)
-	add_check_result_to_list(&check_result_list, newcr);
+	add_check_result_to_list(&check_result_list, crcopy);
 #endif
 #endif
 }
