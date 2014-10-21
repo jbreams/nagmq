@@ -169,7 +169,7 @@ static struct payload * parse_host_check(nebstruct_host_check_data * state) {
 	obj->latency = state->latency;
 	char * processed_command = NULL;
 	int old_current_attempt = obj->current_attempt;
-	if(if(state->type == NEBTYPE_HOSTCHECK_ASYNC_PRECHECK &&
+	if(state->type == NEBTYPE_HOSTCHECK_ASYNC_PRECHECK &&
 		fixup_async_presync_hostcheck(obj, &processed_command) != 0)
 		return NULL;
 
