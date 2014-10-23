@@ -386,6 +386,12 @@ void setup_sockmonitor(struct ev_loop * loop, ev_io * ioev, void * sock) {
 	// before starting the libev loop.
 	sock_monitor_cb(loop, ioev, EV_READ);
 }
+
+void shutdown_sockmonitor(struct ev_loop * loop, ev_io * ioev) {
+	void * monsock = ioev->data;
+	ev_io_stop(loop, ioev);
+	zmq_close(monsock);
+}
 #endif
 
 void handle_end(struct ev_loop * loop, ev_signal * w, int revents) {
@@ -601,6 +607,9 @@ int main(int argc, char ** argv) {
 	logit(INFO, "Starting mqexec event loop");
 	ev_run(loop, 0);
 	logit(INFO, "mexec event loop terminated");
+
+	shutdown_sockmonitor(loop, &pullmonio);
+	shutdown_sockmonitor(loop, &pushmonio);
 
 	if(pullsock)
 		zmq_close(pullsock);

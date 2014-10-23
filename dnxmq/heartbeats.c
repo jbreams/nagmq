@@ -140,7 +140,9 @@ void heartbeat_timeout_cb(struct ev_loop * loop, ev_timer * t, int event) {
 	ev_io_start(loop, &pullio);
 
 #if ZMQ_VERSION_MAJOR >= 3
+	shutdown_sockmonitor(loop, &pullmonio);
 	setup_sockmonitor(loop, &pullmonio, pullsock);
+	shutdown_sockmonitor(loop, &pushmonio);
 	setup_sockmonitor(loop, &pushmonio, pushsock);
 #endif
 	last_recv_seq = -1;

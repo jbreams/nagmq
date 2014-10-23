@@ -55,6 +55,8 @@ void subscribe_heartbeat(void * sock);
 
 // Socket setup functions
 void parse_sock_directive(void * socket, json_t * arg, int bind);
+void shutdown_sockmonitor(struct ev_loop * loop, ev_io * ioev);
+void setup_sockmonitor(struct ev_loop * loop, ev_io * ioev, void * sock);
 
 // I/O Callbacks
 void child_io_cb(struct ev_loop * loop, ev_io * i, int event);
