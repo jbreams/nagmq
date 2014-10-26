@@ -103,7 +103,6 @@ void heartbeat_timeout_cb(struct ev_loop * loop, ev_timer * t, int event) {
 	if(last_recv_seq != -1 && waiting_for_pong_sync == 0) {
 		logit(DEBUG, "We recieved a pong message, but it wasn't right. Retrying. (%08x != %08x)",
 			last_recv_seq, last_sent_seq, last_recv_seq);
-		last_recv_seq = -1;
 		waiting_for_pong_sync = 1;
 		send_heartbeat(loop);
 		return;
@@ -140,9 +139,7 @@ void heartbeat_timeout_cb(struct ev_loop * loop, ev_timer * t, int event) {
 	ev_io_start(loop, &pullio);
 
 #if ZMQ_VERSION_MAJOR >= 3
-	shutdown_sockmonitor(loop, &pullmonio);
 	setup_sockmonitor(loop, &pullmonio, pullsock);
-	shutdown_sockmonitor(loop, &pushmonio);
 	setup_sockmonitor(loop, &pushmonio, pushsock);
 #endif
 	last_recv_seq = -1;

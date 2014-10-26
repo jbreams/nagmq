@@ -38,9 +38,6 @@ int reconnect_ivl = 1000, reconnect_ivl_max = 0;
 
 // For reconnecting sockets after error
 json_t * pullsockdef = NULL, *pushsockdef = NULL;
-int reset_sockets_on_error = 0;
-int send_retries = 3;
-
 int pull_connected = 0, push_connected = 0;
 
 void logit(int level, char * fmt, ...) {
@@ -115,26 +112,26 @@ void obj_for_ending(struct child_job * j, const char * output,
 	char * strout= json_dumps(jout, JSON_COMPACT);
 	json_decref(jout);
 	zmq_msg_init_data(&outmsg, strout, strlen(strout), free_cb, NULL);
-	do {
-		rc = zmq_msg_send(&outmsg, pushsock, 0);
-		if(rc == -1 && errno != EINTR) {
-			logit(ERR, "Error sending message: %s", zmq_strerror(errno));
-			if(reset_sockets_on_error) {
-				logit(DEBUG, "Resetting push socket after failure");
-				zmq_close(pushsock);
-				pushsock = zmq_socket(zmqctx, ZMQ_PUSH);
-				if(pushsock == NULL) {
-					logit(ERR, "Unable to create new PUSH socket. Cannot continue! Error: %s",
-						zmq_strerror(errno));
-					exit(1);
-				}
-				parse_sock_directive(pushsock, pushsockdef, 0);
-			}
-			else {
-				break;
-			}
+
+	// This loop will terminate based on whether the send was successful
+	// It's just here to make sure signals can't drop check results.
+	while(1) {
+		if((rc = zmq_msg_send(&outmsg, pushsock, 0) == -1)) {
+			// We get lots of signals because we're waiting on tons of children
+			// best to just try again.
+			if(errno == EINTR)
+				continue;
+
+			// We don't need to log anything for ETERM, because it's a normal
+			// event that means "just quit now"
+			if(errno != ETERM)
+				logit(ERR, "Error sending message: %s", zmq_strerror(errno));
+			break;
 		}
-	} while(rc != 0 && retry_count++ < send_retries);
+
+		// If there was no error, exit the loop!
+		break;
+	}
 	zmq_msg_close(&outmsg);
 }
 
@@ -148,6 +145,9 @@ void child_io_cb(struct ev_loop * loop, ev_io * i, int event) {
 		if(r > 0)
 			j->bufused += r;
 	} while(r > 0 && j->bufused < sizeof(j->buffer) - 1);
+
+	// If we've filled up the check result buffer, just stop reading from
+	// the child.
 	if(j->bufused == sizeof(j->buffer) - 1)
 		ev_io_stop(loop, i);
 }
@@ -163,8 +163,11 @@ void child_timeout_cb(struct ev_loop * loop, ev_timer * t, int event) {
 		ev_timer_stop(loop, t);
 	ev_io_stop(loop, &j->io);
 	close(j->io.fd);
+
+	// If the child is in our list of children, kill it.
+	// This will also remove the child from the list of children.
 	if(get_child(j->pid)) {
-		kill(j->pid, SIGKILL);
+		kill(j->pid, SIGTERM);
 	}
 
 	if(j->service >= 0) {
@@ -172,7 +175,7 @@ void child_timeout_cb(struct ev_loop * loop, ev_timer * t, int event) {
 		logit(DEBUG, "Child %d timed out. Sending timeout message upstream",
 			j->pid);
 	} else
-		logit(DEBUG, "Non-check child %d timed out",
+		logit(DEBUG, "Non-check child %d timed out. Output so far: %s",
 			j->pid, j->buffer);
 
 	json_decref(j->input);
@@ -187,13 +190,17 @@ void child_end_cb(struct ev_loop * loop, ev_child * c, int event) {
 		return;
 
 	ev_timer_stop(loop, &j->timer);
-	if(ev_is_active(&j->io)) {
+	// If the I/O watcher is still active, call the callback one more
+	// time to make sure the buffer is flushed.
+	if(ev_is_active(&j->io))
 		child_io_cb(loop, &j->io, EV_READ);
-		close(j->io.fd);
-	}
+
+	close(j->io.fd);
 	ev_io_stop(loop, &j->io);
 
-	if(!j->bufused)
+	// If there's nothing in the I/O buffer, write an empty string so
+	// there's something to pack into the JSON response.
+	if(j->bufused == 0)
 		strcpy(j->buffer, "");
 
 	if(j->service >= 0) {
@@ -209,8 +216,6 @@ void child_end_cb(struct ev_loop * loop, ev_child * c, int event) {
 		ev_break(loop, EVBREAK_ALL);
 }
 
-
-
 void recv_job_cb(struct ev_loop * loop, ev_io * i, int event) {
 	while(1) {
 		zmq_msg_t inmsg;
@@ -223,20 +228,26 @@ void recv_job_cb(struct ev_loop * loop, ev_io * i, int event) {
 
 		zmq_msg_init(&inmsg);
 		if(zmq_msg_recv(&inmsg, i->data, ZMQ_DONTWAIT) == -1) {
+			// There are no more messages to process - break the loop
 			if(errno == EAGAIN)
 				break;
-			if(errno == EINTR) {
-				if(pullsock)
-					continue;
-				else
-					break;
-			}
+			// There MAY be more messages to process - continue the loop
+			else if(errno == EINTR)
+				continue;
+
+			// There was an unhandled error - break the loop
+			// If this is recoverable, use heartbeats to recover the socket.
+			// Above all though, break the loop there isn't a chance of
+			// a busy loop.
 			logit(ERR, "Error receiving message from broker %s",
 				zmq_strerror(errno));
-			continue;
+			break;
 		}
 
 		zmq_getsockopt(i->data, ZMQ_RCVMORE, &rcvmore, &rms);
+		// We only want the last frame in the multi-part message
+		// A NagMQ invariant is that the last frame of multi-part messages
+		// will always be JSON.
 		if(rcvmore) {
 			zmq_msg_close(&inmsg);
 			continue;
@@ -299,7 +310,7 @@ void sock_monitor_cb(struct ev_loop * loop, ev_io * i, int event) {
 			return;
 		}
 
-		// These are super chatting log messages, skip em.
+		// These are super chatty log messages, skip em.
 		switch(event) {
 			case ZMQ_EVENT_CLOSED:
 			case ZMQ_EVENT_CONNECT_DELAYED:
@@ -369,6 +380,12 @@ void setup_sockmonitor(struct ev_loop * loop, ev_io * ioev, void * sock) {
 	char channel[64];
 	snprintf(channel, 64, "inproc://monitor_%p", sock);
 
+	if(ev_is_active(ioev)) {
+		ev_io_stop(loop, ioev);
+		void * monsock = ioev->data;
+		zmq_close(monsock);
+	}
+
 	zmq_socket_monitor(sock, channel, ZMQ_EVENT_ALL);
 	int fd = 0;
 	size_t fdsize = sizeof(fd);
@@ -385,12 +402,6 @@ void setup_sockmonitor(struct ev_loop * loop, ev_io * ioev, void * sock) {
 	// Because the events are edge triggered, we have to empty the queue
 	// before starting the libev loop.
 	sock_monitor_cb(loop, ioev, EV_READ);
-}
-
-void shutdown_sockmonitor(struct ev_loop * loop, ev_io * ioev) {
-	void * monsock = ioev->data;
-	ev_io_stop(loop, ioev);
-	zmq_close(monsock);
 }
 #endif
 
@@ -467,7 +478,7 @@ int main(int argc, char ** argv) {
 
 #if ZMQ_VERSION_MAJOR < 4
 	if(json_unpack_ex(config, &jsonerr, 0,
-		"{s:{s?:o s:o s?i s?b s?b s?:o s?o s?s s?s s?s s?i s?i s?b s?i s?i}}",
+		"{s:{s?:o s:o s?i s?b s?b s?:o s?o s?s s?s s?s s?i s?i s?i}}",
 		configobj, "jobs", &jobs, "results", &results,
 		"iothreads", &iothreads, "verbose", &verbose,
 		"syslog", &usesyslog, "filter", &filter,
@@ -475,15 +486,13 @@ int main(int argc, char ** argv) {
 		"unprivpath", &tmpunprivpath, "unprivuser", &tmpunprivuser,
 		"reconnect_ivl", &reconnect_ivl,
 		"reconnect_ivl_max", &reconnect_ivl_max,
-		"reset_sockets_on_error", &reset_sockets_on_error,
-		"send_retries", &send_retries,
 		"heartbeat", &config_heartbeat_interval) != 0) {
 		logit(ERR, "Error getting config %s", jsonerr.text);
 		exit(-1);
 	}
 #else
 	if(json_unpack_ex(config, &jsonerr, 0,
-		"{s:{s?:o s:o s?i s?b s?b s?:o s?o s?s s?s s?s s?{s:s s:s s:s} s?i s?i s?b s?i s?i}}",
+		"{s:{s?:o s:o s?i s?b s?b s?:o s?o s?s s?s s?s s?{s:s s:s s:s} s?i s?i s?i}}",
 		configobj, "jobs", &jobs, "results", &results,
 		"iothreads", &iothreads, "verbose", &verbose,
 		"syslog", &usesyslog, "filter", &filter,
@@ -492,8 +501,6 @@ int main(int argc, char ** argv) {
 		"curve", "publickey", &curve_public, "privatekey", &curve_private,
 		"serverkey", &curve_server, "reconnect_ivl", &reconnect_ivl,
 		"reconnect_ivl_max", &reconnect_ivl_max,
-		"reset_sockets_on_error", &reset_sockets_on_error,
-		"send_retries", &send_retries,
 		"heartbeat", &config_heartbeat_interval) != 0) {
 		logit(ERR, "Error getting config: %s", jsonerr.text);
 		exit(-1);
@@ -607,9 +614,6 @@ int main(int argc, char ** argv) {
 	logit(INFO, "Starting mqexec event loop");
 	ev_run(loop, 0);
 	logit(INFO, "mexec event loop terminated");
-
-	shutdown_sockmonitor(loop, &pullmonio);
-	shutdown_sockmonitor(loop, &pushmonio);
 
 	if(pullsock)
 		zmq_close(pullsock);
