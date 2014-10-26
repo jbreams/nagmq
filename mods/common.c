@@ -393,7 +393,7 @@ int nebmodule_init(int flags, char * localargs, nebmodule * lhandle) {
 
 	neb_set_module_info(handle, NEBMODULE_MODINFO_TITLE, "NagMQ");
 	neb_set_module_info(handle, NEBMODULE_MODINFO_AUTHOR, "Jonathan Reams");
-	neb_set_module_info(handle, NEBMODULE_MODINFO_VERSION, "1.4");
+	neb_set_module_info(handle, NEBMODULE_MODINFO_VERSION, "1.5.1");
 	neb_set_module_info(handle, NEBMODULE_MODINFO_LICENSE, "Apache v2");
 	neb_set_module_info(handle, NEBMODULE_MODINFO_DESC,
 		"Provides interface into Nagios via ZeroMQ");
