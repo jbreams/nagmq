@@ -21,6 +21,7 @@ void * getsock(char * forwhat, int type, json_t * def) {
 	int sndhwm = 0, rcvhwm = 0, backlog = 0, maxmsgsize = 0;
 	json_t * accept_filters = NULL;
 #endif
+	int linger = -1;
 
 	if(get_values(def,
 		"connect", JSON_STRING, 0, &connect,
@@ -36,6 +37,7 @@ void * getsock(char * forwhat, int type, json_t * def) {
 		"maxmsgsize", JSON_INTEGER, 0, &maxmsgsize,
 		"tcpacceptfilters", JSON_ARRAY, 0, &accept_filters,	
 #endif
+		"linger", JSON_INTEGER, 0, &linger,
 		NULL) != 0) {
 		logit(NSLOG_CONFIG_ERROR, TRUE,
 			"Invalid parameters for creating %s NagMQ socket", forwhat);
@@ -97,6 +99,8 @@ void * getsock(char * forwhat, int type, json_t * def) {
 		zmq_close(sock);
 		return NULL;
 	}
+
+	zmq_setsockopt(sock, ZMQ_LINGER, &linger, sizeof(linger));
 
 	if(accept_filters) {
 		size_t i, len = json_array_size(accept_filters);
