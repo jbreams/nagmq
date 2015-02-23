@@ -314,6 +314,7 @@ void sock_monitor_cb(struct ev_loop * loop, ev_io * i, int event) {
 		switch(event) {
 			case ZMQ_EVENT_CLOSED:
 			case ZMQ_EVENT_CONNECT_DELAYED:
+			case ZMQ_EVENT_CONNECT_RETRIED:
 				shouldlog = 0;
 				break;
 		}
@@ -336,9 +337,9 @@ void sock_monitor_cb(struct ev_loop * loop, ev_io * i, int event) {
 			// case ZMQ_EVENT_CONNECT_DELAYED:
 			// 	event_string = "Socket event on %.*s: synchronous connect failed, it's being polled";
 			// 	break;
-			case ZMQ_EVENT_CONNECT_RETRIED:
-				event_string = "Socket event on %.*s: asynchronous connect / reconnection attempt (ivl: %d)";
-				break;
+			// case ZMQ_EVENT_CONNECT_RETRIED:
+			// 	event_string = "Socket event on %.*s: asynchronous connect / reconnection attempt (ivl: %d)";
+			// 	break;
 			case ZMQ_EVENT_LISTENING:
 				event_string = "Socket event on %.*s: socket bound to an address, ready to accept (fd: %d)";
 				break;
