@@ -332,6 +332,7 @@ void sock_monitor_cb(struct ev_loop * loop, ev_io * i, int event) {
 					pull_connected = 1;
 				else if(i == &pushmonio)
 					push_connected = 1;
+				send_heartbeat(loop);
 				break;
 			// This is super chatty. Commenting it out to reduce log chattyness
 			// case ZMQ_EVENT_CONNECT_DELAYED:
@@ -608,9 +609,6 @@ int main(int argc, char ** argv) {
 	setup_sockmonitor(loop, &pullmonio, pullsock);
 	setup_sockmonitor(loop, &pushmonio, pushsock);
 #endif
-
-	if(config_heartbeat_interval > 0)
-		send_heartbeat(loop);
 
 	logit(INFO, "Starting mqexec event loop");
 	ev_run(loop, 0);

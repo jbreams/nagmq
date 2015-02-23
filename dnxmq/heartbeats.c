@@ -23,6 +23,15 @@ extern ev_io pullio, pullmonio, pushmonio;
 extern json_t * pushsockdef, *pullsockdef;
 extern int pullsock_type;
 
+void reset_heartbeat_state() {
+	// We setup the last received sequence to be the negative of the configured
+	// interval so that it has that long to get an initial sync done before
+	// resetting the sockets.
+	last_recv_seq = 0 - heartbeat_interval;
+	heartbeat_curr_interval = 1;
+	waiting_for_pong_sync = 0;
+}
+
 void init_heartbeat(int32_t configed_interval) {
 	if(configed_interval < 1)
 		return;
@@ -36,12 +45,7 @@ void init_heartbeat(int32_t configed_interval) {
 	logit(DEBUG, "Setting heartbeat reply-to name to \"%s\"", heartbeat_reply_string);
 	last_sent_seq = rand();
 	heartbeat_interval = configed_interval;
-	heartbeat_curr_interval = 1;
-
-	// We setup the last received sequence to be the negative of the configured
-	// interval so that it has that long to get an initial sync done before
-	// resetting the sockets.
-	last_recv_seq = 0 - heartbeat_interval;
+	reset_heartbeat_state();
 }
 
 void subscribe_heartbeat(void * sock) {
@@ -90,10 +94,18 @@ void heartbeat_timeout_cb(struct ev_loop * loop, ev_timer * t, int event) {
 	} else
 		ev_timer_stop(loop, t);
 
+	// If one of the sockets isn't connected yet, reset the timer and loop around.
+	if(pull_connected == 0 || push_connected == 0) {
+		last_heartbeat = ev_now(loop);
+
+		if(ev_is_active(&heartbeat_timer))
+			ev_timer_stop(loop, &heartbeat_timer);
+		ev_timer_init(&heartbeat_timer, heartbeat_timeout_cb, heartbeat_curr_interval, 0);
+		ev_timer_start(loop, &heartbeat_timer);
+	}
+
 	if(last_recv_seq < 0) {
-		if(pull_connected)
-			heartbeat_curr_interval = 1;
-		logit(DEBUG, "We haven't received anything yet, incrementing negative sequence");
+		logit(DEBUG, "We haven't received anything heartbeats yet, decreasing timer");
 		// This starts out as negative so that there's a chance to sync up.
 		last_recv_seq++;
 		send_heartbeat(loop);
@@ -149,9 +161,7 @@ void heartbeat_timeout_cb(struct ev_loop * loop, ev_timer * t, int event) {
 	setup_sockmonitor(loop, &pullmonio, pullsock);
 	setup_sockmonitor(loop, &pushmonio, pushsock);
 #endif
-	last_recv_seq = 0 - heartbeat_interval;
-	waiting_for_pong_sync = 0;
-
+	reset_heartbeat_state();
 	send_heartbeat(loop);
 }
 
@@ -160,14 +170,8 @@ void send_heartbeat(struct ev_loop * loop) {
 	zmq_msg_t outputmsg;
 	int rc;
 
-	if(!push_connected) {
-		logit(DEBUG, "Results socket isn't connected. Not sending heartbeat.");
-		last_heartbeat = ev_now(loop);
-
-		if(ev_is_active(&heartbeat_timer))
-			ev_timer_stop(loop, &heartbeat_timer);
-		ev_timer_init(&heartbeat_timer, heartbeat_timeout_cb, heartbeat_curr_interval, 0);
-		ev_timer_start(loop, &heartbeat_timer);
+	if(!push_connected || heartbeat_interval < 1) {
+		// Don't do anything if we know the sockets aren't disconnected.
 		return;
 	}
 
