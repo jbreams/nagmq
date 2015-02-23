@@ -37,6 +37,11 @@ void init_heartbeat(int32_t configed_interval) {
 	last_sent_seq = rand();
 	heartbeat_interval = configed_interval;
 	heartbeat_curr_interval = 1;
+
+	// We setup the last received sequence to be the negative of the configured
+	// interval so that it has that long to get an initial sync done before
+	// resetting the sockets.
+	last_recv_seq = 0 - heartbeat_interval;
 }
 
 void subscribe_heartbeat(void * sock) {
@@ -88,7 +93,9 @@ void heartbeat_timeout_cb(struct ev_loop * loop, ev_timer * t, int event) {
 	if(last_recv_seq < 0) {
 		if(pull_connected)
 			heartbeat_curr_interval = 1;
-		logit(DEBUG, "We haven't received anything yet");
+		logit(DEBUG, "We haven't received anything yet, incrementing negative sequence");
+		// This starts out as negative so that there's a chance to sync up.
+		last_recv_seq++;
 		send_heartbeat(loop);
 		return;
 	}
@@ -100,7 +107,7 @@ void heartbeat_timeout_cb(struct ev_loop * loop, ev_timer * t, int event) {
 		return;
 	}
 
-	if(last_recv_seq != -1 && waiting_for_pong_sync == 0) {
+	if(last_recv_seq > 0 && waiting_for_pong_sync == 0) {
 		logit(DEBUG, "We recieved a pong message, but it wasn't right. Retrying. (%08x != %08x)",
 			last_recv_seq, last_sent_seq, last_recv_seq);
 		waiting_for_pong_sync = 1;
@@ -142,7 +149,7 @@ void heartbeat_timeout_cb(struct ev_loop * loop, ev_timer * t, int event) {
 	setup_sockmonitor(loop, &pullmonio, pullsock);
 	setup_sockmonitor(loop, &pushmonio, pushsock);
 #endif
-	last_recv_seq = -1;
+	last_recv_seq = 0 - heartbeat_interval;
 	waiting_for_pong_sync = 0;
 
 	send_heartbeat(loop);
