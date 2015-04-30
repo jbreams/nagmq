@@ -159,7 +159,7 @@ AC_ARG_WITH([nagios3-headers],
 	[AC_HELP_STRING([--with-nagios3-headers=DIR],
 		[Path to header files for Nagios])],
 	[
-		WITHEADERS="-I$withval"
+		WITHHEADERS="-I$withval"
 		AC_DEFINE([HAVE_NAGIOS3], [], [Compiling against Nagios 3])
 	]
 )
