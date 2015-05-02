@@ -1,5 +1,11 @@
 #include "config.h"
 #include <zmq.h>
+// Nagios 3 doesn't include-what-it-uses, so we need to include
+// these headers so nagios.h has complete types.
+#ifdef HAVE_NAGIOS3
+#include <sys/time.h>
+#include <pthread.h>
+#endif
 #ifdef HAVE_ICINGA
 #include "icinga.h"
 #else

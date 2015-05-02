@@ -1095,6 +1095,7 @@ static void do_list_servicegroups(struct payload * po, json_t * req) {
 }
 
 static void do_program_status(struct payload * po, json_t * req) {
+#ifdef HAVE_NAGIOS4
 	int get_programstatus = 0;
 	get_values(req,
 		"program_status", JSON_TRUE, 0, &get_programstatus,
@@ -1123,6 +1124,7 @@ static void do_program_status(struct payload * po, json_t * req) {
 	payload_new_string(po, "global_host_event_handler", global_host_event_handler);
 	payload_new_string(po, "global_service_event_handler", global_service_event_handler);
 	payload_end_object(po);
+#endif
 }
 
 static void send_msg(struct payload * po) {

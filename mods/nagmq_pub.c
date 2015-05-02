@@ -111,6 +111,36 @@ static struct payload * parse_event_handler(nebstruct_event_handler_data * state
 extern check_result check_result_info;
 #endif
 
+#ifdef HAVE_NAGIOS3
+// Taken from nagios 4 source code...
+/* adjusts current host check attempt before a new check is performed */
+int adjust_host_check_attempt(host *hst, int is_active) {
+
+	log_debug_info(DEBUGL_FUNCTIONS, 0, "adjust_host_check_attempt()\n");
+
+	if(hst == NULL)
+		return ERROR;
+
+	log_debug_info(DEBUGL_CHECKS, 2, "Adjusting check attempt number for host '%s': current attempt=%d/%d, state=%d, state type=%d\n", hst->name, hst->current_attempt, hst->max_attempts, hst->current_state, hst->state_type);
+
+	/* if host is in a hard state, reset current attempt number */
+	if(hst->state_type == HARD_STATE)
+		hst->current_attempt = 1;
+
+	/* if host is in a soft UP state, reset current attempt number (active checks only) */
+	else if(is_active == TRUE && hst->state_type == SOFT_STATE && hst->current_state == HOST_UP)
+		hst->current_attempt = 1;
+
+	/* increment current attempt number */
+	else if(hst->current_attempt < hst->max_attempts)
+		hst->current_attempt++;
+
+	log_debug_info(DEBUGL_CHECKS, 2, "New check attempt number = %d\n", hst->current_attempt);
+
+	return OK;
+	}
+#endif
+
 // This function does what run_sync_host_check in checks.c of Nagios would
 // do between HOSTCHECK_ASYNC_PRE_CHECK and HOSTCHECK_INITIATE.
 // It's here to fix things up and produce the fully parsed command line.
@@ -133,7 +163,11 @@ int fixup_async_presync_hostcheck(host * hst, char ** processed_command) {
 	grab_host_macros_r(&mac, hst);
 
 	/* get the raw command line */
+#ifdef HAVE_NAGIOS4
 	get_raw_command_line_r(&mac, hst->check_command_ptr, hst->check_command, &raw_command, macro_options);
+#else
+	get_raw_command_line_r(&mac, hst->check_command_ptr, hst->host_check_command, &raw_command, macro_options);
+#endif
 	if(raw_command == NULL) {
 		clear_volatile_macros_r(&mac);
 		log_debug_info(DEBUGL_CHECKS, 0, "Raw check command for host '%s' was NULL - aborting.\n", hst->name);
@@ -159,7 +193,11 @@ static struct payload * parse_host_check(nebstruct_host_check_data * state) {
 	host * obj = (host*)state->object_ptr;
 
 	// Find the command args in the raw command line
+#ifdef HAVE_NAGIOS4
 	char * command_args = strchr(obj->check_command, '!');
+#else
+	char * command_args = strchr(obj->host_check_command, '!');
+#endif
 	// If we found the ! we should advance one character to find the start
 	// of the actual arguments list
 	if(command_args != NULL)
