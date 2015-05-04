@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <pthread.h>
 #include <signal.h>
+#include <ctype.h>
 #ifdef HAVE_ICINGA
 #include "icinga.h"
 #else
@@ -175,7 +176,7 @@ void * zap_handler(void* zapsock) {
 		if(rc = now - last_refresh > keyfile_refresh_interval) {
 			if((rc = read_keyfile(curve_knownhosts, &bag)) != 0)
 				logit(NSLOG_RUNTIME_ERROR, TRUE,
-					"Error reading known hosts file for NagMQ curve authentication",
+					"Error reading known hosts file for NagMQ curve authentication: %s",
 					strerror(rc));
 			last_refresh = now;
 			log_debug_info(DEBUGL_IPC, DEBUGV_BASIC,

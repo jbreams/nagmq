@@ -6,6 +6,8 @@
 #include <time.h>
 #include <string.h>
 #include <ctype.h>
+#include <unistd.h>
+#include <pthread.h>
 #define NSCORE 1
 #include "nebstructs.h"
 #include "nebcallbacks.h"

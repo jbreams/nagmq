@@ -6,6 +6,7 @@ void * getsock(char * what, int type, json_t * def);
 void process_payload(struct payload * payload);
 void * zap_handler(void* zapsock);
 void setup_sockmonitor(void * sock);
+int handle_pubstartup(json_t * def);
 
 #ifndef ZMQ_DONTWAIT
 #   define ZMQ_DONTWAIT     ZMQ_NOBLOCK
