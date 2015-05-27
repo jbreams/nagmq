@@ -36,10 +36,6 @@ ev_io pullmonio, pushmonio;
 #endif
 int reconnect_ivl = 1000, reconnect_ivl_max = 0;
 
-// For reconnecting sockets after error
-json_t * pullsockdef = NULL, *pushsockdef = NULL;
-int pull_connected = 0, push_connected = 0;
-
 void logit(int level, char * fmt, ...) {
 	int err;
 	va_list ap;
@@ -69,7 +65,7 @@ void logit(int level, char * fmt, ...) {
 		datebuf[24] = '\0';
 
 		fprintf(stderr, "%s %s: ", datebuf, levelstr);
-		vfprintf(stderr, fmt, ap); 
+		vfprintf(stderr, fmt, ap);
 		fprintf(stderr, "\n");
 	}
 	va_end(ap);
@@ -207,7 +203,7 @@ void child_end_cb(struct ev_loop * loop, ev_child * c, int event) {
 		obj_for_ending(j, j->buffer, WEXITSTATUS(c->rstatus), 0, 1);
 		logit(DEBUG, "Child %d ended with %d. Sending \"%s\" upstream",
 			c->rpid, c->rstatus, j->buffer);
-	} else 
+	} else
 		logit(DEBUG, "Non-check child %d ended with %d. It said \"%s\"",
 			c->rpid, c->rstatus, j->buffer);
 	json_decref(j->input);
@@ -328,11 +324,6 @@ void sock_monitor_cb(struct ev_loop * loop, ev_io * i, int event) {
 		switch(event) {
 			case ZMQ_EVENT_CONNECTED:
 				event_string = "Socket event on %.*s: connection established (fd: %d)";
-				if(i == &pullmonio)
-					pull_connected = 1;
-				else if(i == &pushmonio)
-					push_connected = 1;
-				send_heartbeat(loop);
 				break;
 			// This is super chatty. Commenting it out to reduce log chattyness
 			// case ZMQ_EVENT_CONNECT_DELAYED:
@@ -362,10 +353,6 @@ void sock_monitor_cb(struct ev_loop * loop, ev_io * i, int event) {
 				break;
 			case ZMQ_EVENT_DISCONNECTED:
 				event_string = "Socket event on %.*s: broken session (fd: %d)";
-				if(i == &pullmonio)
-					pull_connected = 0;
-				else if(i == &pushmonio)
-					push_connected = 0;
 				break;
 			default:
 				event_string = "Unknown socket event on %.*s: %d";
@@ -458,7 +445,7 @@ int main(int argc, char ** argv) {
 	}
 	if(daemonize)
 		usesyslog = 1;
-	
+
 	argc -= optind;
 	argv += optind;
 	if(argc < 1) {
@@ -520,8 +507,6 @@ int main(int argc, char ** argv) {
 		}
 	}
 
-	init_heartbeat(config_heartbeat_interval);
-
 	if(tmprootpath) {
 		rootpath = strdup(tmprootpath);
 		rootpathlen = strlen(rootpath);
@@ -562,7 +547,6 @@ int main(int argc, char ** argv) {
 		exit(-1);
 	}
 	parse_sock_directive(pushsock, results, 0);
-	pushsockdef = results;
 	logit(DEBUG, "Setup worker push socket");
 
 	if(jobs) {
@@ -572,7 +556,6 @@ int main(int argc, char ** argv) {
 			exit(-1);
 		}
 		parse_sock_directive(pullsock, jobs, 0);
-		pullsockdef = jobs;
 		logit(DEBUG, "Setup worker pull sock");
 	} else if(publisher) {
 		pullsock = zmq_socket(zmqctx, ZMQ_SUB);
@@ -581,8 +564,6 @@ int main(int argc, char ** argv) {
 			exit(-1);
 		}
 		parse_sock_directive(pullsock, publisher, 0);
-		pullsockdef = publisher;
-		pullsock_type = ZMQ_SUB;
 		logit(DEBUG, "Setup worker pull sock");
 	} else {
 		logit(ERR, "Must supply either a jobs or publisher socket for worker");

@@ -111,8 +111,6 @@ void parse_sock_directive(void * socket, json_t * arg, int bind) {
 					logit(DEBUG, "Subscribing to %s", opt);
 				}
 			}
-
-			subscribe_heartbeat(socket);
 		}
 	} else if(json_is_array(arg)) {
 		for(i = 0; i < json_array_size(arg); i++) {

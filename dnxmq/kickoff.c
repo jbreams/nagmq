@@ -85,12 +85,6 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 		return;
 	}
 
-	if(strcmp(type, "pong") == 0) {
-		process_heartbeat(input);
-		json_decref(input);
-		return;
-	}
-
 	if(json_unpack(input, "{ s:s s?:i s?:s s?:s s:{ s:i s:i } s?:f}",
 		"command_line", &command_line,
 		"timeout", &timeout, "host_name", &hostname,
@@ -143,7 +137,7 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 		obj_for_ending(j, "Error creating pipe", 3, 0, 0);
 		free(j);
 		json_decref(input);
-		return;		
+		return;
 	}
 
 	ev_io_init(&j->io, child_io_cb, fds[0], EV_READ);
@@ -231,7 +225,7 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg) {
 		ev_timer_start(loop, &j->timer);
 		j->timeout = timeout;
 	}
-	
+
 	logit(DEBUG, "Kicked off %d for %s %s", pid, hostname, svcdesc);
 	runningjobs++;
 }
