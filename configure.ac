@@ -1,5 +1,5 @@
 AC_PREREQ([2.60])
-AC_INIT([nagmq], [1.5.1], [nagmq@googlegroups.com])
+AC_INIT([nagmq], [1.6.0], [nagmq@googlegroups.com])
 AC_CONFIG_AUX_DIR([.])
 AC_CONFIG_SRCDIR([mods/nagmq_pub.c])
 AC_CONFIG_HEADERS([mods/config.h dnxmq/config.h])

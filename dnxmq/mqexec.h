@@ -47,12 +47,6 @@ void do_kickoff(struct ev_loop * loop, zmq_msg_t * inmsg);
 void add_child(struct child_job * job);
 struct child_job * get_child(pid_t pid);
 
-// Heartbeat functions
-void send_heartbeat(struct ev_loop * loop);
-void init_heartbeat(int32_t configed_interval);
-void process_heartbeat(json_t * inputmsg);
-void subscribe_heartbeat(void * sock);
-
 // Socket setup functions
 void parse_sock_directive(void * socket, json_t * arg, int bind);
 void setup_sockmonitor(struct ev_loop * loop, ev_io * ioev, void * sock);

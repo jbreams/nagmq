@@ -9,6 +9,7 @@
 
 extern char * curve_private, *curve_public, *curve_server;
 extern int reconnect_ivl, reconnect_ivl_max;
+extern int config_heartbeat_interval, config_heartbeat_timeout;
 
 void parse_sock_directive(void * socket, json_t * arg, int bind) {
 	int i, rc;
@@ -29,6 +30,19 @@ void parse_sock_directive(void * socket, json_t * arg, int bind) {
 			&reconnect_ivl, sizeof(reconnect_ivl));
 		zmq_setsockopt(socket, ZMQ_RECONNECT_IVL_MAX,
 			&reconnect_ivl_max, sizeof(reconnect_ivl_max));
+
+        if(config_heartbeat_interval > 0) {
+#ifdef ZMQ_HEARTBEAT_TIMEOUT
+            zmq_setsockopt(socket, ZMQ_HEARTBEAT_IVL,
+                &config_heartbeat_interval, sizeof(config_heartbeat_interval));
+            if(config_heartbeat_timeout < 0)
+                config_heartbeat_timeout = config_heartbeat_interval;
+            zmq_setsockopt(socket, ZMQ_HEARTBEAT_TIMEOUT,
+                &config_heartbeat_timeout, sizeof(config_heartbeat_timeout));
+#else
+            logit(ERR, "Heartbeat was configured, but is not available in this build of mqexec");
+#endif
+        }
 
 		if(bind)
 			rc = zmq_bind(socket, json_string_value(arg));
@@ -71,6 +85,19 @@ void parse_sock_directive(void * socket, json_t * arg, int bind) {
 			&sndtimeo, sizeof(sndtimeo));
 		zmq_setsockopt(socket, ZMQ_RCVTIMEO,
 			&rcvtimeo, sizeof(rcvtimeo));
+
+        if(config_heartbeat_interval > 0) {
+#ifdef ZMQ_HEARTBEAT_TIMEOUT
+            zmq_setsockopt(socket, ZMQ_HEARTBEAT_IVL,
+                &config_heartbeat_interval, sizeof(config_heartbeat_interval));
+            if(config_heartbeat_timeout < 0)
+                config_heartbeat_timeout = config_heartbeat_interval;
+            zmq_setsockopt(socket, ZMQ_HEARTBEAT_TIMEOUT,
+                &config_heartbeat_timeout, sizeof(config_heartbeat_timeout));
+#else
+            logit(ERR, "Heartbeat was configured, but is not available in this build of mqexec");
+#endif
+        }
 
 		if(bind)
 			rc = zmq_bind(socket, addr);

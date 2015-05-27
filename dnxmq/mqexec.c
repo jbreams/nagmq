@@ -35,6 +35,8 @@ char * curve_private = NULL, *curve_public = NULL, *curve_server = NULL;
 ev_io pullmonio, pushmonio;
 #endif
 int reconnect_ivl = 1000, reconnect_ivl_max = 0;
+int config_heartbeat_interval = -1;
+int config_heartbeat_timeout = -1;
 
 void logit(int level, char * fmt, ...) {
 	int err;
@@ -417,7 +419,6 @@ int main(int argc, char ** argv) {
 	char ch, *configobj = "executor", *tmprootpath = NULL,
 		*tmpunprivpath = NULL, *tmpunprivuser = NULL;
 	json_error_t jsonerr;
-	int32_t config_heartbeat_interval;
 
 	while((ch = getopt(argc, argv, "vsdhc:")) != -1) {
 		switch(ch) {
@@ -467,7 +468,7 @@ int main(int argc, char ** argv) {
 
 #if ZMQ_VERSION_MAJOR < 4
 	if(json_unpack_ex(config, &jsonerr, 0,
-		"{s:{s?:o s:o s?i s?b s?b s?:o s?o s?s s?s s?s s?i s?i s?i}}",
+		"{s:{s?:o s:o s?i s?b s?b s?:o s?o s?s s?s s?s s?i s?i s?i s?i}}",
 		configobj, "jobs", &jobs, "results", &results,
 		"iothreads", &iothreads, "verbose", &verbose,
 		"syslog", &usesyslog, "filter", &filter,
@@ -481,7 +482,7 @@ int main(int argc, char ** argv) {
 	}
 #else
 	if(json_unpack_ex(config, &jsonerr, 0,
-		"{s:{s?:o s:o s?i s?b s?b s?:o s?o s?s s?s s?s s?{s:s s:s s:s} s?i s?i s?i}}",
+		"{s:{s?:o s:o s?i s?b s?b s?:o s?o s?s s?s s?s s?{s:s s:s s:s} s?i s?i s?i s?i}}",
 		configobj, "jobs", &jobs, "results", &results,
 		"iothreads", &iothreads, "verbose", &verbose,
 		"syslog", &usesyslog, "filter", &filter,
@@ -490,7 +491,8 @@ int main(int argc, char ** argv) {
 		"curve", "publickey", &curve_public, "privatekey", &curve_private,
 		"serverkey", &curve_server, "reconnect_ivl", &reconnect_ivl,
 		"reconnect_ivl_max", &reconnect_ivl_max,
-		"heartbeat", &config_heartbeat_interval) != 0) {
+		"heartbeat", &config_heartbeat_interval,
+        "heartbeat_timeout", &config_heartbeat_timeout) != 0) {
 		logit(ERR, "Error getting config: %s", jsonerr.text);
 		exit(-1);
 	}
