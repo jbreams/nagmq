@@ -45,6 +45,9 @@ int nebmodule_deinit(int flags, int reason) {
 	neb_deregister_module_callbacks(nagmq_handle);
 	if(config)
 		json_decref(config);
+#ifdef HAVE_SHUTDOWN_COMMAND_FILE_WORKER
+    shutdown_command_file_worker();
+#endif
 	return 0;
 }
 
