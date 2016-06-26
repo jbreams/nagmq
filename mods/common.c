@@ -34,7 +34,7 @@ extern int daemon_mode;
 extern int sigrestart;
 json_t * config;
 char * curve_publickey = NULL, *curve_privatekey = NULL,
-	*curve_knownhosts = NULL;
+	*curve_knownhosts = NULL;	
 int keyfile_refresh_interval = 60;
 
 // This is defined in nagios's objects.c, it should match the current
@@ -56,89 +56,7 @@ extern void * pubext;
 extern int pullmonfd, reqmonfd, pubmonfd;
 extern void * pullmon, *reqmon, *pubmon;
 
-#ifndef HAVE_NAGIOS4
-int handle_timedevent(int which, void * obj) {
-	nebstruct_timed_event_data * data = obj;
-	struct timespec * delay = NULL;
-	struct timeval start;
-	int nevents;
-	long timeout = 0, diff;
-
-	if(which != NEBCALLBACK_TIMED_EVENT_DATA)
-		return ERROR;
-	if(data->type != NEBTYPE_TIMEDEVENT_SLEEP)
-		return 0;
-
-	zmq_pollitem_t pollables[2];
-	memset(pollables, 0, sizeof(pollables));
-	if(pullsock) {
-		pollables[0].socket = pullsock;
-		pollables[0].events = ZMQ_POLLIN;
-	}
-
-	if(reqsock) {
-		pollables[1].socket = reqsock;
-		pollables[1].events = ZMQ_POLLIN;
-	}
-
-	delay = (struct timespec*)data->event_data;
-	timeout = (delay->tv_sec * 1000 * ZMQ_POLL_MSEC) +
-		((delay->tv_nsec / 1000000) * ZMQ_POLL_MSEC);
-	gettimeofday(&start, NULL);
-
-	if(zmq_poll(pollables, 2, timeout) < 1) {
-		delay->tv_sec = 0;
-		delay->tv_nsec = 0;
-		return 0;
-	}
-
-	do {
-		struct timeval end;
-		int j;
-		nevents = 0;
-		for(j = 0; j < 2; j++) {
-			zmq_msg_t input;
-			zmq_msg_init(&input);
-			if(zmq_msg_recv(&input, pollables[j].socket, ZMQ_DONTWAIT) == -1) {
-				if(errno != EAGAIN) {
-					const char * whichsockstr = (pollables[j].socket == pullsock) ?
-						"command" : "state";
-					logit(NSLOG_RUNTIME_ERROR, TRUE,
-						"Error receiving message for %s socket in sleep handler: %s",
-						whichsockstr, zmq_strerror(errno));
-				}
-				continue;
-			}
-
-			if(pollables[j].socket == pullsock)
-				process_pull_msg(&input);
-			else if(pollables[j].socket == reqsock)
-				process_req_msg(&input);
-			zmq_msg_close(&input);
-			nevents++;
-		}
-
-		gettimeofday(&end, NULL);
-		diff = ((end.tv_sec - start.tv_sec) * 1000000) +
-			(end.tv_usec - start.tv_usec);
-		if(diff / 1000 >= timeout)
-			break;
-	} while(nevents > 0);
-
-	if(diff / 1000 >= timeout) {
-		delay->tv_sec = 0;
-		delay->tv_nsec = 0;
-	} else {
-		delay->tv_sec = diff / 1000000;
-		diff -= delay->tv_sec * 1000000;
-		delay->tv_nsec = diff > 1 ? diff * 1000 : 0;
-	}
-
-	return 0;
-}
-#endif
-
-void input_reaper(void * insock) {
+int input_reaper(int sd, int events, void * insock) {
 	while(1) {
 		zmq_msg_t input;
 		zmq_msg_init(&input);
@@ -157,21 +75,14 @@ void input_reaper(void * insock) {
 
 		if(insock == pullsock)
 			process_pull_msg(&input);
-		else if(insock == reqsock)
-			process_req_msg(&input);
 
 		zmq_msg_close(&input);
 	}
-}
 
-#ifdef HAVE_NAGIOS4
-int brokered_input_reaper(int sd, int events, void * arg) {
-	input_reaper(arg);
 	return 0;
 }
 
 extern iobroker_set *nagios_iobs;
-#endif
 
 int handle_startup(int which, void * obj) {
 	struct nebstruct_process_struct *ps = (struct nebstruct_process_struct *)obj;
@@ -201,10 +112,10 @@ int handle_startup(int which, void * obj) {
 				exit(1);
 				return -1;
 			}
-		
+
 			if(!pubdef && !pulldef && !reqdef)
 				return 0;
-			
+
 			zmq_ctx = zmq_init(numthreads);
 			if(zmq_ctx == NULL) {
 				logit(NSLOG_RUNTIME_ERROR, TRUE,
@@ -271,49 +182,17 @@ int handle_startup(int which, void * obj) {
 					exit(1);
 					return -1;
 				}
-#ifdef HAVE_NAGIOS4
 				int fd;
 				size_t throwaway = sizeof(fd);
 				zmq_getsockopt(pullsock, ZMQ_FD, &fd, &throwaway);
-				iobroker_register(nagios_iobs, fd, pullsock, brokered_input_reaper);
-#else
-				schedule_new_event(EVENT_USER_FUNCTION, 1, now, 1, interval,
-					NULL, 1, input_reaper, pullsock, 0);
-#endif
+				iobroker_register(nagios_iobs, fd, pullsock, input_reaper);
+
 				setup_sockmonitor(pullsock);
 				// Call the input_reaper once manually to clear out any
 				// level-triggered polling problems.
-				input_reaper(pullsock);
+				input_reaper(0, 0, pullsock);
 			}
 
-			if(reqdef) {
-				unsigned long interval = 2;
-				get_values(reqdef,
-					"interval", JSON_INTEGER, 0, &interval,
-					NULL);
-				if((reqsock = getsock("reply", ZMQ_REP, reqdef)) == NULL) {
-					exit(1);
-					return -1;
-				}
-#ifdef HAVE_NAGIOS4
-				int fd;
-				size_t throwaway = sizeof(fd);
-				zmq_getsockopt(reqsock, ZMQ_FD, &fd, &throwaway);
-				iobroker_register(nagios_iobs, fd, reqsock, brokered_input_reaper);
-#else
-				schedule_new_event(EVENT_USER_FUNCTION, 1, now, 1, interval,
-					NULL, 1, input_reaper, reqsock, 0);
-#endif
-				setup_sockmonitor(reqsock);
-				// Call the input_reaper once manually to clear out any
-				// level-triggered polling problems.
-				input_reaper(reqsock);
-			}
-
-#ifndef HAVE_NAGIOS4
-			if(pulldef || reqdef)
-				neb_register_callback(NEBCALLBACK_TIMED_EVENT_DATA, handle, 0, handle_timedevent);
-#endif
 			break;
 		}
 		case NEBTYPE_PROCESS_EVENTLOOPEND:
@@ -326,14 +205,14 @@ int handle_startup(int which, void * obj) {
 				process_payload(payload);
 			}
 			if(pullsock) {
-#ifdef HAVE_NAGIOS4
+
 				int fd;
 				size_t throwaway = sizeof(fd);
 				zmq_getsockopt(pullsock, ZMQ_FD, &fd, &throwaway);
 				iobroker_unregister(nagios_iobs, fd);
 				iobroker_unregister(nagios_iobs, pullmonfd);
 				zmq_close(pullmon);
-#endif
+
 				rc = zmq_close(pullsock);
 				if(rc == -1) {
 					logit(NSLOG_RUNTIME_ERROR, TRUE, "Error closing NagMQ command socket: %s",
@@ -341,27 +220,11 @@ int handle_startup(int which, void * obj) {
 				}
 				pullsock = NULL;
 			}
-			if(reqsock) {
-#ifdef HAVE_NAGIOS4
-				int fd;
-				size_t throwaway = sizeof(fd);
-				zmq_getsockopt(reqsock, ZMQ_FD, &fd, &throwaway);
-				iobroker_unregister(nagios_iobs, fd);
-				iobroker_unregister(nagios_iobs, reqmonfd);
-				zmq_close(reqmon);
-#endif
-				rc = zmq_close(reqsock);
-				if(rc == -1) {
-					logit(NSLOG_RUNTIME_ERROR, TRUE, "Error closing NagMQ state socket: %s",
-						zmq_strerror(errno));
-				}
-				pullsock = NULL;
-			}
 			if(pubext) {
-#ifdef HAVE_NAGIOS4
+
 				iobroker_unregister(nagios_iobs, pubmonfd);
 				zmq_close(pubmon);
-#endif
+
 				rc = zmq_close(pubext);
 				if(rc == -1) {
 					logit(NSLOG_RUNTIME_ERROR, TRUE, "Error closing NagMQ state socket: %s",

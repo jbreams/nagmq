@@ -96,12 +96,7 @@ static void process_bulkstate(json_t * payload) {
 			"event_handler_enabled", JSON_TRUE, 1, &event_handler_enabled,
 			"flap_detection_enabled", JSON_TRUE, 1, &flap_detection_enabled,
 			"problem_has_been_acknowledged", JSON_TRUE, 1, &acknowledged,
-#ifdef HAVE_NAGIOS4
 			"accept_passive_checks", JSON_TRUE, 0, &passive_checks_enabled,
-#else
-			"accept_passive_service_checks", JSON_TRUE, 0, &passive_checks_enabled,
-			"accept_passive_host_checks", JSON_TRUE, 0, &passive_checks_enabled,
-#endif
 			"type", JSON_STRING, 1, &type,
 			"last_check", JSON_INTEGER, 1, &last_check,
 			"has_been_checked", JSON_TRUE, 1, &has_been_checked,
@@ -131,11 +126,8 @@ static void process_bulkstate(json_t * payload) {
 			svctarget->event_handler_enabled = event_handler_enabled;
 			svctarget->flap_detection_enabled = flap_detection_enabled;
 			svctarget->problem_has_been_acknowledged = acknowledged;
-#ifdef HAVE_NAGIOS4
 			svctarget->accept_passive_checks = passive_checks_enabled;
-#else
-			svctarget->accept_passive_service_checks = passive_checks_enabled;
-#endif
+
 			if(svctarget->plugin_output)
 				free(svctarget->plugin_output);
 			svctarget->plugin_output = strdup(plugin_output);
@@ -151,7 +143,7 @@ static void process_bulkstate(json_t * payload) {
 			svctarget->last_notification = last_notification;
 			svctarget->latency = latency;
 			svctarget->execution_time = execution_time;
-		}			
+		}
 		else {
 			host * hsttarget = find_host(host_name);
 			if(!hsttarget)
@@ -165,11 +157,7 @@ static void process_bulkstate(json_t * payload) {
 			hsttarget->event_handler_enabled = event_handler_enabled;
 			hsttarget->flap_detection_enabled = flap_detection_enabled;
 			hsttarget->problem_has_been_acknowledged = acknowledged;
-#ifdef HAVE_NAGIOS4
 			hsttarget->accept_passive_checks = passive_checks_enabled;
-#else
-			hsttarget->accept_passive_host_checks = passive_checks_enabled;
-#endif
 			if(hsttarget->plugin_output)
 				free(hsttarget->plugin_output);
 			hsttarget->plugin_output = strdup(plugin_output);
@@ -182,22 +170,15 @@ static void process_bulkstate(json_t * payload) {
 			hsttarget->last_check = last_check;
 			hsttarget->last_state_change = last_state_change;
 			hsttarget->has_been_checked = has_been_checked;
-#ifdef HAVE_NAGIOS4
 			hsttarget->last_notification = last_notification;
-#else
-			hsttarget->last_host_notification = last_notification;
-#endif
+
 			hsttarget->latency = latency;
 			hsttarget->execution_time = execution_time;
 		}
 	}
 }
 
-#ifdef HAVE_ADD_CHECK_RESULT_TWO
-extern check_result * check_result_list;
-#endif
-#ifdef HAVE_NAGIOS4
-const char * nagmq_source_name(void * unused) {
+const char * nagmq_source_name(const void * unused) {
 	return "NagMQ";
 }
 
@@ -206,7 +187,6 @@ struct check_engine nagmq_check_engine = {
 	nagmq_source_name,
 	free
 };
-#endif
 
 static void process_status(json_t * payload) {
 	char * host_name, *service_description = NULL, *output = NULL;
@@ -252,26 +232,15 @@ static void process_status(json_t * payload) {
 	}
 	newcr.output = strdup(output);
 
-	const char * debug_service_name = service_target ? 
+	const char * debug_service_name = service_target ?
 		newcr.service_description : "(N/A)";
 	log_debug_info(DEBUGL_CHECKS, DEBUGV_BASIC,
 		"Received a check result via NagMQ for %s %s\n",
 		newcr.host_name, debug_service_name);
 
-#ifdef HAVE_NAGIOS4
 	newcr.engine = &nagmq_check_engine;
 	process_check_result(&newcr);
 	free_check_result(&newcr);
-#else
-	check_result *crcopy = NULL;
-	crcopy = calloc(1, sizeof(check_result));
-	memcpy(crcopy, &newcr, sizeof(check_result));
-#ifdef HAVE_ADD_CHECK_RESULT_ONE
-	add_check_result_to_list(crcopy);
-#elif defined(HAVE_ADD_CHECK_RESULT_TWO)
-	add_check_result_to_list(&check_result_list, crcopy);
-#endif
-#endif
 }
 
 static void process_acknowledgement(json_t * payload) {

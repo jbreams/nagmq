@@ -24,7 +24,7 @@ AC_CHECK_HEADERS([ctype.h fcntl.h float.h signal.h stdarg.h \
 
 PKG_CHECK_MODULES([libzmq], [libzmq >= 3])
 PKG_CHECK_MODULES([jansson], [jansson])
-PKG_CHECK_MODULES([libev], [libev])
+PKG_CHECK_MODULES([libuv], [libuv])
 PKG_CHECK_MODULES([libpcre], [libpcre])
 AC_CHECK_HEADER([pthread.h], [], AC_MSG_FAILURE([pthread.h not found]), [])
 AC_SEARCH_LIBS([pthread_create], [pthread])
@@ -49,27 +49,16 @@ AC_ARG_WITH([icinga-headers],
 	]
 )
 
-AC_ARG_WITH([nagios3-headers],
-	[AC_HELP_STRING([--with-nagios3-headers=DIR],
-		[Path to header files for Nagios])],
-	[
-		WITHHEADERS="-I$withval"
-		AC_DEFINE([HAVE_NAGIOS3], [], [Compiling against Nagios 3])
-	]
-)
-
-AC_ARG_WITH([nagios4-src],
-	[AC_HELP_STRING([--with-nagios4-src=DIR],
+AC_ARG_WITH([nagios-src],
+	[AC_HELP_STRING([--with-nagios-src=DIR],
 		[Path to source files for Nagios 4])],
 	[
 		WITHHEADERS="-I$withval/include -I$withval"
-		AC_DEFINE([HAVE_NAGIOS4], [], [Compiling against Nagios 4])
 	],
 	[
 		AC_CHECK_HEADERS([nagios/nagios.h nagios/lib/libnagios.h],
 		[
 			WITHHEADERS="-I/usr/include/nagios"
-			AC_DEFINE([HAVE_NAGIOS4], [], [Compiling against Nagios 4])
 		])
 	]
 )
@@ -80,7 +69,6 @@ AC_ARG_WITH([naemon-src],
 	[
 		WITHHEADERS="-I$withval"
 		# For right now these are one and the same
-		AC_DEFINE([HAVE_NAGIOS4], [], [Compiling against Nagios 4.x])
 		AC_DEFINE([HAVE_NAEMON], [], [Compiling against Naemon])
 	]
 )
@@ -93,26 +81,6 @@ fi
 CFLAGS="$WITHHEADERS $CFLAGS"
 AC_SUBST([WITHHEADERS])
 
-AC_CHECK_DECL([add_check_result_to_list(check_result **, check_result *)],
-	AC_DEFINE([HAVE_ADD_CHECK_RESULT_TWO], [], [Two parameter add_check_result_to_list]),
-	[], [
-AC_INCLUDES_DEFAULT
-#ifdef HAVE_ICINGA
-#include <icinga.h>
-#else
-#include <nagios.h>
-#endif
-#define __cplusplus])
-AC_CHECK_DECL([add_check_result_to_list(check_result *)],
-	AC_DEFINE([HAVE_ADD_CHECK_RESULT_ONE], [], [One parameter add_check_result_to_list]),
-	[], [
-AC_INCLUDES_DEFAULT
-#ifdef HAVE_ICINGA
-#include <icinga.h>
-#else
-#include <nagios.h>
-#endif
-#define __cplusplus])
 AC_CHECK_DECL([delete_downtime_by_hostname_service_description_start_time_comment],
 	AC_DEFINE([HAVE_DELETE_DOWNTIME_LONGNAME], [], [Have the really really long function name for deleting downtimes]),
 	[], [#include <downtime.h>])
