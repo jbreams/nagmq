@@ -2,22 +2,16 @@
 #include <zmq.h>
 // Nagios 3 doesn't include-what-it-uses, so we need to include
 // these headers so nagios.h has complete types.
-#ifdef HAVE_NAGIOS3
-#include <pthread.h>
-#include <sys/time.h>
-#endif
 #ifdef HAVE_ICINGA
 #include "icinga.h"
 #else
 #include "nagios.h"
 #endif
 #include <string.h>
+#include "nagmq_common.h"
 
-extern void *zmq_ctx, *pullsock, *reqsock, *pubext;
-void *pullmon = NULL, *reqmon = NULL, *pubmon = NULL;
-int pullmonfd = -1, reqmonfd = -1, pubmonfd;
+extern void *zmq_ctx;
 
-#if ZMQ_VERSION_MAJOR >= 3 && defined(HAVE_NAGIOS4)
 int sock_monitor_cb(int sd, int events, void* sock) {
     while (1) {
         zmq_msg_t addrmsg, eventmsg;
@@ -142,11 +136,11 @@ int sock_monitor_cb(int sd, int events, void* sock) {
 
 extern iobroker_set* nagios_iobs;
 
-void setup_sockmonitor(void* sock) {
+void setup_sockmonitor(struct socket_list* sock) {
     char channel[64];
     snprintf(channel, 64, "inproc://monitor_%p", sock);
 
-    zmq_socket_monitor(sock, channel, ZMQ_EVENT_ALL);
+    zmq_socket_monitor(sock->sock, channel, ZMQ_EVENT_ALL);
     int fd = 0;
     size_t fdsize = sizeof(fd);
 
@@ -154,16 +148,8 @@ void setup_sockmonitor(void* sock) {
     zmq_connect(monsock, channel);
     zmq_getsockopt(monsock, ZMQ_FD, &fd, &fdsize);
 
-    if (sock == pullsock) {
-        pullmon = monsock;
-        pullmonfd = fd;
-    } else if (sock == reqsock) {
-        reqmon = monsock;
-        reqmonfd = fd;
-    } else if (sock == pubext) {
-        pubmon = monsock;
-        pubmonfd = fd;
-    }
+    sock->mon_fd = fd;
+    sock->mon_sock = monsock;
 
     iobroker_register(nagios_iobs, fd, monsock, sock_monitor_cb);
 
@@ -174,8 +160,4 @@ void setup_sockmonitor(void* sock) {
     // before starting the libev loop.
     sock_monitor_cb(0, 0, monsock);
 }
-#else
 
-// This is a Nagios 4-only feature.
-void setup_sockmonitor(void* sock) {}
-#endif

@@ -1,14 +1,24 @@
 #include "json.h"
 #include <zmq.h>
 
+struct socket_list {
+    void* sock;
+    int fd;
+    int mon_fd;
+    void* mon_sock;
+    const char* name;
+    void (*processing_fn)(zmq_msg_t* msg);
+    struct socket_list* next;
+};
+
 void process_pull_msg(zmq_msg_t* payload_msg);
-int handle_timedevent(int which, void* obj);
 void free_cb(void* ptr, void* hint);
 void* getsock(char* what, int type, json_t* def);
 void process_payload(struct payload* payload);
 void* zap_handler(void* zapsock);
-void setup_sockmonitor(void* sock);
-int handle_pubstartup(json_t* def);
+void setup_sockmonitor(struct socket_list* sock);
+int handle_pubstartup(void* sock);
+void register_zmq_sock_for_pull(void* sock);
 
 #ifndef ZMQ_DONTWAIT
 #define ZMQ_DONTWAIT ZMQ_NOBLOCK

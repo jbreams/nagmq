@@ -22,6 +22,7 @@
 #include "nagmq_common.h"
 #include "jansson.h"
 #include "objects.h"
+#include "utlist.h"
 
 NEB_API_VERSION(CURRENT_NEB_API_VERSION)
 static void* nagmq_handle = NULL;
@@ -48,40 +49,63 @@ int nebmodule_deinit(int flags, int reason) {
     return 0;
 }
 
-void *pullsock = NULL, *reqsock = NULL;
-extern void* pubext;
-extern int pullmonfd, reqmonfd, pubmonfd;
-extern void *pullmon, *reqmon, *pubmon;
-
-int input_reaper(int sd, int events, void* insock) {
+int input_reaper(int sd, int events, void* param) {
     while (1) {
+        struct socket_list* sock_desc = (struct socket_list*)param;
         zmq_msg_t input;
         zmq_msg_init(&input);
 
-        if (zmq_msg_recv(&input, insock, ZMQ_DONTWAIT) == -1) {
+        if (zmq_msg_recv(&input, sock_desc->sock, ZMQ_DONTWAIT) == -1) {
             if (errno == EAGAIN)
                 break;
             else if (errno == EINTR)
                 continue;
-            const char* whichsockstr = (insock == pullsock) ? "command" : "state";
             logit(NSLOG_RUNTIME_WARNING,
                   TRUE,
                   "Error receiving message from %s socket: %s",
-                  whichsockstr,
+                  sock_desc->name,
                   zmq_strerror(errno));
             continue;
         }
 
-        if (insock == pullsock)
-            process_pull_msg(&input);
-
+        sock_desc->processing_fn(&input);
         zmq_msg_close(&input);
     }
 
     return 0;
 }
 
+struct socket_list* sockets = NULL;
 extern iobroker_set* nagios_iobs;
+
+void register_zmq_sock(void* sock, char* name) {
+    struct socket_list* new_sock = calloc(1, sizeof(struct socket_list));
+    new_sock->sock = sock;
+    new_sock->fd = -1;
+    new_sock->name = name;
+
+    setup_sockmonitor(new_sock);
+    LL_APPEND(sockets, new_sock);
+}
+
+void register_zmq_sock_for_poll(void* sock, const char* name,
+        void (*processing_fn)(zmq_msg_t* msg)) {
+    struct socket_list* new_sock = calloc(1, sizeof(struct socket_list));
+    new_sock->sock = sock;
+    new_sock->processing_fn = processing_fn;
+    new_sock->name = name;
+
+    size_t throwaway = sizeof(new_sock->fd);
+    zmq_getsockopt(sock, ZMQ_FD, &new_sock->fd, &throwaway);
+    iobroker_register(nagios_iobs, new_sock->fd, new_sock, input_reaper);
+
+    setup_sockmonitor(new_sock);
+    // Call the input_reaper once manually to clear out any
+    // level-triggered polling problems.
+    input_reaper(0, 0, sock);
+
+    LL_APPEND(sockets, new_sock);
+}
 
 int handle_startup(int which, void* obj) {
     struct nebstruct_process_struct* ps = (struct nebstruct_process_struct*)obj;
@@ -90,7 +114,7 @@ int handle_startup(int which, void* obj) {
 
     switch (ps->type) {
         case NEBTYPE_PROCESS_EVENTLOOPSTART: {
-            json_t *pubdef = NULL, *pulldef = NULL, *reqdef = NULL, *curvedef = NULL;
+            json_t *pubdef = NULL, *cmddef = NULL, *curvedef = NULL, *distdef = NULL;
             int numthreads = 1;
 
             log_debug_info(
@@ -100,18 +124,18 @@ int handle_startup(int which, void* obj) {
                            JSON_INTEGER,
                            0,
                            &numthreads,
-                           "publish",
+                           "event_publisher",
                            JSON_OBJECT,
                            0,
                            &pubdef,
-                           "pull",
+                           "command_processor",
                            JSON_OBJECT,
                            0,
-                           &pulldef,
-                           "reply",
+                           &cmddef,
+                           "check_distributor",
                            JSON_OBJECT,
                            0,
-                           &reqdef,
+                           &distdef,
 #if ZMQ_VERSION_MAJOR > 3
                            "curve",
                            JSON_OBJECT,
@@ -124,7 +148,7 @@ int handle_startup(int which, void* obj) {
                 return -1;
             }
 
-            if (!pubdef && !pulldef && !reqdef)
+            if (!pubdef && !cmddef && !distdef)
                 return 0;
 
             zmq_ctx = zmq_init(numthreads);
@@ -191,27 +215,22 @@ int handle_startup(int which, void* obj) {
             }
 #endif
 
-            if (pubdef && handle_pubstartup(pubdef) < 0) {
-                exit(1);
-                return -1;
-            }
-
-            if (pulldef) {
-                unsigned long interval = 2;
-                get_values(pulldef, "interval", JSON_INTEGER, 0, &interval, NULL);
-                if ((pullsock = getsock("pull", ZMQ_PULL, pulldef)) == NULL) {
+            if (pubdef) {
+                void* pubsock;
+                if ((pubsock = getsock("event_publisher", ZMQ_PUB, pubdef)) == NULL) {
                     exit(1);
                     return -1;
                 }
-                int fd;
-                size_t throwaway = sizeof(fd);
-                zmq_getsockopt(pullsock, ZMQ_FD, &fd, &throwaway);
-                iobroker_register(nagios_iobs, fd, pullsock, input_reaper);
+                register_zmq_sock(pubsock, "event publisher");
+            }
 
-                setup_sockmonitor(pullsock);
-                // Call the input_reaper once manually to clear out any
-                // level-triggered polling problems.
-                input_reaper(0, 0, pullsock);
+            if (cmddef) {
+                void* pullsock;
+                if ((pullsock = getsock("command_processor", ZMQ_PULL, cmddef)) == NULL) {
+                    exit(1);
+                    return -1;
+                }
+                register_zmq_sock_for_poll(pullsock, "command processor", process_pull_msg);
             }
 
             break;
@@ -225,35 +244,22 @@ int handle_startup(int which, void* obj) {
                 payload_finalize(payload);
                 process_payload(payload);
             }
-            if (pullsock) {
-                int fd;
-                size_t throwaway = sizeof(fd);
-                zmq_getsockopt(pullsock, ZMQ_FD, &fd, &throwaway);
-                iobroker_unregister(nagios_iobs, fd);
-                iobroker_unregister(nagios_iobs, pullmonfd);
-                zmq_close(pullmon);
 
-                rc = zmq_close(pullsock);
+            struct socket_list* cur_sock = NULL;
+            LL_FOREACH(sockets, cur_sock) {
+                if (cur_sock->fd >= 0) {
+                    iobroker_unregister(nagios_iobs, cur_sock->fd);
+                }
+                iobroker_unregister(nagios_iobs, cur_sock->mon_fd);
+                zmq_close(cur_sock->mon_sock);
+                rc = zmq_close(cur_sock->sock);
                 if (rc == -1) {
                     logit(NSLOG_RUNTIME_ERROR,
                           TRUE,
                           "Error closing NagMQ command socket: %s",
                           zmq_strerror(errno));
                 }
-                pullsock = NULL;
-            }
-            if (pubext) {
-                iobroker_unregister(nagios_iobs, pubmonfd);
-                zmq_close(pubmon);
-
-                rc = zmq_close(pubext);
-                if (rc == -1) {
-                    logit(NSLOG_RUNTIME_ERROR,
-                          TRUE,
-                          "Error closing NagMQ state socket: %s",
-                          zmq_strerror(errno));
-                }
-                pubext = NULL;
+                LL_DELETE(sockets, cur_sock);
             }
 
             while ((rc = zmq_term(zmq_ctx)) != 0) {

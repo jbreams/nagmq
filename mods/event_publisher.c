@@ -22,13 +22,7 @@
 #include <errno.h>
 
 extern nebmodule* handle;
-void* pubext;
-#define OR_HOSTCHECK_INITIATE 0
-#define OR_SERVICECHECK_INITIATE 1
-#define OR_EVENTHANDLER_START 2
-#define OR_NOTIFICATION_START 3
-#define OR_MAX 4
-static int overrides[OR_MAX];
+static void* pubext;
 
 static struct payload* parse_program_status(nebstruct_program_status_data* state) {
     struct payload* ret = payload_new();
@@ -227,8 +221,7 @@ static struct payload* parse_host_check(nebstruct_host_check_data* state) {
 
         // This gets overriden by adjust_host_check_attempt, restore it
         // if we aren't going to override the check so that it makes sense.
-        if (!overrides[OR_HOSTCHECK_INITIATE])
-            obj->current_attempt = old_current_attempt;
+        obj->current_attempt = old_current_attempt;
     }
     return ret;
 }
@@ -712,17 +705,12 @@ int handle_nagdata(int which, void* obj) {
     switch (which) {
         case NEBCALLBACK_EVENT_HANDLER_DATA:
             payload = parse_event_handler(obj);
-            if (raw->type == NEBTYPE_EVENTHANDLER_START && overrides[OR_EVENTHANDLER_START])
-                rc = NEBERROR_CALLBACKOVERRIDE;
             break;
         case NEBCALLBACK_HOST_CHECK_DATA:
             switch (raw->type) {
                 case NEBTYPE_HOSTCHECK_ASYNC_PRECHECK:
                 case NEBTYPE_HOSTCHECK_PROCESSED:
                     payload = parse_host_check(obj);
-                    if (raw->type == NEBTYPE_HOSTCHECK_ASYNC_PRECHECK &&
-                        overrides[OR_HOSTCHECK_INITIATE])
-                        rc = NEBERROR_CALLBACKOVERRIDE;
                     break;
                 default:
                     return 0;
@@ -733,9 +721,6 @@ int handle_nagdata(int which, void* obj) {
                 case NEBTYPE_SERVICECHECK_INITIATE:
                 case NEBTYPE_SERVICECHECK_PROCESSED:
                     payload = parse_service_check(obj);
-                    if (raw->type == NEBTYPE_SERVICECHECK_INITIATE &&
-                        overrides[OR_SERVICECHECK_INITIATE])
-                        rc = NEBERROR_CALLBACKOVERRIDE;
                     break;
                 default:
                     return 0;
@@ -745,8 +730,6 @@ int handle_nagdata(int which, void* obj) {
             if (raw->type != NEBTYPE_NOTIFICATION_START)
                 return 0;
             payload = parse_notification(obj);
-            if (raw->type == NEBTYPE_NOTIFICATION_START && overrides[OR_NOTIFICATION_START])
-                rc = NEBERROR_CALLBACKOVERRIDE;
             break;
         case NEBCALLBACK_ACKNOWLEDGEMENT_DATA:
             if (raw->type != NEBTYPE_ACKNOWLEDGEMENT_ADD)
@@ -784,49 +767,11 @@ int handle_nagdata(int which, void* obj) {
     payload_new_timestamp(payload, "timestamp", &raw->timestamp);
     payload_finalize(payload);
     process_payload(payload);
-    if (rc == NEBERROR_CALLBACKOVERRIDE) {
-        log_debug_info(DEBUGL_CHECKS, DEBUGV_MORE, "Overriding event for event %d\n", which);
-    }
     return rc;
 }
 
-static void override_string(const char* in) {
-    if (strcasecmp(in, "service_check_initiate") == 0)
-        overrides[OR_SERVICECHECK_INITIATE] = 1;
-    else if (strcasecmp(in, "host_check_initiate") == 0)
-        overrides[OR_HOSTCHECK_INITIATE] = 1;
-    else if (strcasecmp(in, "eventhandler_start") == 0)
-        overrides[OR_EVENTHANDLER_START] = 1;
-    else if (strcasecmp(in, "notification_start") == 0)
-        overrides[OR_NOTIFICATION_START] = 1;
-}
-
-int handle_pubstartup(json_t* def) {
-    pubext = getsock("publish", ZMQ_PUB, def);
-    if (pubext == NULL)
-        return -1;
-    setup_sockmonitor(pubext);
-
-    json_t* override = NULL;
-    double sleeptime = 0.0;
-
-    if (get_values(
-            def, "override", JSON_ARRAY, 0, & override, "startupdelay", JSON_REAL, 0, &sleeptime, NULL) !=
-        0) {
-        logit(NSLOG_RUNTIME_ERROR, TRUE, "Invalid parameters to NagMQ events socket");
-        return -1;
-    }
-
-    memset(overrides, 0, sizeof(overrides));
-    if (override) {
-        int i;
-        for (i = 0; i < json_array_size(override); i++) {
-            json_t* val = json_array_get(override, i);
-            if (json_is_string(val))
-                override_string(json_string_value(val));
-        }
-    }
-
+int handle_pubstartup(void* sock) {
+    pubext = sock;
     neb_register_callback(NEBCALLBACK_COMMENT_DATA, handle, 0, handle_nagdata);
     neb_register_callback(NEBCALLBACK_DOWNTIME_DATA, handle, 0, handle_nagdata);
     neb_register_callback(NEBCALLBACK_PROGRAM_STATUS_DATA, handle, 0, handle_nagdata);
@@ -839,13 +784,5 @@ int handle_pubstartup(json_t* def) {
     neb_register_callback(NEBCALLBACK_ADAPTIVE_HOST_DATA, handle, 0, handle_nagdata);
     neb_register_callback(NEBCALLBACK_ADAPTIVE_SERVICE_DATA, handle, 0, handle_nagdata);
 
-    if (sleeptime > 0) {
-        double integral;
-        struct timespec realsleeptime;
-        double fractional = modf(sleeptime, &integral);
-        realsleeptime.tv_sec = integral;
-        realsleeptime.tv_nsec = fractional * 100000000;
-        nanosleep(&realsleeptime, NULL);
-    }
     return 0;
 }
