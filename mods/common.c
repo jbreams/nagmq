@@ -19,11 +19,9 @@
 #include "nagios.h"
 #endif
 #include "broker.h"
-#include "common.h"
+#include "nagmq_common.h"
 #include "jansson.h"
-#include "json.h"
 #include "objects.h"
-#include <zmq.h>
 
 NEB_API_VERSION(CURRENT_NEB_API_VERSION)
 static void* nagmq_handle = NULL;

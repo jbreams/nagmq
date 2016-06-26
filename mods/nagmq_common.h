@@ -1,3 +1,6 @@
+#include "json.h"
+#include <zmq.h>
+
 void process_pull_msg(zmq_msg_t* payload_msg);
 int handle_timedevent(int which, void* obj);
 void free_cb(void* ptr, void* hint);

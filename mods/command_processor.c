@@ -19,9 +19,9 @@
 #include "comments.h"
 #include "common.h"
 #include "downtime.h"
-#include "json.h"
 #include "objects.h"
 #include <zmq.h>
+#include "nagmq_common.h"
 
 extern int errno;
 

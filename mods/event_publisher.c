@@ -16,12 +16,10 @@
 #include "nagios.h"
 #endif
 #include "broker.h"
-#include "common.h"
-#include "json.h"
+#include "nagmq_common.h"
 #include "neberrors.h"
 #include "objects.h"
 #include <errno.h>
-#include <zmq.h>
 
 extern nebmodule* handle;
 void* pubext;
