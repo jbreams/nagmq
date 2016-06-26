@@ -107,6 +107,25 @@ void register_zmq_sock_for_poll(void* sock, const char* name,
     LL_APPEND(sockets, new_sock);
 }
 
+void close_all_zmq_sockets() {
+    struct socket_list* cur_sock = NULL;
+    LL_FOREACH(sockets, cur_sock) {
+        if (cur_sock->fd >= 0) {
+            iobroker_unregister(nagios_iobs, cur_sock->fd);
+        }
+        iobroker_unregister(nagios_iobs, cur_sock->mon_fd);
+        zmq_close(cur_sock->mon_sock);
+        rc = zmq_close(cur_sock->sock);
+        if (rc == -1) {
+            logit(NSLOG_RUNTIME_ERROR,
+                  TRUE,
+                  "Error closing NagMQ command socket: %s",
+                  zmq_strerror(errno));
+        }
+        LL_DELETE(sockets, cur_sock);
+    }
+}
+
 int handle_startup(int which, void* obj) {
     struct nebstruct_process_struct* ps = (struct nebstruct_process_struct*)obj;
     time_t now = ps->timestamp.tv_sec;
@@ -245,23 +264,7 @@ int handle_startup(int which, void* obj) {
                 process_payload(payload);
             }
 
-            struct socket_list* cur_sock = NULL;
-            LL_FOREACH(sockets, cur_sock) {
-                if (cur_sock->fd >= 0) {
-                    iobroker_unregister(nagios_iobs, cur_sock->fd);
-                }
-                iobroker_unregister(nagios_iobs, cur_sock->mon_fd);
-                zmq_close(cur_sock->mon_sock);
-                rc = zmq_close(cur_sock->sock);
-                if (rc == -1) {
-                    logit(NSLOG_RUNTIME_ERROR,
-                          TRUE,
-                          "Error closing NagMQ command socket: %s",
-                          zmq_strerror(errno));
-                }
-                LL_DELETE(sockets, cur_sock);
-            }
-
+            close_all_zmq_sockets();
             while ((rc = zmq_term(zmq_ctx)) != 0) {
                 if (errno == EINTR) {
                     logit(NSLOG_RUNTIME_WARNING,
