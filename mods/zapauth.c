@@ -11,79 +11,34 @@
 #else
 #include "nagios.h"
 #endif
+#include "uthash.h"
 
-extern int keyfile_refresh_interval;
 extern char * curve_knownhosts;
 #if ZMQ_VERSION_MAJOR > 3
-struct keybag {
-	uint8_t key[32];
-	struct keybag * next;
+struct key_data {
+	uint8_t data[32];
 };
 
-struct keybaghash {
-	int buckets;
-	int count;
-	struct keybag ** data;
+struct allowed_key {
+    struct key_data key;
+    UT_hash_handle hh;
 };
 
-uint32_t fnv_hash(uint8_t * key) {
-	int i;
-	uint32_t hash = 2166136261; // offset_basis
-	for(i = 0; i < 32; i++) {
-		hash ^= key[i];
-		hash *= 16777619; //fnv_prime
-	}
-	hash =(hash>>16) ^ (hash & 0xffff);
-
-	return hash;
-}
-
-int rehash_keybags(struct keybaghash * o) {
-	if(!(o->count > o->buckets && o->count < (0xffff)))
-		return 0;
-
-	int kiter;
-	int newsize = ((o->buckets + 1) << 2) - 1;
-
-	struct keybag ** newdata = calloc(newsize + 1, sizeof(struct keybag*));
-	if(newdata == NULL)
-		return -ENOMEM;
-
-	for(kiter = 0; kiter < o->buckets + 1; kiter++) {
-		struct keybag * curkey = o->data[kiter], *savekey;
-		while(curkey) {
-			uint32_t hash = fnv_hash(curkey->key) & newsize;
-			savekey = curkey->next;
-			curkey->next = newdata[hash];
-			newdata[hash] = curkey;
-			curkey = savekey;
-		}
-	}
-
-	free(o->data);
-	o->buckets = newsize;
-	o->data = newdata;
-	return 0;
-}
-
-int read_keyfile(const char * path, struct keybaghash * o) {
+struct allowed_key* read_keyfile(const char * path) {
 	char * buf = NULL;
 	size_t buflen = 0;
 	ssize_t readcount;
 	int i;
 
 	FILE * fp = fopen(path, "r");
-	if(fp == NULL)
-		return errno;
+	if(fp == NULL) {
+        logit(NSLOG_RUNTIME_ERROR, TRUE,
+            "Error reading known hosts file for NagMQ curve authentication: %s",
+            strerror(errno));
+        return NULL;
+    }
 
-	for(i = 0; i < o->buckets; i++) {
-		while(o->data[i]) {
-			struct keybag * n = o->data[i]->next;
-			free(o->data[i]);
-			o->data[i] = n;
-		}
-	}
-	o->count = 0;
+    struct allowed_key* keys = NULL;
 
 	while((readcount = getline(&buf, &buflen, fp)) != -1) {
 		char * end = buf + readcount, *front = buf;
@@ -103,26 +58,18 @@ int read_keyfile(const char * path, struct keybaghash * o) {
 		if(end < front)
 			continue;
 
-		struct keybag * nk = calloc(1, sizeof(struct keybag));
-
-		if(zmq_z85_decode(nk->key, end) == NULL) {
+        struct allowed_key* nk = calloc(1, sizeof(struct allowed_key));
+		if(zmq_z85_decode(nk->key.data, end) == NULL) {
 			free(nk);
 			continue;
 		}
 
-		uint32_t hashval = fnv_hash(nk->key) & o->buckets;
-
-		nk->next = o->data[hashval];
-		o->data[hashval] = nk;
-		o->count++;
-
-		if(rehash_keybags(o) != 0)
-			return -ENOMEM;
+        HASH_ADD(hh, keys, key, sizeof(struct key_data), nk);
 	}
 
 	fclose(fp);
 	free(buf);
-	return 0;
+	return keys;
 }
 
 int send_zap_resp(zmq_msg_t * reqid, char * code, char * text,
@@ -157,12 +104,7 @@ int send_zap_resp(zmq_msg_t * reqid, char * code, char * text,
 }
 
 void * zap_handler(void* zapsock) {
-	struct keybaghash bag;
-	bag.buckets = 63;
-	bag.data = calloc(64, sizeof(struct keybag*));
-	bag.count = 0;
-	time_t last_refresh = 0;
-	int keeprunning = 1, i;
+	int keeprunning = 1, i, rc;
 	sigset_t sigset;
 
 	sigfillset(&sigset);
@@ -170,19 +112,11 @@ void * zap_handler(void* zapsock) {
 
 	log_debug_info(DEBUGL_IPC, DEBUGV_BASIC, "Starting NagMQ curve authentication thread\n");
 
-	for(;;) {
-		time_t now = time(NULL);
-		int rc;
-		if(rc = now - last_refresh > keyfile_refresh_interval) {
-			if((rc = read_keyfile(curve_knownhosts, &bag)) != 0)
-				logit(NSLOG_RUNTIME_ERROR, TRUE,
-					"Error reading known hosts file for NagMQ curve authentication: %s",
-					strerror(rc));
-			last_refresh = now;
-			log_debug_info(DEBUGL_IPC, DEBUGV_BASIC,
-				"Read known hosts file for NagMQ curve authentication\n");
-		}
+    struct allowed_key* keys = read_keyfile(curve_knownhosts);
+    if (!keys)
+        return NULL;
 
+	for(;;) {
 		zmq_msg_t reqid;
 		char mech[32], creds[255];
 		i = 0;
@@ -229,15 +163,11 @@ void * zap_handler(void* zapsock) {
 			goto cleanup;
 		}
 
-		uint32_t hashval = fnv_hash(creds);
-		hashval &= bag.buckets;
+        struct allowed_key needle, *found = NULL;
+        memcpy(needle.key.data, creds, 32);
+        HASH_FIND(hh, keys, &needle.key, sizeof(struct key_data), found);
 
-		struct keybag * search = bag.data[hashval];
-
-		while(search && memcmp(search->key, creds, 32) != 0)
-			search = search->next;
-
-		if(search == NULL) {
+		if(found == NULL) {
 			rc = send_zap_resp(&reqid, "400",
 				"No authorized key found", "", zapsock);
 			log_debug_info(DEBUGL_IPC, DEBUGV_BASIC,
@@ -256,17 +186,9 @@ cleanup:
 			break;
 	}
 
-	for(i = 0; i < bag.buckets; i++) {
-		while(bag.data[i]) {
-			struct keybag * n = bag.data[i]->next;
-			free(bag.data[i]);
-			bag.data[i] = n;
-		}
-	}
-
 	log_debug_info(DEBUGL_IPC, DEBUGV_BASIC,
 		"Ending NagMQ curve authentication thread\n");
-	free(bag.data);
+    HASH_CLEAR(hh, keys);
 	zmq_close(zapsock);
 	return NULL;
 }
