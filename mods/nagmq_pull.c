@@ -59,125 +59,6 @@ static void process_ping(json_t * payload) {
 	process_payload(po);
 }
 
-static void process_bulkstate(json_t * payload) {
-	size_t max, i;
-	json_t * statedata;
-
-	if(get_values(payload,
-		"data", JSON_ARRAY, 1, &statedata,
-		NULL) != 0) {
-		return;
-	}
-
-	max = json_array_size(statedata);
-
-	for(i = 0; i < max; i++) {
-		char * service_description = NULL, * host_name, *type;
-		char * plugin_output, * long_output = NULL, *perf_data = NULL;
-		int state, current_attempt, acknowledged, state_type;
-		int is_flapping, notifications_enabled, checks_enabled;
-		int passive_checks_enabled = -1, event_handler_enabled;
-		int flap_detection_enabled, has_been_checked;
-		time_t last_check, last_state_change, last_notification;
-		double latency, execution_time;
-
-		if(get_values(json_array_get(statedata, i),
-			"host_name", JSON_STRING, 1, &host_name,
-			"service_description", JSON_STRING, 0, &service_description,
-			"plugin_output", JSON_STRING, 1, &plugin_output,
-			"long_output", JSON_STRING, 0, &long_output,
-			"perf_data", JSON_STRING, 0, &perf_data,
-			"current_state", JSON_INTEGER, 1, &state,
-			"current_attempt", JSON_INTEGER, 1, &current_attempt,
-			"state_type", JSON_INTEGER, 1, &state_type,
-			"is_flapping", JSON_TRUE, 1, &is_flapping,
-			"notifications_enabled", JSON_TRUE, 1, &notifications_enabled,
-			"checks_enabled", JSON_TRUE, 1, &checks_enabled,
-			"event_handler_enabled", JSON_TRUE, 1, &event_handler_enabled,
-			"flap_detection_enabled", JSON_TRUE, 1, &flap_detection_enabled,
-			"problem_has_been_acknowledged", JSON_TRUE, 1, &acknowledged,
-			"accept_passive_checks", JSON_TRUE, 0, &passive_checks_enabled,
-			"type", JSON_STRING, 1, &type,
-			"last_check", JSON_INTEGER, 1, &last_check,
-			"has_been_checked", JSON_TRUE, 1, &has_been_checked,
-			"latency", JSON_REAL, 1, &latency,
-			"execution_time", JSON_REAL, 1, &execution_time,
-			"last_notification", JSON_INTEGER, 1, &last_notification,
-			"last_state_change", JSON_INTEGER, 1, &last_state_change,
-			NULL) != 0)
-			continue;
-
-		if(passive_checks_enabled < 0)
-			continue;
-
-		if(strcmp(type, "host") != 0 && strcmp(type, "service") != 0)
-			continue;
-
-		if(service_description) {
-			service * svctarget = find_service(host_name, service_description);
-			if(!svctarget)
-				continue;
-			svctarget->current_state = state;
-			svctarget->current_attempt = current_attempt;
-			svctarget->state_type = state_type;
-			svctarget->is_flapping = is_flapping;
-			svctarget->notifications_enabled = notifications_enabled;
-			svctarget->checks_enabled = checks_enabled;
-			svctarget->event_handler_enabled = event_handler_enabled;
-			svctarget->flap_detection_enabled = flap_detection_enabled;
-			svctarget->problem_has_been_acknowledged = acknowledged;
-			svctarget->accept_passive_checks = passive_checks_enabled;
-
-			if(svctarget->plugin_output)
-				free(svctarget->plugin_output);
-			svctarget->plugin_output = strdup(plugin_output);
-			if(svctarget->long_plugin_output)
-				free(svctarget->long_plugin_output);
-			svctarget->long_plugin_output = long_output ? strdup(long_output) : NULL;
-			if(svctarget->perf_data)
-				free(svctarget->perf_data);
-			svctarget->perf_data = perf_data ? strdup(perf_data) : NULL;
-			svctarget->last_check = last_check;
-			svctarget->last_state_change = last_state_change;
-			svctarget->has_been_checked = has_been_checked;
-			svctarget->last_notification = last_notification;
-			svctarget->latency = latency;
-			svctarget->execution_time = execution_time;
-		}
-		else {
-			host * hsttarget = find_host(host_name);
-			if(!hsttarget)
-				continue;
-			hsttarget->current_state = state;
-			hsttarget->current_attempt = current_attempt;
-			hsttarget->state_type = state_type;
-			hsttarget->is_flapping = is_flapping;
-			hsttarget->notifications_enabled = notifications_enabled;
-			hsttarget->checks_enabled = checks_enabled;
-			hsttarget->event_handler_enabled = event_handler_enabled;
-			hsttarget->flap_detection_enabled = flap_detection_enabled;
-			hsttarget->problem_has_been_acknowledged = acknowledged;
-			hsttarget->accept_passive_checks = passive_checks_enabled;
-			if(hsttarget->plugin_output)
-				free(hsttarget->plugin_output);
-			hsttarget->plugin_output = strdup(plugin_output);
-			if(hsttarget->long_plugin_output)
-				free(hsttarget->long_plugin_output);
-			hsttarget->long_plugin_output = long_output ? strdup(long_output) : NULL;
-			if(hsttarget->perf_data)
-				free(hsttarget->perf_data);
-			hsttarget->perf_data = perf_data ? strdup(perf_data) : NULL;
-			hsttarget->last_check = last_check;
-			hsttarget->last_state_change = last_state_change;
-			hsttarget->has_been_checked = has_been_checked;
-			hsttarget->last_notification = last_notification;
-
-			hsttarget->latency = latency;
-			hsttarget->execution_time = execution_time;
-		}
-	}
-}
-
 const char * nagmq_source_name(const void * unused) {
 	return "NagMQ";
 }
@@ -576,8 +457,6 @@ void process_pull_msg(zmq_msg_t * payload_msg) {
 		process_comment(payload);
 	else if(strcmp(type, "downtime_add") == 0)
 		process_downtime(payload);
-	else if(strcmp(type, "state_data") == 0)
-		process_bulkstate(payload);
 	else if(strcmp(type, "ping") == 0)
 		process_ping(payload);
 	json_decref(payload);
