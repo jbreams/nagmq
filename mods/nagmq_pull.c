@@ -25,51 +25,6 @@
 
 extern int errno;
 
-static void process_ping(json_t* payload) {
-    char* target;
-    int32_t seq;
-    char* extra = NULL;
-    struct timeval curtime;
-
-    if (get_values(payload,
-                   "replyto",
-                   JSON_STRING,
-                   1,
-                   &target,
-                   "sequence",
-                   JSON_INTEGER,
-                   1,
-                   &seq,
-                   "extra",
-                   JSON_STRING,
-                   0,
-                   &extra,
-                   NULL) != 0) {
-        return;
-    }
-
-    struct payload* po = payload_new();
-    if (po == NULL)
-        return;
-
-    gettimeofday(&curtime, NULL);
-
-    payload_new_string(po, "type", "pong");
-    payload_new_string(po, "pong_target", target);
-    payload_new_integer(po, "sequence", seq);
-    payload_new_string(po, "extra", extra);
-    payload_new_timestamp(po, "timestamp", &curtime);
-
-    log_debug_info(DEBUGL_IPC,
-                   DEBUGV_MORE,
-                   "Recieved a ping message. Replyto %s Sequence %08x\n",
-                   target,
-                   seq);
-
-    payload_finalize(po);
-    process_payload(po);
-}
-
 const char* nagmq_source_name(const void* unused) {
     return "NagMQ";
 }
@@ -672,8 +627,6 @@ void process_pull_msg(zmq_msg_t* payload_msg) {
         process_comment(payload);
     else if (strcmp(type, "downtime_add") == 0)
         process_downtime(payload);
-    else if (strcmp(type, "ping") == 0)
-        process_ping(payload);
     json_decref(payload);
     return;
 }

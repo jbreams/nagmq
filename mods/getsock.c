@@ -15,12 +15,8 @@ extern char *curve_publickey, *curve_privatekey;
 void* getsock(char* forwhat, int type, json_t* def) {
     char *connect = NULL, *bind = NULL;
     json_t *connect_array = NULL, *bind_array = NULL;
-#if ZMQ_VERSION_MAJOR == 2
-    int hwm = 0;
-#else
     int sndhwm = 0, rcvhwm = 0, backlog = 0, maxmsgsize = 0;
     json_t* accept_filters = NULL;
-#endif
     int linger = -1;
 
     if (get_values(def,
@@ -40,12 +36,6 @@ void* getsock(char* forwhat, int type, json_t* def) {
                    JSON_ARRAY,
                    0,
                    &bind_array,
-#if ZMQ_VERSION_MAJOR == 2
-                   "hwm",
-                   JSON_INTEGER,
-                   0,
-                   &hwm,
-#else
                    "sndhwm",
                    JSON_INTEGER,
                    0,
@@ -66,7 +56,6 @@ void* getsock(char* forwhat, int type, json_t* def) {
                    JSON_ARRAY,
                    0,
                    &accept_filters,
-#endif
                    "linger",
                    JSON_INTEGER,
                    0,
@@ -94,17 +83,6 @@ void* getsock(char* forwhat, int type, json_t* def) {
         return NULL;
     }
 
-#if ZMQ_VERSION_MAJOR == 2
-    if (hwm > 0 && zmq_setsockopt(sock, ZMQ_HWM, &hwm, sizeof(hwm)) != 0) {
-        logit(NSLOG_RUNTIME_ERROR,
-              TRUE,
-              "NagMQ error setting HWM for %s: %s",
-              forwhat,
-              zmq_strerror(errno));
-        zmq_close(sock);
-        return NULL;
-    }
-#else
     if (sndhwm > 0 && zmq_setsockopt(sock, ZMQ_SNDHWM, &sndhwm, sizeof(sndhwm)) != 0) {
         logit(NSLOG_RUNTIME_ERROR,
               TRUE,
@@ -175,7 +153,6 @@ void* getsock(char* forwhat, int type, json_t* def) {
             }
         }
     }
-#endif
 
 #if ZMQ_VERSION_MAJOR > 3
     if (curve_privatekey) {
