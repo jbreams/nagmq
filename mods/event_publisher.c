@@ -9,7 +9,6 @@
 #include "nebcallbacks.h"
 #include "nebmods.h"
 #include "nebmodules.h"
-#include "nebstructs.h"
 #ifdef HAVE_ICINGA
 #include "icinga.h"
 #else
@@ -46,8 +45,9 @@ static struct payload* parse_program_status(nebstruct_program_status_data* state
     return ret;
 }
 
-static struct payload* parse_event_handler(nebstruct_event_handler_data* state) {
+struct payload* parse_event_handler(nebstruct_event_handler_data* state, int keep_auxdata) {
     struct payload* ret = payload_new();
+    ret->keep_auxdata = keep_auxdata;
     host* host_obj = NULL;
     service* service_obj = NULL;
     if (state->service_description) {
@@ -151,8 +151,9 @@ int fixup_async_presync_hostcheck(host* hst, char** processed_command) {
     return 0;
 }
 
-static struct payload* parse_host_check(nebstruct_host_check_data* state) {
+struct payload* parse_host_check(nebstruct_host_check_data* state, int keep_auxdata) {
     struct payload* ret = payload_new();
+    ret->keep_auxdata = keep_auxdata;
     host* obj = (host*)state->object_ptr;
 
     // Find the command args in the raw command line
@@ -226,8 +227,9 @@ static struct payload* parse_host_check(nebstruct_host_check_data* state) {
     return ret;
 }
 
-static struct payload* parse_service_check(nebstruct_service_check_data* state) {
+struct payload* parse_service_check(nebstruct_service_check_data* state, int keep_auxdata) {
     struct payload* ret = payload_new();
+    ret->keep_auxdata = keep_auxdata;
     service* obj = (service*)state->object_ptr;
     check_result* cri = state->check_result_ptr;
 
@@ -450,8 +452,9 @@ static void process_escalation_contacts(service* svc, host* hst, int type, struc
     }
 }
 
-static struct payload* parse_notification(nebstruct_notification_data* state) {
+struct payload* parse_notification(nebstruct_notification_data* state, int keep_auxdata) {
     struct payload* ret = payload_new();
+    ret->keep_auxdata = keep_auxdata;
     service* service_obj = NULL;
     host* host_obj = NULL;
 
@@ -704,13 +707,13 @@ int handle_nagdata(int which, void* obj) {
 
     switch (which) {
         case NEBCALLBACK_EVENT_HANDLER_DATA:
-            payload = parse_event_handler(obj);
+            payload = parse_event_handler(obj, 1);
             break;
         case NEBCALLBACK_HOST_CHECK_DATA:
             switch (raw->type) {
                 case NEBTYPE_HOSTCHECK_ASYNC_PRECHECK:
                 case NEBTYPE_HOSTCHECK_PROCESSED:
-                    payload = parse_host_check(obj);
+                    payload = parse_host_check(obj, 1);
                     break;
                 default:
                     return 0;
@@ -720,7 +723,7 @@ int handle_nagdata(int which, void* obj) {
             switch (raw->type) {
                 case NEBTYPE_SERVICECHECK_INITIATE:
                 case NEBTYPE_SERVICECHECK_PROCESSED:
-                    payload = parse_service_check(obj);
+                    payload = parse_service_check(obj, 1);
                     break;
                 default:
                     return 0;
@@ -729,7 +732,7 @@ int handle_nagdata(int which, void* obj) {
         case NEBCALLBACK_NOTIFICATION_DATA:
             if (raw->type != NEBTYPE_NOTIFICATION_START)
                 return 0;
-            payload = parse_notification(obj);
+            payload = parse_notification(obj, 1);
             break;
         case NEBCALLBACK_ACKNOWLEDGEMENT_DATA:
             if (raw->type != NEBTYPE_ACKNOWLEDGEMENT_ADD)

@@ -31,7 +31,7 @@ const char* nagmq_source_name(const void* unused) {
 
 struct check_engine nagmq_check_engine = {"NagMQ", nagmq_source_name, free};
 
-static void process_status(json_t* payload) {
+void process_check_status(json_t* payload) {
     char *host_name, *service_description = NULL, *output = NULL;
     check_result newcr;
 
@@ -620,7 +620,7 @@ void process_pull_msg(zmq_msg_t* payload_msg) {
         process_cmd(payload);
     else if (strcmp(type, "host_check_processed") == 0 ||
              strcmp(type, "service_check_processed") == 0)
-        process_status(payload);
+        process_check_status(payload);
     else if (strcmp(type, "acknowledgement") == 0)
         process_acknowledgement(payload);
     else if (strcmp(type, "comment_add") == 0)

@@ -1,5 +1,6 @@
 #include "json.h"
 #include <zmq.h>
+#include "nebstructs.h"
 
 struct socket_list {
     void* sock;
@@ -19,6 +20,11 @@ void* zap_handler(void* zapsock);
 void setup_sockmonitor(struct socket_list* sock);
 int handle_pubstartup(void* sock);
 void register_zmq_sock_for_pull(void* sock);
+
+struct payload* parse_service_check(nebstruct_service_check_data* state, int keep_auxdata);
+struct payload* parse_host_check(nebstruct_host_check_data* state, int keep_auxdata);
+struct payload* parse_event_handler(nebstruct_event_handler_data* state, int keep_auxdata);
+struct payload* parse_notification(nebstruct_notification_data* state, int keep_auxdata);
 
 #ifndef ZMQ_DONTWAIT
 #define ZMQ_DONTWAIT ZMQ_NOBLOCK

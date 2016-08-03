@@ -1,7 +1,7 @@
 AC_PREREQ([2.60])
 AC_INIT([nagmq], [1.6.0], [nagmq@googlegroups.com])
 AC_CONFIG_AUX_DIR([.])
-AC_CONFIG_SRCDIR([mods/nagmq_pub.c])
+AC_CONFIG_SRCDIR([mods/event_publisher.c])
 AC_CONFIG_HEADERS([mods/config.h dnxmq/config.h])
 AC_CONFIG_MACRO_DIR([m4])
 AM_INIT_AUTOMAKE([-Wall -Werror foreign subdir-objects])
@@ -89,6 +89,8 @@ AC_CHECK_DECL([shutdown_command_file_worker],
     [], [#include <nagios.h>])
 CFLAGS=$CFLAGS_BAK
 
+AC_SUBST([libev_CFLAGS])
+AC_SUBST([libev_LIBS])
 AC_SUBST([libpcre_LIBS])
 AC_SUBST([libpcre_CFLAGS])
 AC_SUBST([libzmq_LIBS])

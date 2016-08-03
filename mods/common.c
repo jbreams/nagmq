@@ -115,8 +115,7 @@ void close_all_zmq_sockets() {
         }
         iobroker_unregister(nagios_iobs, cur_sock->mon_fd);
         zmq_close(cur_sock->mon_sock);
-        rc = zmq_close(cur_sock->sock);
-        if (rc == -1) {
+        if (zmq_close(cur_sock->sock)) {
             logit(NSLOG_RUNTIME_ERROR,
                   TRUE,
                   "Error closing NagMQ command socket: %s",
