@@ -19,3 +19,7 @@ int handle_pubstartup(json_t * def);
 #   define ZMQ_POLL_MSEC    1           //  zmq_poll is msec
 #endif
 
+#ifdef HAVE_NAGIOS_COMMENT_TYPE
+#include <comments.h>
+typedef nagios_comment comment;
+#endif

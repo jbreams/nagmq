@@ -119,6 +119,11 @@ AC_CHECK_DECL([delete_downtime_by_hostname_service_description_start_time_commen
 AC_CHECK_DECL([shutdown_command_file_worker],
     AC_DEFINE([HAVE_SHUTDOWN_COMMAND_FILE_WORKER], [], [Have shutdown_command_file_worker function]),
     [], [#include <nagios.h>])
+
+AC_CHECK_TYPE([nagios_comment],
+    [AC_DEFINE([HAVE_NAGIOS_COMMENT_TYPE], [], [Have nagios 4.2 comment type])],
+    [], [#include <comments.h>])
+
 CFLAGS=$CFLAGS_BAK
 
 AC_SUBST([libpcre_LIBS])
