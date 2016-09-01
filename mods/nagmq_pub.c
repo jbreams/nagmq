@@ -193,10 +193,13 @@ static struct payload * parse_host_check(nebstruct_host_check_data * state) {
 	host * obj = (host*)state->object_ptr;
 
 	// Find the command args in the raw command line
+    char* command_args = NULL;
 #ifdef HAVE_NAGIOS4
-	char * command_args = strchr(obj->check_command, '!');
+    if (obj->check_command)
+	    command_args = strchr(obj->check_command, '!');
 #else
-	char * command_args = strchr(obj->host_check_command, '!');
+    if (obj->host_check_command)
+	    command_args = strchr(obj->host_check_command, '!');
 #endif
 	// If we found the ! we should advance one character to find the start
 	// of the actual arguments list
