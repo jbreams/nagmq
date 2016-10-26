@@ -412,11 +412,11 @@ int main(int argc, char ** argv) {
 	ev_child child_handler;
 	struct ev_loop * loop;
 	json_t * jobs = NULL, * results, *publisher = NULL;
-	int pullfd = -1, i, daemonize = 0, iothreads = 1;
+	int pullfd = -1, i, daemonize = 0, iothreads = 1, ch;
 	size_t pullfds = sizeof(pullfd);
 	json_t * config, *filter = NULL;
 	json_error_t config_err;
-	char ch, *configobj = "executor", *tmprootpath = NULL,
+	char *configobj = "executor", *tmprootpath = NULL,
 		*tmpunprivpath = NULL, *tmpunprivuser = NULL;
 	json_error_t jsonerr;
 
