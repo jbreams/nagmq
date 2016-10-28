@@ -127,7 +127,6 @@ void close_all_zmq_sockets() {
 
 int handle_startup(int which, void* obj) {
     struct nebstruct_process_struct* ps = (struct nebstruct_process_struct*)obj;
-    time_t now = ps->timestamp.tv_sec;
     int rc;
 
     switch (ps->type) {

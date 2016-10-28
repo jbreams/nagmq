@@ -127,10 +127,9 @@ void process_check_status(json_t* payload) {
 
 static void process_acknowledgement(json_t* payload) {
     char *host_name, *service_description = NULL, *author_name, *comment_data;
-    int persistent_comment = 0, notify_contacts = 0, acknowledgement_type = 0, end_time = 0;
+    int persistent_comment = 0, notify_contacts = 0, acknowledgement_type = 0;
     host* host_target = NULL;
     service* service_target = NULL;
-    json_error_t err;
     if (get_values(payload,
                    "host_name",
                    JSON_STRING,

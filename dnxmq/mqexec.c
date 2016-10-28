@@ -84,7 +84,7 @@ void obj_for_ending(struct child_job * j, const char * output,
 		"check_options", "scheduled_check", "reschedule_check",
 		"early_timeout", "check_type", NULL };
 	struct timeval finish;
-	int i, rc, retry_count = 0;
+	int i, rc;
 
 	if(j->start.tv_sec == 0)
 		gettimeofday(&j->start, NULL);

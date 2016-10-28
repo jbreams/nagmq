@@ -431,7 +431,6 @@ static void process_contactgroups(
 }
 
 static void process_escalation_contacts(service* svc, host* hst, int type, struct payload* ret) {
-    void* ptr = NULL;
     objectlist* set = svc != NULL ? svc->escalation_list : NULL;
     objectlist* het = hst != NULL ? hst->escalation_list : NULL;
 

@@ -28,7 +28,6 @@ struct allowed_key* read_keyfile(const char* path) {
     char* buf = NULL;
     size_t buflen = 0;
     ssize_t readcount;
-    int i;
 
     FILE* fp = fopen(path, "r");
     if (fp == NULL) {

@@ -161,7 +161,7 @@ void* getsock(char* forwhat, int type, json_t* def) {
         if (rc == -1) {
             logit(NSLOG_RUNTIME_ERROR,
                   TRUE,
-                  "Error setting NagMQ secret key for %s %s %d %s",
+                  "Error setting NagMQ secret key for %s %s %lu %s",
                   forwhat,
                   curve_privatekey,
                   strlen(curve_privatekey),

@@ -36,6 +36,9 @@ struct child_job {
 #define INFO 0
 void logit(int level, char * fmt, ...);
 
+void obj_for_ending(struct child_job * j, const char * output,
+	int return_code, int early_timeout, int exited_ok);
+
 // Filter functions
 int parse_filter(json_t * in, int or);
 int match_filter(json_t * input);
