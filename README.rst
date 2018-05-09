@@ -1,3 +1,7 @@
+**NagMQ is unmaintained**
+It's been a long time since I've had to work with Nagios, so as of 2018-05-09,
+I am archiving this repository.
+
 NagMQ README
 ============
 
